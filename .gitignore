@@ -30,5 +30,3 @@ pnpm-debug.log*
 .vscode/
 .idea/
 
-# Pi/local agent state
-.pi/
