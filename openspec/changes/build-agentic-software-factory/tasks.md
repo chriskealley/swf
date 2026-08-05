@@ -1,0 +1,166 @@
+## 1. Architecture and Project Foundation
+
+- [ ] 1.1 Define the package/module boundaries for domain core, persistence, service, integrations, CLI, Pi extension, and web dashboard
+- [ ] 1.2 Establish TypeScript build, lint, formatting, unit-test, integration-test, and end-to-end test commands
+- [ ] 1.3 Select and document the schema validation, local HTTP, web UI, and process-service libraries
+- [ ] 1.4 Define versioned schemas for project configuration, workflows, policies, profiles, and guidelines
+- [ ] 1.5 Define versioned schemas for runs, events, snapshots, invocations, artifacts, handoffs, approvals, checkpoints, and delivery records
+- [ ] 1.6 Add schema fixtures and validation tests for valid, invalid, and forward-incompatible documents
+
+## 2. Project Initialization and Configuration
+
+- [ ] 2.1 Implement trusted-project discovery and root resolution
+- [ ] 2.2 Implement `swf init` generation of committed `.swf/` defaults without overwriting existing customizations
+- [ ] 2.3 Add starter default, feature, bugfix, and security-sensitive workflow definitions
+- [ ] 2.4 Add starter phase guidelines, harness profiles, and manual/autonomous policies
+- [ ] 2.5 Create `.swf-state/` during initialization and add its root-relative entry to `.gitignore`
+- [ ] 2.6 Implement deterministic layered configuration merging from built-in through run-time overrides
+- [ ] 2.7 Preserve configuration provenance and implement resolved-configuration explanation
+- [ ] 2.8 Validate references and required harness capabilities before execution resources are created
+- [ ] 2.9 Test initialization idempotency, conflict handling, configuration precedence, provenance, and invalid references
+
+## 3. Domain Model and Event Store
+
+- [ ] 3.1 Implement typed run, phase, attempt, work-unit, check, gate, artifact, invocation, checkpoint, and delivery domain models
+- [ ] 3.2 Implement legal run and phase transition reducers with explicit blocked, failed, cancelled, skipped, and completed states
+- [ ] 3.3 Implement immutable event envelopes with IDs, per-run sequence numbers, actor identity, context, and typed payloads
+- [ ] 3.4 Implement append-only JSONL writing with atomicity, per-run locking, and idempotency protection
+- [ ] 3.5 Implement state reconstruction from `run.json` and ordered events
+- [ ] 3.6 Implement rebuildable snapshots with schema version and stale-snapshot detection
+- [ ] 3.7 Implement run creation with one-to-one OpenSpec change binding and duplicate-run rejection
+- [ ] 3.8 Model retries, phase reruns, remediation, reset, and rollback as attempts and appended events within the same run
+- [ ] 3.9 Add reducer, replay, concurrent-write, interrupted-write, duplicate-event, and corrupt-snapshot tests
+
+## 4. Persistent Service and Project Registry
+
+- [ ] 4.1 Implement a single-instance user-scoped service with process lock, local endpoint metadata, and service credentials
+- [ ] 4.2 Implement the global project registry while keeping project `.swf-state/` as authoritative run storage
+- [ ] 4.3 Implement project registration, moved-path reconciliation, availability reporting, and permission-error handling
+- [ ] 4.4 Implement authenticated API queries for projects, runs, phases, invocations, artifacts, costs, configuration, and delivery
+- [ ] 4.5 Implement authenticated API commands for run start, pause, resume, cancel, approval, rejection, remediation, and rollback
+- [ ] 4.6 Implement ordered Server-Sent Event subscriptions with reconnect and last-event continuation
+- [ ] 4.7 Implement graceful service shutdown that stops new work, safely pauses active work where possible, flushes state, and does not cancel runs
+- [ ] 4.8 Implement startup recovery and reconciliation hooks for active runs
+- [ ] 4.9 Test single-service ownership, authentication, restart recovery, disconnected clients, missing projects, and event-stream reconnection
+
+## 5. Git and Herdr Runtime
+
+- [ ] 5.1 Implement Git repository, branch, worktree, status, diff, commit, reset, and clean-tree operations behind testable interfaces
+- [ ] 5.2 Implement one isolated SWF branch and Herdr-managed worktree per run
+- [ ] 5.3 Record ownership metadata for every SWF-created Herdr workspace, tab, pane, terminal, process, and worktree resource
+- [ ] 5.4 Implement Herdr launch, readiness wait, prompt submission, status observation, blocked detection, transcript collection, timeout, and cancellation
+- [ ] 5.5 Add Herdr integration diagnostics that verify required agent-status integrations and installed harness executables
+- [ ] 5.6 Implement reconciliation for missing, completed, blocked, and unknown Herdr resources after service restart
+- [ ] 5.7 Ensure cleanup only targets resources recorded as owned by the run
+- [ ] 5.8 Add isolated Herdr session integration tests for normal completion, blocking, timeout, cancellation, missing panes, and restart reconciliation
+
+## 6. Workflow Scheduler and Pi Reference Adapter
+
+- [ ] 6.1 Implement ordered workflow and phase scheduling with typed agent, command, human, OpenSpec, and sequential composite work units
+- [ ] 6.2 Implement phase-specific harness, model, profile, guideline, timeout, retry, budget, and artifact-context resolution
+- [ ] 6.3 Define the harness adapter contract and capability advertisement model
+- [ ] 6.4 Implement availability and configuration validation for the Pi harness adapter
+- [ ] 6.5 Implement Pi launch, structured event observation, prompt delivery, tool/model selection, cancellation, result collection, and usage extraction through Herdr
+- [ ] 6.6 Implement blocked-agent input routing from the service to operator clients and back to the owned pane
+- [ ] 6.7 Implement a shared adapter conformance suite and make the Pi adapter pass every advertised capability
+- [ ] 6.8 Complete an end-to-end sequential run containing one Pi agent work unit and one command work unit in the shared run worktree
+
+## 7. Evidence, Artifact Reuse, and Handoffs
+
+- [ ] 7.1 Implement the typed artifact manifest and storage layout under `.swf-state/`
+- [ ] 7.2 Capture deterministic command results including normalized command, configuration fingerprint, commit, exit status, summary, and raw output reference
+- [ ] 7.3 Collect phase Git evidence including before/after commits, status, diff, changed files, and clean-tree state
+- [ ] 7.4 Collect declared OpenSpec status and validation evidence
+- [ ] 7.5 Implement artifact validity states and exact-commit plus exact-input reuse rules
+- [ ] 7.6 Mark dependent artifacts stale or invalid after source changes, remediation, reset, or rollback
+- [ ] 7.7 Implement declared downstream context selection using OpenSpec artifacts, valid evidence summaries, prior handoffs, and raw-output references
+- [ ] 7.8 Request a structured handoff from the same contextual phase agent after deterministic evidence collection
+- [ ] 7.9 Validate handoff schemas, preserve deterministic facts separately, and implement retry plus degraded deterministic fallback
+- [ ] 7.10 Implement bounded summaries and output references so raw transcripts are not injected by default
+- [ ] 7.11 Test valid reuse, stale evidence rejection, contradictory agent narrative, handoff failure, and selective context construction
+
+## 8. Checks, Gates, and Approval Policy
+
+- [ ] 8.1 Implement command checks backed by deterministic command-result artifacts
+- [ ] 8.2 Implement OpenSpec validation checks backed by OpenSpec evidence
+- [ ] 8.3 Implement schema-constrained agentic review checks and blocking finding records
+- [ ] 8.4 Implement human approval, rejection, and request-changes checks with actor and evidence context
+- [ ] 8.5 Implement `all`, `any`, threshold, advisory, and required-check transition gate evaluation
+- [ ] 8.6 Prevent stale, invalid, missing, or narrative-only evidence from satisfying required gates
+- [ ] 8.7 Implement delegated autonomous authorization with human identity, scope, acknowledgment, configuration source, and expiration
+- [ ] 8.8 Record automatic satisfaction as a policy `auto-approved` decision rather than a human decision
+- [ ] 8.9 Implement risk overrides for sensitive paths, destructive operations, secret findings, elevated risk, and budget thresholds
+- [ ] 8.10 Implement bounded retry and remediation loops with attempt, elapsed-time, and spend limits
+- [ ] 8.11 Test manual, autonomous, risk-overridden, unavailable-approver, timeout, remediation, and budget-exhaustion scenarios
+
+## 9. Phase Checkpoints, Rollback, and OpenSpec Dossier
+
+- [ ] 9.1 Create a phase commit after a successful gate when tracked content changed
+- [ ] 9.2 Record a logical checkpoint without an empty commit when a successful phase made no tracked changes
+- [ ] 9.3 Persist checkpoint evidence including commits, artifacts, handoff, gate decision, and clean-tree state
+- [ ] 9.4 Implement authorized rollback to a checkpoint and invalidation of later dependent outcomes
+- [ ] 9.5 Verify and select a custom OpenSpec evidence location that survives validation and archival
+- [ ] 9.6 Generate a compact change dossier containing phase handoffs, evidence manifest, approvals, checkpoints, delivery references, and final report
+- [ ] 9.7 Exclude secrets, raw transcripts, large logs, and full event history from committed dossier content
+- [ ] 9.8 Test rollback history preservation, checkpoint recovery, dossier generation, OpenSpec validation, and archived-change retention
+
+## 10. CLI and Pi Client
+
+- [ ] 10.1 Implement CLI service start, status, stop, and diagnostic commands
+- [ ] 10.2 Implement CLI initialization, run lifecycle, approval, rollback, event, artifact, log, cost, and configuration commands
+- [ ] 10.3 Add versioned JSON output and stable exit codes for every automation-relevant CLI operation
+- [ ] 10.4 Replace the minimal Pi tool with service-backed SWF commands and tools
+- [ ] 10.5 Add Pi footer and widget status for current run, phase, work, checks, and spend
+- [ ] 10.6 Add Pi approval, rejection, request-changes, blocked-input, pause, resume, cancel, and rollback interactions
+- [ ] 10.7 Add compact and expanded Pi renderers for runs, invocations, artifacts, and retained output
+- [ ] 10.8 Restore Pi client state by querying the service after extension reload, session replacement, or Pi restart
+- [ ] 10.9 Add CLI contract tests and Pi extension tests against a simulated service
+
+## 11. Global Web Dashboard
+
+- [ ] 11.1 Create the authenticated dashboard shell and service API client
+- [ ] 11.2 Implement the global project index with availability, active runs, waiting gates, failures, recent invocations, and aggregate spend
+- [ ] 11.3 Implement project-specific active and historical run listings
+- [ ] 11.4 Implement run detail with OpenSpec identity, phase timeline, attempts, worktree, branch, outputs, artifacts, decisions, and costs
+- [ ] 11.5 Implement retained invocation output and artifact inspection with explicit truncation and raw-output retrieval
+- [ ] 11.6 Implement live event updates with reconnect and ordered replay
+- [ ] 11.7 Add dashboard controls for safe run operations and approval decisions through the service API
+- [ ] 11.8 Display cost provenance as exact, estimated, or unknown at invocation, phase, run, project, and global levels
+- [ ] 11.9 Add dashboard security, accessibility, unavailable-project, stale-client, and live-update tests
+
+## 12. Pull-Request Delivery
+
+- [ ] 12.1 Define the Git hosting adapter contract and implement the initial GitHub adapter
+- [ ] 12.2 Implement idempotent create-or-update pull-request delivery from the run branch to the configured target
+- [ ] 12.3 Record pull request, hosted checks, reviews, merge state, and cleanup as artifacts and events
+- [ ] 12.4 Track execution status separately from delivery status
+- [ ] 12.5 Implement manual-policy behavior that opens a PR and awaits human merge by default
+- [ ] 12.6 Implement autonomous-policy behavior that requests repository-supported auto-merge after final gates pass
+- [ ] 12.7 Require explicit configuration and resolved-policy authorization for local-branch-only or direct-merge delivery
+- [ ] 12.8 Continue monitoring hosted checks and merge state after agent execution completes
+- [ ] 12.9 Apply configured remediation or escalation when hosted checks fail or a PR is rejected or closed
+- [ ] 12.10 Test duplicate-delivery prevention, manual merge, auto-merge, failed hosted checks, unsupported auto-merge, and direct-merge safeguards
+
+## 13. Additional Harness Adapters
+
+- [ ] 13.1 Investigate and document Codex CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
+- [ ] 13.2 Implement the Codex CLI adapter and pass its advertised adapter conformance tests
+- [ ] 13.3 Investigate and document Claude Code CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
+- [ ] 13.4 Implement the Claude Code adapter and pass its advertised adapter conformance tests
+- [ ] 13.5 Investigate and document GitHub Copilot CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
+- [ ] 13.6 Implement the GitHub Copilot CLI adapter and pass its advertised adapter conformance tests
+- [ ] 13.7 Add per-phase harness/model switching tests across a single sequential run
+- [ ] 13.8 Add diagnostics and dashboard capability reporting for every installed adapter
+
+## 14. Security, Retention, and Operational Hardening
+
+- [ ] 14.1 Enforce local binding, service authentication, project trust, filesystem permissions, and mutating-operation audit events
+- [ ] 14.2 Implement configurable secret and sensitive-value redaction before logs, events, artifacts, or API responses are persisted
+- [ ] 14.3 Implement raw output retention, pruning, and storage-budget policies without deleting required audit summaries
+- [ ] 14.4 Implement cost and token budgets at invocation, phase, run, project, and service scopes
+- [ ] 14.5 Add stuck-agent detection, orphaned-resource reporting, and operator reconciliation commands
+- [ ] 14.6 Implement versioned state migrations with dry-run, backup, and rollback support
+- [ ] 14.7 Implement complete run export and import for operational-history backup and transfer
+- [ ] 14.8 Add fault-injection tests for service crashes, partial events, full disks, permission failures, network failures, and harness version changes
+- [ ] 14.9 Add an end-to-end acceptance suite using disposable repositories, isolated Herdr sessions, simulated models, and selected live harness smoke tests
+- [ ] 14.10 Document installation, initialization, service operation, autonomous-policy implications, recovery, dashboard use, and adapter support matrix
