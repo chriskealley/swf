@@ -1,0 +1,11 @@
+node_modules/
+**/.nitro/
+**/.output/
+**/dist/
+.openspec/
+openspec/
+.claude/
+.codex/
+.github/
+.pi/
+pnpm-lock.yaml

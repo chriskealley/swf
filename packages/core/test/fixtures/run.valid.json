@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "runId": "8c86919c-3569-4e97-9f09-1bba7b49ed3d",
+  "projectId": "37bf77bd-cfc8-46fe-92b0-ca5d6201c13b",
+  "changeName": "add-user-auth",
+  "workflowId": "default",
+  "description": "Add token authentication",
+  "status": "pending",
+  "createdAt": "2026-04-02T12:00:00.000Z",
+  "updatedAt": "2026-04-02T12:00:00.000Z"
+}

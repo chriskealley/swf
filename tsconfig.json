@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./apps/cli" },
+    { "path": "./apps/service" },
+    { "path": "./apps/dashboard" }
+  ]
+}

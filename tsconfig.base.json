@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "allowSyntheticDefaultImports": true,
+    "composite": true,
+    "declaration": true,
+    "esModuleInterop": true,
+    "declarationMap": true,
+    "isolatedModules": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "strict": true,
+    "target": "ES2024",
+    "types": ["node"],
+    "verbatimModuleSyntax": true
+  }
+}

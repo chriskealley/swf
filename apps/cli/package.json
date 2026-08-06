@@ -1,0 +1,19 @@
+{
+  "name": "@swf/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "swf": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@swf/core": "workspace:*",
+    "citty": "^0.2.2",
+    "consola": "^3.4.2",
+    "nypm": "^0.6.9",
+    "tsx": "^4.21.0"
+  }
+}

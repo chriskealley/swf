@@ -1,0 +1,15 @@
+{
+  "name": "@swf/service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nitro build",
+    "dev": "nitro dev"
+  },
+  "dependencies": {
+    "@swf/core": "workspace:*",
+    "h3": "^1.15.4",
+    "nitropack": "^2.13.4"
+  }
+}

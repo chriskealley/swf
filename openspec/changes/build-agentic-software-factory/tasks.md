@@ -1,18 +1,18 @@
 ## 1. Architecture and Project Foundation
 
-- [ ] 1.1 Define the package/module boundaries for domain core, persistence, service, integrations, CLI, Pi extension, and web dashboard
-- [ ] 1.2 Establish TypeScript build, lint, formatting, unit-test, integration-test, and end-to-end test commands
-- [ ] 1.3 Establish Nitro for the local service, Vite and Vue for the dashboard, Zod and Ajv for validation, and Citty, nypm, Consola, and destr for CLI, setup, logging, and safe parsing
-- [ ] 1.4 Define versioned schemas for project configuration, workflows, policies, profiles, and guidelines
-- [ ] 1.5 Define versioned schemas for runs, events, snapshots, invocations, artifacts, handoffs, approvals, checkpoints, and delivery records
-- [ ] 1.6 Add schema fixtures and validation tests for valid, invalid, and forward-incompatible documents
-- [ ] 1.7 Declare Node.js `>=22.19.0`, Git `>=2.30.0`, OpenSpec `>=1.6.0`, GitHub CLI, and compatible Herdr and Pi ranges as baseline requirements
-- [ ] 1.8 Implement non-mutating `swf doctor` checks for platform, architecture, executables, versions, PATH, permissions, terminal capabilities, Herdr integrations, selected harnesses, GitHub remote, and authentication
-- [ ] 1.9 Implement explicit opt-in `swf setup` remediation with source, version, destination, command preview, confirmation, and post-install verification
-- [ ] 1.10 Add supported installers or package-manager integrations for Herdr, Pi, OpenSpec tooling, GitHub CLI, and optional harnesses without silently changing the system
-- [ ] 1.11 Install and verify required Herdr agent integrations through `herdr integration install`
-- [ ] 1.12 Document Node bootstrap installation, macOS/Linux support, Windows preview status, compatible terminals, and why Ghostty is optional
-- [ ] 1.13 Add installation and diagnostics tests for missing, incompatible, optional, unauthenticated, declined, and successfully installed dependencies
+- [x] 1.1 Define the package/module boundaries for domain core, persistence, service, integrations, CLI, Pi extension, and web dashboard
+- [x] 1.2 Establish TypeScript build, lint, formatting, unit-test, integration-test, and end-to-end test commands
+- [x] 1.3 Establish Nitro for the local service, Vite and Vue for the dashboard, Zod and Ajv for validation, and Citty, nypm, Consola, and destr for CLI, setup, logging, and safe parsing
+- [x] 1.4 Define versioned schemas for project configuration, workflows, policies, profiles, and guidelines
+- [x] 1.5 Define versioned schemas for runs, events, snapshots, invocations, artifacts, handoffs, approvals, checkpoints, and delivery records
+- [x] 1.6 Add schema fixtures and validation tests for valid, invalid, and forward-incompatible documents
+- [x] 1.7 Declare Node.js `>=22.19.0`, Git `>=2.30.0`, OpenSpec `>=1.6.0`, GitHub CLI, and compatible Herdr and Pi ranges as baseline requirements
+- [x] 1.8 Implement non-mutating `swf doctor` checks for platform, architecture, executables, versions, PATH, permissions, terminal capabilities, Herdr integrations, selected harnesses, GitHub remote, and authentication
+- [x] 1.9 Implement explicit opt-in `swf setup` remediation with source, version, destination, command preview, confirmation, and post-install verification
+- [x] 1.10 Add supported installers or package-manager integrations for Herdr, Pi, OpenSpec tooling, GitHub CLI, and optional harnesses without silently changing the system
+- [x] 1.11 Install and verify required Herdr agent integrations through `herdr integration install`
+- [x] 1.12 Document Node bootstrap installation, macOS/Linux support, Windows preview status, compatible terminals, and why Ghostty is optional
+- [x] 1.13 Add installation and diagnostics tests for missing, incompatible, optional, unauthenticated, declined, and successfully installed dependencies
 
 ## 2. Project Initialization and Configuration
 
