@@ -16,16 +16,16 @@
 
 ## 2. Project Initialization and Configuration
 
-- [ ] 2.1 Implement trusted-project discovery and root resolution
-- [ ] 2.2 Implement `swf init` generation of committed `.swf/` defaults without overwriting existing customizations
-- [ ] 2.3 Add the default Planning, Building, Reviewing, Verifying, and Releasing workflow
-- [ ] 2.4 Add `planner`, `builder`, `reviewer`, `verifier`, and `releaser` profiles plus reusable designing, testing, documenting, and writing activities
-- [ ] 2.5 Add starter phase guidelines and manual, autonomous, and security-sensitive policies
-- [ ] 2.6 Create `.swf-state/` during initialization and add its root-relative entry to `.gitignore`
-- [ ] 2.7 Implement deterministic layered configuration merging from built-in through run-time overrides
-- [ ] 2.8 Preserve configuration provenance and implement resolved-configuration explanation
-- [ ] 2.9 Validate references and required harness capabilities before execution resources are created
-- [ ] 2.10 Test initialization idempotency, default workflow and profiles, conflict handling, configuration precedence, provenance, and invalid references
+- [x] 2.1 Implement trusted-project discovery and root resolution
+- [x] 2.2 Implement `swf init` generation of committed `.swf/` defaults without overwriting existing customizations
+- [x] 2.3 Add the default Planning, Building, Reviewing, Verifying, and Releasing workflow
+- [x] 2.4 Add `planner`, `builder`, `reviewer`, `verifier`, and `releaser` profiles plus reusable designing, testing, documenting, and writing activities
+- [x] 2.5 Add starter phase guidelines and manual, autonomous, and security-sensitive policies
+- [x] 2.6 Create `.swf-state/` during initialization and add its root-relative entry to `.gitignore`
+- [x] 2.7 Implement deterministic layered configuration merging from built-in through run-time overrides
+- [x] 2.8 Preserve configuration provenance and implement resolved-configuration explanation
+- [x] 2.9 Validate references and required harness capabilities before execution resources are created
+- [x] 2.10 Test initialization idempotency, default workflow and profiles, conflict handling, configuration precedence, provenance, and invalid references
 
 ## 3. Domain Model and Event Store
 

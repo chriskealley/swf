@@ -6,6 +6,7 @@ import { detectPackageManager } from "nypm";
 import {
   applySetupPlan,
   createSetupPlan,
+  initializeProject,
   runDoctor,
   type CheckStatus,
   type SetupAction,
@@ -139,13 +140,55 @@ const setup = defineCommand({
   },
 });
 
+const init = defineCommand({
+  meta: {
+    name: "init",
+    description: "Initialize committed SWF project configuration",
+  },
+  args: {
+    cwd: {
+      type: "string",
+      description: "Project directory (defaults to current directory)",
+    },
+    trust: {
+      type: "boolean",
+      description: "Explicitly trust this project before writing configuration",
+    },
+    json: { type: "boolean", description: "Write machine-readable JSON" },
+  },
+  async run({ args }) {
+    const result = await initializeProject({
+      cwd: args.cwd,
+      trust: args.trust,
+    });
+    if (args.json) {
+      console.log(JSON.stringify({ schemaVersion: 1, result }, null, 2));
+      return;
+    }
+    if (result.status === "untrusted") {
+      consola.warn(`Project is not trusted: ${result.project.root}`);
+      consola.info("Rerun with swf init --trust after reviewing the project.");
+      process.exitCode = 1;
+      return;
+    }
+    if (result.status === "already-initialized") {
+      consola.warn(
+        `SWF configuration already exists: ${result.conflicts.join(", ")}`,
+      );
+      return;
+    }
+    consola.success(`Initialized SWF in ${result.project.root}`);
+    for (const path of result.created) consola.log(`  created ${path}`);
+  },
+});
+
 const main = defineCommand({
   meta: {
     name: "swf",
     version: "0.1.0",
     description: "Agentic software factory",
   },
-  subCommands: { doctor, setup },
+  subCommands: { doctor, init, setup },
 });
 
 await runMain(main);

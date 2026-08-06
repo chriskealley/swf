@@ -31,6 +31,7 @@ export const ProfileSchema = z.object({
   harness: HarnessSchema.optional(),
   model: z.string().min(1).optional(),
   guidelines: z.array(z.string().min(1)).default([]),
+  capabilities: z.array(z.string().min(1)).default([]),
   options: JsonObject.default({}),
 });
 
@@ -73,6 +74,7 @@ export const PhaseSchema = z.object({
   title: z.string().min(1),
   profile: Identifier,
   guidelines: z.array(Identifier).default([]),
+  requiredCapabilities: z.array(z.string().min(1)).default([]),
   work: z.array(WorkUnitSchema).default([]),
   checks: z.array(CheckSchema).default([]),
   gate: z.object({ mode: GateModeSchema }).default({ mode: "manual" }),
