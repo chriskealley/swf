@@ -65,19 +65,19 @@
 
 ## 6. Workflow Scheduler and Pi Reference Adapter
 
-- [ ] 6.1 Implement ordered workflow and phase scheduling with typed agent, command, human, OpenSpec, and sequential composite work units
-- [ ] 6.2 Implement phase-specific harness, model, profile, guideline, timeout, retry, budget, and artifact-context resolution
-- [ ] 6.3 Define the harness adapter contract and capability advertisement model
-- [ ] 6.4 Implement availability and configuration validation for the Pi harness adapter
-- [ ] 6.5 Implement Pi launch, structured event observation, prompt delivery, tool/model selection, cancellation, result collection, and usage extraction through Herdr
-- [ ] 6.6 Implement blocked-agent input routing from the service to operator clients and back to the owned pane
-- [ ] 6.7 Implement a shared adapter conformance suite and make the Pi adapter pass every advertised capability
-- [ ] 6.8 Complete an end-to-end sequential run containing one Pi agent work unit and one command work unit in the shared run worktree
-- [ ] 6.9 Implement normalized Planning input from a description or explicitly selected exploration brief
-- [ ] 6.10 Implement default Planning production and validation of OpenSpec proposal, design, capability specs, tasks, evidence, and handoff
-- [ ] 6.11 Implement phase eligibility evaluation and explanations across dependencies, artifact validity, worktree state, concurrency, checks, capabilities, policy, and budget
-- [ ] 6.12 Implement explicit completed-phase rerun with downstream impact preview, authorization, and invalidation
-- [ ] 6.13 Prevent child phase invocations from mutating orchestration unless nested execution is explicitly permitted
+- [x] 6.1 Implement ordered workflow and phase scheduling with typed agent, command, human, OpenSpec, and sequential composite work units
+- [x] 6.2 Implement phase-specific harness, model, profile, guideline, timeout, retry, budget, and artifact-context resolution
+- [x] 6.3 Define the harness adapter contract and capability advertisement model
+- [x] 6.4 Implement availability and configuration validation for the Pi harness adapter
+- [x] 6.5 Implement Pi launch, structured event observation, prompt delivery, tool/model selection, cancellation, result collection, and usage extraction through Herdr
+- [x] 6.6 Implement blocked-agent input routing from the service to operator clients and back to the owned pane
+- [x] 6.7 Implement a shared adapter conformance suite and make the Pi adapter pass every advertised capability
+- [x] 6.8 Complete an end-to-end sequential run containing one Pi agent work unit and one command work unit in the shared run worktree
+- [x] 6.9 Implement normalized Planning input from a description or explicitly selected exploration brief
+- [x] 6.10 Implement default Planning production and validation of OpenSpec proposal, design, capability specs, tasks, evidence, and handoff
+- [x] 6.11 Implement phase eligibility evaluation and explanations across dependencies, artifact validity, worktree state, concurrency, checks, capabilities, policy, and budget
+- [x] 6.12 Implement explicit completed-phase rerun with downstream impact preview, authorization, and invalidation
+- [x] 6.13 Prevent child phase invocations from mutating orchestration unless nested execution is explicitly permitted
 
 ## 7. Evidence, Artifact Reuse, and Handoffs
 

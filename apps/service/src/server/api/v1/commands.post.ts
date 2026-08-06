@@ -11,6 +11,7 @@ const commandTypes = new Set<ServiceCommand["type"]>([
   "reject",
   "remediate",
   "rollback",
+  "blocked-input",
 ]);
 
 export default defineEventHandler(async (event) => {

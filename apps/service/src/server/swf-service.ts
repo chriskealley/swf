@@ -12,13 +12,17 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  BlockedAgentRouter,
   RunEventStore,
   createRunEvent,
   findProjectRoot,
   reduceRunState,
   validateProjectConfiguration,
+  type AdapterInvocation,
+  type AdapterObservation,
   type EventDraft,
   type EventType,
+  type HarnessAdapter,
   type Run,
   type RunState,
 } from "@swf/core";
@@ -342,7 +346,8 @@ export interface ServiceQuery {
     | "artifacts"
     | "costs"
     | "configuration"
-    | "delivery";
+    | "delivery"
+    | "blocked-inputs";
   projectId?: string;
   runId?: string;
 }
@@ -376,13 +381,15 @@ export type ServiceCommand =
       phaseId: string;
       checkpointId: string;
       invalidatedPhaseIds?: string[];
-    };
+    }
+  | { type: "blocked-input"; invocationId: string; response: string };
 
 export class SwfService {
   readonly serviceHome: string;
   readonly endpoint: string;
   readonly registry: ProjectRegistry;
   private readonly broker = new EventBroker();
+  private readonly blockedAgents = new BlockedAgentRouter();
   private readonly activeWork = new Map<string, WorkRegistration>();
   private lock?: Awaited<ReturnType<typeof open>>;
   private metadata?: ServiceMetadata;
@@ -471,6 +478,37 @@ export class SwfService {
     return this.broker.subscribe(lastEventId);
   }
 
+  reportBlockedAgent(
+    adapter: HarnessAdapter,
+    invocation: AdapterInvocation,
+    observation: AdapterObservation,
+  ): void {
+    const input = this.blockedAgents.report(adapter, invocation, observation);
+    if (input) {
+      this.broker.publish({
+        type: "agent.blocked",
+        projectId: undefined,
+        runId: invocation.runId,
+        data: { ...input },
+      });
+    }
+  }
+
+  blockedInputs() {
+    return this.blockedAgents.list();
+  }
+
+  async submitBlockedInput(
+    invocationId: string,
+    response: string,
+  ): Promise<void> {
+    await this.blockedAgents.submit(invocationId, response);
+    this.broker.publish({
+      type: "agent.input-submitted",
+      data: { invocationId },
+    });
+  }
+
   async registerProject(input: {
     projectId: string;
     displayName: string;
@@ -552,6 +590,7 @@ export class SwfService {
   async query(query: ServiceQuery): Promise<unknown> {
     this.requireRunning();
     if (query.resource === "projects") return this.registry.reconcile();
+    if (query.resource === "blocked-inputs") return this.blockedInputs();
     if (!query.projectId)
       throw new Error(`projectId is required for ${query.resource}`);
     const { project, store } = await this.runStore(query.projectId);
@@ -628,6 +667,10 @@ export class SwfService {
 
   async command(command: ServiceCommand): Promise<void> {
     this.requireRunning();
+    if (command.type === "blocked-input") {
+      await this.submitBlockedInput(command.invocationId, command.response);
+      return;
+    }
     if (!this.acceptingWork && command.type === "start")
       throw new Error("SWF service is draining and cannot start new work");
     const { store } = await this.runStore(command.projectId);

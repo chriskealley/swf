@@ -7,4 +7,5 @@ export * from "./requirements.js";
 export * from "./runtime.js";
 export * from "./project.js";
 export * from "./schemas.js";
+export * from "./scheduler.js";
 export * from "./setup.js";

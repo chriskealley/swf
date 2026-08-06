@@ -1,7 +1,14 @@
 import { mkdir, realpath, rm, rename, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RunEventStore } from "@swf/core";
+import {
+  RunEventStore,
+  type AdapterInvocation,
+  type AdapterObservation,
+  type AdapterResult,
+  type AdapterValidation,
+  type HarnessAdapter,
+} from "@swf/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ServiceAlreadyRunningError,
@@ -188,6 +195,71 @@ describe("user-scoped SWF service", () => {
     await expect(
       service.query({ resource: "costs", projectId, runId }),
     ).resolves.toEqual({ exactUsd: 0, estimatedUsd: 0, unknown: 0 });
+    await service.shutdown();
+  });
+
+  it("routes blocked agent input through the service to its recorded owned invocation", async () => {
+    const { service } = await setup();
+    const submitted: string[] = [];
+    const adapter: HarnessAdapter = {
+      id: "fake",
+      capabilities: {
+        structuredEvents: true,
+        modelSelection: false,
+        toolSelection: false,
+        cancellation: true,
+        blockedInput: true,
+        resume: false,
+        usage: false,
+      },
+      availability: async (): Promise<AdapterValidation> => ({
+        valid: true,
+        errors: [],
+      }),
+      validate: async (): Promise<AdapterValidation> => ({
+        valid: true,
+        errors: [],
+      }),
+      launch: async (): Promise<AdapterInvocation> => {
+        throw new Error("not used");
+      },
+      submit: async (_invocation, response) => {
+        submitted.push(response);
+      },
+      observe: async (): Promise<AdapterObservation> => ({
+        status: "blocked",
+        structuredEvents: [],
+      }),
+      cancel: async () => undefined,
+      collect: async (): Promise<AdapterResult> => ({
+        status: "completed",
+        transcript: "",
+        usage: { quality: "unknown" },
+      }),
+    };
+    const invocation: AdapterInvocation = {
+      invocationId: "b49d10b4-8aa7-4e10-9018-e5e9d1a9c133",
+      runId,
+      phaseId: "planning",
+      workUnitId: "agent",
+      paneId: "p1",
+      status: "blocked",
+      startedAt: "2026-04-02T12:00:00.000Z",
+    };
+    service.reportBlockedAgent(adapter, invocation, {
+      status: "blocked",
+      blockedPrompt: "Choose",
+      structuredEvents: [],
+    });
+    await expect(
+      service.query({ resource: "blocked-inputs" }),
+    ).resolves.toMatchObject([{ invocationId: invocation.invocationId }]);
+    await service.command({
+      type: "blocked-input",
+      invocationId: invocation.invocationId,
+      response: "Continue",
+    });
+    expect(submitted).toEqual(["Continue"]);
     await service.shutdown();
   });
 

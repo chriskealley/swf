@@ -12,6 +12,7 @@ const resources = new Set<ServiceQuery["resource"]>([
   "costs",
   "configuration",
   "delivery",
+  "blocked-inputs",
 ]);
 
 export default defineEventHandler(async (event) => {
