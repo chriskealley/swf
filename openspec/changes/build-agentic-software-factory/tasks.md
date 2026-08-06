@@ -116,15 +116,15 @@
 
 ## 9. Phase Checkpoints, Rollback, and OpenSpec Dossier
 
-- [ ] 9.1 Create a phase commit after a successful gate when tracked content changed
-- [ ] 9.2 Record a logical checkpoint without an empty commit when a successful phase made no tracked changes
-- [ ] 9.3 Persist checkpoint evidence including commits, artifacts, handoff, gate decision, and clean-tree state
-- [ ] 9.4 Implement authorized rollback to a checkpoint and invalidation of later dependent outcomes
-- [ ] 9.5 Persist the portable dossier under `openspec/changes/<change>/evidence/`
-- [ ] 9.6 Verify that OpenSpec validation accepts the evidence subtree and archival moves it to the dated archived change directory
-- [ ] 9.7 Generate a compact change dossier containing phase handoffs, evidence manifest, approvals, checkpoints, delivery references, and final report
-- [ ] 9.8 Exclude secrets, raw transcripts, large logs, and full event history from committed dossier content
-- [ ] 9.9 Test rollback history preservation, checkpoint recovery, dossier generation, OpenSpec validation, and archived-change retention
+- [x] 9.1 Create a phase commit after a successful gate when tracked content changed
+- [x] 9.2 Record a logical checkpoint without an empty commit when a successful phase made no tracked changes
+- [x] 9.3 Persist checkpoint evidence including commits, artifacts, handoff, gate decision, and clean-tree state
+- [x] 9.4 Implement authorized rollback to a checkpoint and invalidation of later dependent outcomes
+- [x] 9.5 Persist the portable dossier under `openspec/changes/<change>/evidence/`
+- [x] 9.6 Verify that OpenSpec validation accepts the evidence subtree and archival moves it to the dated archived change directory
+- [x] 9.7 Generate a compact change dossier containing phase handoffs, evidence manifest, approvals, checkpoints, delivery references, and final report
+- [x] 9.8 Exclude secrets, raw transcripts, large logs, and full event history from committed dossier content
+- [x] 9.9 Test rollback history preservation, checkpoint recovery, dossier generation, OpenSpec validation, and archived-change retention
 
 ## 10. CLI and Pi Client
 

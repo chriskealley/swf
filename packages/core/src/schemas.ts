@@ -322,6 +322,13 @@ export const CheckpointSchema = z.object({
   afterCommit: z.string().min(1),
   createdAt: IsoDateTime,
   logical: z.boolean(),
+  artifactIds: z.array(z.string().uuid()).default([]),
+  handoffId: z.string().uuid().optional(),
+  gateDecision: z
+    .enum(["satisfied", "rejected", "blocked", "skipped"])
+    .optional(),
+  changedFiles: z.array(z.string().min(1)).default([]),
+  clean: z.boolean().default(true),
 });
 
 export const DeliverySchema = z.object({
