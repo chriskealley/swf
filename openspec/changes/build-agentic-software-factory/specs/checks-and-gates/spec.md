@@ -15,6 +15,13 @@ The system SHALL support command, agentic, OpenSpec, and human checks, and every
 - **WHEN** a required OpenSpec validation reports an error
 - **THEN** the phase gate cannot pass until the validation is corrected or explicitly waived by an authorized policy
 
+### Requirement: Manual check refresh
+The system SHALL allow an authorized user to run an individual declared check to produce fresh evidence without representing the containing phase as completed.
+
+#### Scenario: Rerun unit tests only
+- **WHEN** a user invokes `swf check run <change> <check-id>` for the declared unit-test check
+- **THEN** the system records a new check attempt and evidence artifact but leaves phase completion to normal gate and phase evaluation
+
 ### Requirement: Gates control transitions
 A phase SHALL advance only when its transition gate evaluates the required valid check evidence as passing under the resolved policy.
 

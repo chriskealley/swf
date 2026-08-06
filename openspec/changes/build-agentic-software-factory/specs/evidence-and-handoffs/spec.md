@@ -1,5 +1,31 @@
 ## ADDED Requirements
 
+### Requirement: Durable read-only exploration
+The system SHALL support durable pre-change explorations under `.swf-state/explorations/<exploration-id>/` containing metadata, append-only events, retained transcript, and a distilled planning brief without creating an OpenSpec change or SWF run.
+
+#### Scenario: Explore an idea
+- **WHEN** a user starts `swf explore` with an idea
+- **THEN** the exploration may inspect and research the project in read-only mode, ask questions, and persist its history without modifying application code or producing the formal OpenSpec proposal
+
+#### Scenario: Distill an exploration
+- **WHEN** an exploration reaches a useful stopping point
+- **THEN** the system records a brief containing problem, goals, non-goals, options, decisions, open questions, codebase findings, candidate scope, and candidate change name
+
+### Requirement: Explicit exploration promotion
+The system SHALL require an explicit exploration identity when using an exploration as the foundation for `swf new` or `swf run`, and SHALL preserve that identity and normalized brief as Planning input.
+
+#### Scenario: Promote an exploration into Planning
+- **WHEN** a user invokes new or run with `--from-exploration <id>`
+- **THEN** the selected brief is copied into normalized Planning input and the resulting run references the exploration
+
+#### Scenario: Multiple explorations exist
+- **WHEN** a client has more than one recent exploration and the user starts work without selecting one
+- **THEN** the system does not silently choose the latest exploration
+
+#### Scenario: Discard an exploration
+- **WHEN** a user discards an exploration
+- **THEN** the system marks it discarded for later retention pruning rather than immediately deleting its audit history
+
 ### Requirement: Typed artifact catalog
 The system SHALL catalog phase outputs as typed artifacts with producer, phase attempt, timestamps, status, source commit, normalized input fingerprint, output references, and consumer records.
 
@@ -48,7 +74,11 @@ The system SHALL construct each phase's context from declared OpenSpec artifacts
 - **THEN** it receives configured specifications, implementation handoff, changed-files and diff evidence, and valid check summaries while raw logs remain addressable by reference
 
 ### Requirement: Portable change dossier
-The system SHALL persist a compact dossier with the OpenSpec change containing phase handoffs, evidence manifest, approvals, checkpoints, delivery references, and final report while excluding secrets and large raw operational output.
+The system SHALL persist a compact dossier at `openspec/changes/<change>/evidence/` containing phase handoffs, evidence manifest, approvals, checkpoints, delivery references, and final report while excluding secrets and large raw operational output.
+
+#### Scenario: Archive an OpenSpec change
+- **WHEN** OpenSpec archives a completed change
+- **THEN** the entire `evidence/` subtree moves with the change to `openspec/changes/archive/<date>-<change>/evidence/`
 
 #### Scenario: Inspect a cloned archived change
 - **WHEN** a user inspects a repository clone without the original `.swf-state/`
@@ -60,3 +90,14 @@ The system SHALL keep full events, raw transcripts, command logs, snapshots, and
 #### Scenario: Record large agent output
 - **WHEN** a harness invocation produces large output
 - **THEN** the full output is retained in `.swf-state/` and only a bounded summary or reference is placed in committed evidence
+
+### Requirement: User-controlled raw-output pruning
+The system SHALL provide a simple user-controlled mechanism to preview and prune eligible raw invocation outputs by age, selected run, or storage budget while retaining durable events, metadata, costs, summaries, manifests, approvals, checkpoints, and committed evidence.
+
+#### Scenario: Preview pruning
+- **WHEN** a user requests a pruning dry run with an age or storage constraint
+- **THEN** the system reports which raw outputs and bytes would be removed without changing stored data
+
+#### Scenario: Prune old raw output
+- **WHEN** an authorized user confirms pruning
+- **THEN** eligible raw payloads are removed, their references remain marked as pruned by retention policy, and compact audit and evidence records remain available

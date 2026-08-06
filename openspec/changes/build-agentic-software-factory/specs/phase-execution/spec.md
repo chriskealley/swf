@@ -11,6 +11,17 @@ The system SHALL create or adopt one isolated Git worktree and SWF branch for a 
 - **WHEN** a phase gate passes
 - **THEN** the next phase uses the same run worktree at the successful phase checkpoint
 
+### Requirement: Planning owns OpenSpec planning artifacts
+In the default workflow, Planning SHALL consume the normalized description or exploration brief and SHALL create and validate the OpenSpec proposal, design, capability specifications, tasks, deterministic planning evidence, and planning handoff before its gate can pass.
+
+#### Scenario: Begin from a description
+- **WHEN** Planning starts from `swf new` or `swf run` with a description
+- **THEN** the description is recorded as Planning input and Planning produces the formal OpenSpec artifacts
+
+#### Scenario: Begin from an exploration
+- **WHEN** Planning starts with an explicitly selected exploration
+- **THEN** its distilled brief and identity are recorded as Planning input while Planning remains responsible for producing the formal OpenSpec artifacts
+
 ### Requirement: Typed phase execution
 The system SHALL execute ordered workflow phases containing typed agent, command, human, OpenSpec, or sequential composite work units.
 
@@ -43,6 +54,21 @@ The system SHALL use Herdr as the terminal execution substrate, record every res
 #### Scenario: Agent requests input
 - **WHEN** Herdr or the harness reports that an agent is blocked
 - **THEN** the system exposes the request to operator clients and follows configured human-intervention policy
+
+### Requirement: Phase eligibility and explicit reruns
+The system SHALL execute a manually requested phase only when its workflow dependencies, required valid artifacts, worktree checkpoint, concurrency state, entry checks, harness capabilities, policy, and budget make it eligible. Completed phases SHALL require an explicit rerun operation.
+
+#### Scenario: Completed phase is requested normally
+- **WHEN** a user requests normal execution of an already completed phase
+- **THEN** the system refuses to repeat it and identifies the explicit rerun command
+
+#### Scenario: Rerun invalidates downstream work
+- **WHEN** a user requests rerun of a completed phase
+- **THEN** the system reports affected downstream checkpoints, phases, artifacts, checks, and delivery state and requires authorization before invalidating them
+
+#### Scenario: Testing is requested in the default workflow
+- **WHEN** a user wants to refresh tests and the workflow defines testing as a Verifying check rather than a phase
+- **THEN** the system exposes the declared check operation without fabricating a `testing` phase
 
 ### Requirement: Cancellation and timeout
 The system SHALL propagate cancellation and timeout to active harness or command execution and SHALL record whether termination was graceful, forced, or indeterminate.

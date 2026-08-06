@@ -52,7 +52,7 @@ This prevents Pi session lifetime from controlling run lifetime and enables futu
 
 A single service per user remains active until explicitly terminated. It owns scheduling, run locks, Herdr coordination, artifact registration, cost aggregation, and API/event delivery. A lightweight global registry under the user's configuration directory indexes known project roots; authoritative run data remains in each project's `.swf-state/`.
 
-Service shutdown will stop accepting work, safely pause active execution where possible, flush state, and exit without semantically cancelling runs. Restart will reconcile Herdr resources and resume or report blocked work according to policy.
+Graceful service shutdown will stop accepting new work, wait for active work units to reach a safe boundary, pause remaining runs, flush durable state, and exit without semantically cancelling runs. Forced shutdown will interrupt SWF-owned execution, preserve partial output and recoverable state where possible, flush state, and exit without waiting for a safe boundary. Restart will reconcile Herdr resources and resume or report blocked work according to policy.
 
 ### 4. Model workflows as typed phases, work units, checks, and gates
 
@@ -70,7 +70,7 @@ Snapshots are disposable accelerators. Current state must be reconstructable fro
 
 A concrete OpenSpec change has one immutable SWF run identity. Retries, resumes, phase reruns, remediation, rollback, and delivery monitoring remain inside that run as attempts and events rather than creating replacement runs. The binding stores both a generated run ID and the change identity so change-name reuse after archival cannot silently collide.
 
-A compact dossier containing phase handoffs, evidence summaries, approvals, checkpoints, delivery references, and final report will be persisted with the OpenSpec change when compatible with OpenSpec validation and archival. Raw operational history remains in `.swf-state/`.
+A compact dossier containing phase handoffs, evidence summaries, approvals, checkpoints, delivery references, and final report will be persisted at `openspec/changes/<change>/evidence/`. OpenSpec 1.6 archives by moving the entire change directory, including arbitrary supporting subdirectories, to `openspec/changes/archive/<date>-<change>/`; the dossier therefore remains attached to the archived change. Raw operational history remains in `.swf-state/`.
 
 ### 7. Treat Herdr as the supervised execution runtime
 
@@ -110,26 +110,78 @@ Rollback resets the run worktree to a prior checkpoint and appends invalidation 
 
 ### 13. Use PR-first delivery and separate execution from delivery status
 
-After final checks, the default delivery action is to create or update a pull request. Under manual approval policy the run reports execution complete and delivery awaiting merge. Under delegated automatic policy the service requests auto-merge and continues observing hosted checks and merge state. Direct merge or local-branch-only delivery requires explicit project workflow configuration.
+After final checks, the default delivery action is to create or update a GitHub pull request. Under manual approval policy the run reports execution complete and delivery awaiting authorization to merge. Under delegated automatic policy the service requests auto-merge and continues observing hosted checks and merge state. Once merge is authorized, the default method is a merge commit; projects may configure squash, rebase, or repository-default behavior. Direct merge or local-branch-only delivery requires explicit project workflow configuration.
 
-Execution status and delivery status are tracked separately so a completed workflow can remain `awaiting-merge`. Pull requests, hosted checks, reviews, merge results, and branch cleanup are typed delivery artifacts and events.
+Execution status and delivery status are tracked separately so a completed workflow can remain `awaiting-merge`. Pull requests, hosted checks, reviews, merge results, merge method, and branch cleanup are typed delivery artifacts and events. GitHub is the required initial hosting provider behind an adapter boundary, and the GitHub CLI (`gh`) is a required runtime dependency used for authentication and pull-request delivery.
 
 ### 14. Provide a global dashboard backed by project-local truth
 
 The dashboard lists all registered projects and aggregates active runs, waiting gates, failures, invocation history, and spend. Project detail displays OpenSpec linkage, phase timeline, worktree/branch, attempts, outputs, artifacts, costs, policy decisions, and PR delivery state. Missing or moved projects remain visible with an availability status.
 
-Initial live updates will use ordinary local HTTP queries/commands plus Server-Sent Events. WebSockets are deferred until terminal-style bidirectional interaction is required. The service binds locally and requires a service credential.
+The local service and API will use Nitro. The dashboard will use Vite and Vue as a lightweight Nuxt-aligned stack. Initial live updates will use ordinary local HTTP queries/commands plus Server-Sent Events. WebSockets are deferred until terminal-style bidirectional interaction is required. The service binds locally and requires a service credential.
 
 ### 15. Preserve output and cost at invocation granularity
 
 The hierarchy is run, phase attempt, work-unit execution, harness invocation, and model turn. Each invocation records harness, model/provider, times, Herdr/native session IDs, prompt and output references, stop reason, exit status, token usage, cost, and retry ancestry. Cost quality is explicitly exact, estimated, or unknown; unknown is never rendered as zero.
 
+### 16. Standardize the implementation stack
+
+Nitro will host the persistent local HTTP API and event endpoints. Vite and Vue will provide the dashboard as a lightweight Nuxt-aligned web stack. Zod will validate TypeScript-facing runtime inputs and support ergonomic inferred types; Ajv will validate versioned JSON Schema documents and interoperability boundaries. Citty will implement the CLI, nypm will support package-manager operations during setup, Consola will provide structured user-facing and service logging, and destr will safely parse configuration-oriented data where appropriate.
+
+The selected libraries fit the UnJS ecosystem and minimize framework weight while retaining independent domain and persistence modules. Framework-specific types must not leak into the domain core.
+
+### 17. Ship a standard five-phase workflow and reusable profiles
+
+Initialization will create a default workflow with Planning, Building, Reviewing, Verifying, and Releasing phases. The matching default profiles are `planner`, `builder`, `reviewer`, `verifier`, and `releaser`. Projects may customize, replace, remove, or extend those phases and profiles.
+
+The initialized catalog will also support reusable activities or optional workflows for designing, testing, documenting, and writing. These are building blocks rather than mandatory phases in every run.
+
+### 18. Make raw-output pruning explicit and user-controlled
+
+Raw invocation output is retained by default under `.swf-state/` until a user invokes pruning or enables a configured retention rule. The service will offer simple pruning by age, selected run, and storage budget, with dry-run reporting before deletion. Pruning removes eligible raw payloads but preserves run events, invocation metadata, cost records, summaries, artifact manifests, approvals, checkpoints, and the OpenSpec evidence dossier. Pruned references remain present and are marked unavailable because of retention policy.
+
+### 19. Define installation, terminal, and project preflight requirements
+
+The supported baseline runtime is macOS or Linux with Node.js `>=22.19.0`, a compatible Git release (`>=2.30.0` initially), Herdr, Pi, OpenSpec `>=1.6.0`, and GitHub CLI (`gh`). SWF will pin or declare compatible ranges for Herdr and Pi and reject known-incompatible versions. Native Windows remains preview-only while Herdr's Windows support is preview. Codex CLI, Claude Code CLI, and GitHub Copilot CLI are optional unless selected by a workflow.
+
+OpenSpec should be pinned as an SWF package dependency where possible so core behavior does not depend on an arbitrary global installation. Pi remains required for the initial extension and reference harness. GitHub CLI is required for GitHub authentication, repository checks, pull-request creation, merge operations, and delivery monitoring.
+
+Ghostty is not required. Herdr is the terminal multiplexer rather than a terminal emulator. Interactive Pi or Herdr operation requires a modern UTF-8, ANSI-capable interactive terminal; Ghostty, iTerm2, WezTerm, Kitty, macOS Terminal, GNOME Terminal, and comparable terminals are acceptable. The persistent service, JSON CLI usage, and dashboard do not require a particular terminal emulator.
+
+`swf doctor` will perform non-mutating checks for operating system and architecture, executable presence and versions, PATH visibility, project trust and write access, Git repository/worktree support, Herdr service health, required Herdr integrations, selected harness readiness, GitHub authentication, local service ports, and interactive terminal capabilities when relevant.
+
+`swf setup` will provide explicit, opt-in remediation. It may install Herdr through an official installer or detected package manager; install Pi, OpenSpec tooling, and optional Node-distributed harnesses through an npm-compatible manager; install Herdr agent integrations with `herdr integration install`; and offer supported installation guidance or commands for Node, Git, and `gh`. Every download or system modification must show its source, version, destination, and command and require user confirmation. SWF must verify the result after installation. It must never silently download a terminal emulator, invent a Git remote, or create/authenticate credentials without user interaction.
+
+Because a Node-based CLI cannot repair a missing Node prerequisite, distribution will include documented bootstrap installation that verifies Node before installing SWF. Authentication remains an explicit user action even when setup can launch the relevant login flow.
+
+The default Releasing phase requires a Git repository with a configured GitHub remote, network access, a resolvable target branch, valid `gh` authentication, branch push permission, pull-request creation permission, and merge or auto-merge permission when required by resolved policy. The remote defaults to `origin` and is configurable. These checks run before expensive workflow execution. A workflow explicitly configured for local-branch delivery may omit GitHub remote, authentication, and PR permissions.
+
+### 20. Make exploration, Planning, and workflow execution the user entry points
+
+SWF will not expose a public `swf create` command that produces an empty run. Work begins through `swf explore`, `swf new`, or `swf run`, so creation mechanics do not displace the Planning phase.
+
+`swf explore [idea]` starts or resumes durable read-only ideation before an OpenSpec change or SWF run exists. Exploration may inspect the repository, research alternatives, and ask the human questions, but it must not modify application code, create the formal OpenSpec proposal, or advance a workflow. Its events, transcript, and distilled brief are stored under `.swf-state/explorations/<exploration-id>/`. The brief records problem, goals, non-goals, options, decisions, open questions, codebase findings, candidate scope, and candidate change name.
+
+An exploration can be listed, shown, resumed, discarded, or explicitly promoted. `swf new <change> --from-exploration <id>` and `swf run <change> --from-exploration <id>` copy the selected distilled brief into a normalized Planning input and preserve its identity. Promotion must identify the exploration explicitly; clients must not silently use whichever exploration is newest. Discarding marks an exploration for later retention pruning rather than immediately destroying its history.
+
+`swf new <change> --description <text>` validates preconditions, creates the OpenSpec scaffold and one-to-one run binding, selects and resolves the workflow, creates the isolated worktree, executes exactly the first eligible phase, evaluates its gate, checkpoints it, and then stops even when automatic policy could continue. In the default workflow that first phase is Planning. Planning owns creation and validation of `proposal.md`, `design.md`, capability specs, `tasks.md`, deterministic planning evidence, and the planning handoff. The description or exploration brief is Planning input rather than a pre-created proposal.
+
+`swf run <change> --description <text>` is the automatic entry point. If no change or run exists, it performs the same creation and Planning behavior as `swf new` and then continues through eligible phases until completion, a blocking gate, failure, budget boundary, pause, or cancellation. If the run exists, `swf run <change>` resumes automatic progression from durable state. A supplied description is initialization input: an identical value is idempotent, while a differing value for an existing run is rejected rather than silently changing scope.
+
+`swf next <change>` executes exactly one currently eligible phase, including all work, checks, gate evaluation, handoff, and checkpoint behavior, and then stops. `swf phase run <change> <phase-id>` executes exactly one named eligible phase and stops. A phase is eligible only when it exists in the selected workflow, all predecessors are completed, required artifacts remain valid, the worktree matches its checkpoint, no conflicting work is active, entry checks pass, required harness capabilities are available, policy permits execution, and budget remains.
+
+Completed phases require explicit `swf phase rerun`; normal phase execution never repeats them accidentally. Before rerunning, SWF reports and requires authorization for downstream checkpoints, phases, artifacts, checks, and delivery state that will be invalidated. Individual deterministic checks may be refreshed through `swf check run <change> <check-id>` without pretending the containing phase completed. In the default workflow, testing is normally a check or activity within Verifying; a `testing` phase is addressable only when a project workflow actually defines one.
+
+The durable OpenSpec change and run binding are created before the Planning harness starts. A failed Planning attempt therefore leaves a recoverable run whose Planning phase can be retried; a second `swf new` for the same identity is rejected. `swf resume` continues interrupted work using its prior single-phase or automatic mode, while an explicit `swf run` switches progression to automatic mode.
+
+Operator commands and skills will include `swf-explore`, `swf-new`, `swf-run`, `swf-next`, `swf-phase`, `swf-status`, `swf-approve`, and artifact/history inspection. Thin harness-specific skills call the SWF service or CLI rather than reproducing workflow logic. SWF-launched phase agents receive role profiles and read-only run context, not mutating operator controls. The service marks child invocations with run, phase, invocation, and child-environment identifiers and rejects recursive orchestration unless a workflow explicitly permits it.
+
 ## Risks / Trade-offs
 
 - **[JSONL stores become expensive to scan]** → Maintain rebuildable snapshots and bounded indexes while preserving JSONL as source of truth.
-- **[Ignored operational history is lost on a fresh clone or disk failure]** → Persist compact dossiers with changes and add explicit run export/import or backup later.
+- **[Ignored operational history is lost on a fresh clone, disk failure, or user pruning]** → Persist compact dossiers with changes, preserve metadata and summaries after pruning, and add explicit run export/import or backup.
 - **[Project roots move or disappear]** → Keep the global registry lightweight, detect availability, and support path reconciliation without copying authoritative state globally.
-- **[Harness behavior and CLI output change between versions]** → Advertise capabilities, capture versions, fail validation early, and maintain adapter conformance tests.
+- **[Harness, Herdr, GitHub CLI, or Git behavior changes between versions]** → Declare compatible ranges, capture versions, fail installation and run preflight early, and maintain adapter conformance tests.
 - **[Herdr status integrations are absent or stale]** → Add doctor checks, installation guidance, timeouts, transcript inspection fallbacks, and explicit unknown/blocked states.
 - **[Agent summaries contradict deterministic facts]** → Keep facts immutable, schema-validate references, label narrative separately, and prevent narrative from satisfying deterministic checks.
 - **[Artifact reuse accepts stale evidence]** → Begin with exact-commit and exact-input matching; require explicit reruns after source changes.
@@ -144,24 +196,18 @@ The hierarchy is run, phase attempt, work-unit execution, harness invocation, an
 
 1. Preserve the current minimal extension as a temporary compatibility entry while introducing shared packages/modules.
 2. Define and version `.swf/` configuration, `.swf-state/` storage, event, workflow, artifact, handoff, and API schemas.
-3. Add `swf init` to create project defaults and Git-ignore operational state.
-4. Build the pure reducer, JSONL store, snapshots, project/run locks, and simulated adapters.
-5. Add the persistent local service, global project registry, recovery, local API, and event stream.
-6. Implement the Herdr runtime and Pi reference adapter in a single sequential vertical slice.
-7. Add deterministic evidence, same-agent handoffs, exact-commit artifact reuse, checks, gates, and phase checkpoints.
-8. Add CLI and Pi client functionality, then a minimal global dashboard consuming the same API.
-9. Add PR-first delivery and monitoring, followed by Codex, Claude, and Copilot adapters.
-10. Add richer remediation, risk policy, spend analytics, dossier archival, export/import, and operational hardening.
+3. Add bootstrap documentation plus `swf setup` and `swf doctor` for required runtime, integration, terminal, GitHub CLI, authentication, and project preflight checks.
+4. Add `swf init` to create the standard five-phase workflow, reusable profiles and activities, project defaults, and Git-ignored operational state.
+5. Build the pure reducer, JSONL store, snapshots, project/run locks, and simulated adapters.
+6. Add the persistent local service, global project registry, recovery, local API, and event stream.
+7. Implement the Herdr runtime and Pi reference adapter in a single sequential vertical slice.
+8. Add deterministic evidence, same-agent handoffs, exact-commit artifact reuse, checks, gates, and phase checkpoints.
+9. Add CLI and Pi client functionality, then a minimal global dashboard consuming the same API.
+10. Add `gh`-backed GitHub PR delivery and monitoring, followed by Codex, Claude, and Copilot adapters.
+11. Add richer remediation, risk policy, spend analytics, dossier archival, export/import, and operational hardening.
 
 Rollback during development consists of disabling the service and returning to the minimal extension; all new project state is isolated under `.swf/`, `.swf-state/`, and the change dossier. Persisted formats must be versioned before release so migrations can be explicit and reversible.
 
 ## Open Questions
 
-- Confirm the operational directory name (`.swf-state/` is the current recommendation).
-- Confirm the exact custom evidence location and behavior when OpenSpec archives a change.
-- Define whether service shutdown pauses active harnesses immediately or waits for a safe work-unit boundary by default.
-- Select the local HTTP framework, web stack, JSON schema/validation library, and process/service installation mechanism.
-- Define Git hosting abstraction boundaries and the first supported provider beyond local Git; GitHub is assumed for the first PR integration.
-- Define default workflow phase names and starter profiles shipped by `swf init`.
-- Define retention, pruning, redaction, and export policy for raw invocation outputs.
-- Define whether final PR delivery defaults to squash, rebase, or repository-configured merge behavior.
+No architectural open questions remain from the initial proposal. Lower-level implementation choices must remain consistent with the decisions above and may be refined during implementation without changing the specified behavior.
