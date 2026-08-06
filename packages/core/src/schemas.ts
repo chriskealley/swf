@@ -111,7 +111,41 @@ export const RunStatusSchema = z.enum([
   "paused",
   "failed",
   "cancelled",
+  "skipped",
   "completed",
+]);
+export const PhaseStatusSchema = z.enum([
+  "pending",
+  "running",
+  "blocked",
+  "failed",
+  "cancelled",
+  "skipped",
+  "completed",
+]);
+export const AttemptStatusSchema = z.enum([
+  "running",
+  "blocked",
+  "failed",
+  "cancelled",
+  "completed",
+]);
+export const WorkUnitStatusSchema = AttemptStatusSchema;
+export const CheckStatusSchema = z.enum([
+  "pending",
+  "running",
+  "passed",
+  "failed",
+  "blocked",
+  "cancelled",
+  "skipped",
+]);
+export const GateStatusSchema = z.enum([
+  "pending",
+  "satisfied",
+  "rejected",
+  "blocked",
+  "skipped",
 ]);
 
 export const RunSchema = z.object({
@@ -120,11 +154,44 @@ export const RunSchema = z.object({
   projectId: z.string().uuid(),
   changeName: Identifier,
   workflowId: Identifier,
+  changeIdentity: z.string().min(1).optional(),
+  phaseIds: z.array(Identifier).optional(),
   description: z.string().min(1),
   status: RunStatusSchema,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
+
+export const EventActorSchema = z.object({
+  type: z.enum(["system", "user", "policy", "harness", "service"]),
+  id: z.string().min(1),
+});
+export const EventContextSchema = z.object({
+  phaseId: Identifier.optional(),
+  attemptId: z.string().uuid().optional(),
+  workUnitId: Identifier.optional(),
+  checkId: Identifier.optional(),
+  invocationId: z.string().uuid().optional(),
+});
+export const EventTypeSchema = z.enum([
+  "run.created",
+  "run.transitioned",
+  "phase.transitioned",
+  "attempt.started",
+  "attempt.completed",
+  "work-unit.transitioned",
+  "check.recorded",
+  "gate.decided",
+  "artifact.recorded",
+  "invocation.recorded",
+  "checkpoint.recorded",
+  "delivery.recorded",
+  "run.retried",
+  "phase.rerun",
+  "run.remediated",
+  "run.reset",
+  "run.rolled-back",
+]);
 
 export const EventSchema = z.object({
   schemaVersion: SchemaVersion,
@@ -132,10 +199,10 @@ export const EventSchema = z.object({
   runId: z.string().uuid(),
   sequence: z.number().int().nonnegative(),
   timestamp: IsoDateTime,
-  type: z.string().min(1),
-  actor: z.object({ type: z.string().min(1), id: z.string().min(1) }),
-  phaseId: Identifier.optional(),
-  attempt: z.number().int().positive().optional(),
+  type: EventTypeSchema,
+  actor: EventActorSchema,
+  context: EventContextSchema.default({}),
+  idempotencyKey: z.string().min(1).max(200).optional(),
   data: JsonObject,
 });
 

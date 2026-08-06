@@ -29,15 +29,15 @@
 
 ## 3. Domain Model and Event Store
 
-- [ ] 3.1 Implement typed run, phase, attempt, work-unit, check, gate, artifact, invocation, checkpoint, and delivery domain models
-- [ ] 3.2 Implement legal run and phase transition reducers with explicit blocked, failed, cancelled, skipped, and completed states
-- [ ] 3.3 Implement immutable event envelopes with IDs, per-run sequence numbers, actor identity, context, and typed payloads
-- [ ] 3.4 Implement append-only JSONL writing with atomicity, per-run locking, and idempotency protection
-- [ ] 3.5 Implement state reconstruction from `run.json` and ordered events
-- [ ] 3.6 Implement rebuildable snapshots with schema version and stale-snapshot detection
-- [ ] 3.7 Implement run creation with one-to-one OpenSpec change binding and duplicate-run rejection
-- [ ] 3.8 Model retries, phase reruns, remediation, reset, and rollback as attempts and appended events within the same run
-- [ ] 3.9 Add reducer, replay, concurrent-write, interrupted-write, duplicate-event, and corrupt-snapshot tests
+- [x] 3.1 Implement typed run, phase, attempt, work-unit, check, gate, artifact, invocation, checkpoint, and delivery domain models
+- [x] 3.2 Implement legal run and phase transition reducers with explicit blocked, failed, cancelled, skipped, and completed states
+- [x] 3.3 Implement immutable event envelopes with IDs, per-run sequence numbers, actor identity, context, and typed payloads
+- [x] 3.4 Implement append-only JSONL writing with atomicity, per-run locking, and idempotency protection
+- [x] 3.5 Implement state reconstruction from `run.json` and ordered events
+- [x] 3.6 Implement rebuildable snapshots with schema version and stale-snapshot detection
+- [x] 3.7 Implement run creation with one-to-one OpenSpec change binding and duplicate-run rejection
+- [x] 3.8 Model retries, phase reruns, remediation, reset, and rollback as attempts and appended events within the same run
+- [x] 3.9 Add reducer, replay, concurrent-write, interrupted-write, duplicate-event, and corrupt-snapshot tests
 
 ## 4. Persistent Service and Project Registry
 

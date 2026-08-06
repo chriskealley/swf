@@ -1,3 +1,5 @@
+export * from "./domain.js";
+export * from "./event-store.js";
 export * from "./doctor.js";
 export * from "./requirements.js";
 export * from "./project.js";
