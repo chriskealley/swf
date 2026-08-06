@@ -41,16 +41,16 @@
 
 ## 4. Persistent Service and Project Registry
 
-- [ ] 4.1 Implement a single-instance user-scoped service with process lock, local endpoint metadata, and service credentials
-- [ ] 4.2 Implement the global project registry while keeping project `.swf-state/` as authoritative run storage
-- [ ] 4.3 Implement project registration, moved-path reconciliation, availability reporting, and permission-error handling
-- [ ] 4.4 Implement authenticated API queries for projects, runs, phases, invocations, artifacts, costs, configuration, and delivery
-- [ ] 4.5 Implement authenticated API commands for run start, pause, resume, cancel, approval, rejection, remediation, and rollback
-- [ ] 4.6 Implement ordered Server-Sent Event subscriptions with reconnect and last-event continuation
-- [ ] 4.7 Implement graceful service shutdown that stops new work, reports draining progress, waits for active work units to reach safe boundaries, pauses remaining runs, flushes state, and exits
-- [ ] 4.8 Implement forced shutdown that interrupts only SWF-owned execution, preserves partial and recoverable state, flushes state, and exits without waiting
-- [ ] 4.9 Implement startup recovery and reconciliation hooks for active runs
-- [ ] 4.10 Test single-service ownership, authentication, graceful and forced shutdown, restart recovery, disconnected clients, missing projects, and event-stream reconnection
+- [x] 4.1 Implement a single-instance user-scoped service with process lock, local endpoint metadata, and service credentials
+- [x] 4.2 Implement the global project registry while keeping project `.swf-state/` as authoritative run storage
+- [x] 4.3 Implement project registration, moved-path reconciliation, availability reporting, and permission-error handling
+- [x] 4.4 Implement authenticated API queries for projects, runs, phases, invocations, artifacts, costs, configuration, and delivery
+- [x] 4.5 Implement authenticated API commands for run start, pause, resume, cancel, approval, rejection, remediation, and rollback
+- [x] 4.6 Implement ordered Server-Sent Event subscriptions with reconnect and last-event continuation
+- [x] 4.7 Implement graceful service shutdown that stops new work, reports draining progress, waits for active work units to reach safe boundaries, pauses remaining runs, flushes state, and exits
+- [x] 4.8 Implement forced shutdown that interrupts only SWF-owned execution, preserves partial and recoverable state, flushes state, and exits without waiting
+- [x] 4.9 Implement startup recovery and reconciliation hooks for active runs
+- [x] 4.10 Test single-service ownership, authentication, graceful and forced shutdown, restart recovery, disconnected clients, missing projects, and event-stream reconnection
 
 ## 5. Git and Herdr Runtime
 
