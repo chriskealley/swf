@@ -241,6 +241,11 @@ export const ArtifactSchema = z.object({
   status: z.enum(["valid", "stale", "invalid", "missing"]),
   createdAt: IsoDateTime,
   outputRef: z.string().min(1),
+  producerAttemptId: z.string().uuid().optional(),
+  rawOutputRef: z.string().min(1).optional(),
+  summary: z.string().min(1).max(2_000).optional(),
+  consumers: z.array(Identifier).default([]),
+  invalidReason: z.string().min(1).optional(),
 });
 
 export const HandoffSchema = z.object({
@@ -253,6 +258,31 @@ export const HandoffSchema = z.object({
   knownIssues: z.array(z.string().min(1)).default([]),
   recommendedNextActions: z.array(z.string().min(1)).default([]),
   artifactIds: z.array(z.string().uuid()).default([]),
+  degraded: z.boolean().default(false),
+});
+
+export const ExplorationBriefSchema = z.object({
+  schemaVersion: SchemaVersion,
+  explorationId: z.string().uuid(),
+  problem: z.string().min(1),
+  goals: z.array(z.string().min(1)),
+  nonGoals: z.array(z.string().min(1)),
+  options: z.array(z.string().min(1)),
+  decisions: z.array(z.string().min(1)),
+  openQuestions: z.array(z.string().min(1)),
+  codebaseFindings: z.array(z.string().min(1)),
+  candidateScope: z.string().min(1),
+  candidateChangeName: Identifier,
+});
+
+export const ExplorationSchema = z.object({
+  schemaVersion: SchemaVersion,
+  explorationId: z.string().uuid(),
+  idea: z.string().min(1),
+  status: z.enum(["active", "blocked", "completed", "cancelled", "discarded"]),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  brief: ExplorationBriefSchema.optional(),
 });
 
 export const ApprovalSchema = z.object({
@@ -304,6 +334,8 @@ export const documents = {
   invocation: InvocationSchema,
   artifact: ArtifactSchema,
   handoff: HandoffSchema,
+  exploration: ExplorationSchema,
+  explorationBrief: ExplorationBriefSchema,
   approval: ApprovalSchema,
   checkpoint: CheckpointSchema,
   delivery: DeliverySchema,

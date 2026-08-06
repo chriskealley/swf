@@ -81,23 +81,23 @@
 
 ## 7. Evidence, Artifact Reuse, and Handoffs
 
-- [ ] 7.1 Implement the typed artifact manifest and storage layout under `.swf-state/`
-- [ ] 7.2 Capture deterministic command results including normalized command, configuration fingerprint, commit, exit status, summary, and raw output reference
-- [ ] 7.3 Collect phase Git evidence including before/after commits, status, diff, changed files, and clean-tree state
-- [ ] 7.4 Collect declared OpenSpec status and validation evidence
-- [ ] 7.5 Implement artifact validity states and exact-commit plus exact-input reuse rules
-- [ ] 7.6 Mark dependent artifacts stale or invalid after source changes, remediation, reset, or rollback
-- [ ] 7.7 Implement declared downstream context selection using OpenSpec artifacts, valid evidence summaries, prior handoffs, and raw-output references
-- [ ] 7.8 Request a structured handoff from the same contextual phase agent after deterministic evidence collection
-- [ ] 7.9 Validate handoff schemas, preserve deterministic facts separately, and implement retry plus degraded deterministic fallback
-- [ ] 7.10 Implement bounded summaries and output references so raw transcripts are not injected by default
-- [ ] 7.11 Test valid reuse, stale evidence rejection, contradictory agent narrative, handoff failure, and selective context construction
-- [ ] 7.12 Implement durable exploration metadata, events, transcript, and brief storage under `.swf-state/explorations/`
-- [ ] 7.13 Implement read-only exploration execution with repository inspection, research, human questions, resume, and safe cancellation
-- [ ] 7.14 Implement schema-validated exploration briefs containing problem, goals, non-goals, options, decisions, open questions, codebase findings, candidate scope, and candidate name
-- [ ] 7.15 Implement explicit exploration list, show, resume, discard, and promotion operations without implicit latest-selection behavior
-- [ ] 7.16 Preserve exploration identity and brief as Planning input and include its compact foundation in the OpenSpec evidence dossier
-- [ ] 7.17 Test exploration read-only enforcement, resume, multiple-candidate selection, discard retention, and promotion into new and automatic runs
+- [x] 7.1 Implement the typed artifact manifest and storage layout under `.swf-state/`
+- [x] 7.2 Capture deterministic command results including normalized command, configuration fingerprint, commit, exit status, summary, and raw output reference
+- [x] 7.3 Collect phase Git evidence including before/after commits, status, diff, changed files, and clean-tree state
+- [x] 7.4 Collect declared OpenSpec status and validation evidence
+- [x] 7.5 Implement artifact validity states and exact-commit plus exact-input reuse rules
+- [x] 7.6 Mark dependent artifacts stale or invalid after source changes, remediation, reset, or rollback
+- [x] 7.7 Implement declared downstream context selection using OpenSpec artifacts, valid evidence summaries, prior handoffs, and raw-output references
+- [x] 7.8 Request a structured handoff from the same contextual phase agent after deterministic evidence collection
+- [x] 7.9 Validate handoff schemas, preserve deterministic facts separately, and implement retry plus degraded deterministic fallback
+- [x] 7.10 Implement bounded summaries and output references so raw transcripts are not injected by default
+- [x] 7.11 Test valid reuse, stale evidence rejection, contradictory agent narrative, handoff failure, and selective context construction
+- [x] 7.12 Implement durable exploration metadata, events, transcript, and brief storage under `.swf-state/explorations/`
+- [x] 7.13 Implement read-only exploration execution with repository inspection, research, human questions, resume, and safe cancellation
+- [x] 7.14 Implement schema-validated exploration briefs containing problem, goals, non-goals, options, decisions, open questions, codebase findings, candidate scope, and candidate name
+- [x] 7.15 Implement explicit exploration list, show, resume, discard, and promotion operations without implicit latest-selection behavior
+- [x] 7.16 Preserve exploration identity and brief as Planning input and include its compact foundation in the OpenSpec evidence dossier
+- [x] 7.17 Test exploration read-only enforcement, resume, multiple-candidate selection, discard retention, and promotion into new and automatic runs
 
 ## 8. Checks, Gates, and Approval Policy
 

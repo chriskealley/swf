@@ -597,7 +597,7 @@ export class BlockedAgentRouter {
   }
 }
 
-export interface ExplorationBrief {
+export interface PlanningExplorationBrief {
   explorationId: string;
   problem: string;
   goals: string[];
@@ -612,11 +612,11 @@ export interface ExplorationBrief {
 
 export type PlanningInput =
   | { kind: "description"; description: string }
-  | { kind: "exploration"; brief: ExplorationBrief };
+  | { kind: "exploration"; brief: PlanningExplorationBrief };
 
 export function normalizePlanningInput(input: {
   description?: string;
-  exploration?: ExplorationBrief;
+  exploration?: PlanningExplorationBrief;
 }): PlanningInput {
   if (input.description?.trim())
     return { kind: "description", description: input.description.trim() };
