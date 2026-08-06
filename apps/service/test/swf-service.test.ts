@@ -166,6 +166,9 @@ describe("user-scoped SWF service", () => {
           afterCommit: "def",
           createdAt: "2026-04-02T12:00:01.000Z",
           logical: false,
+          artifactIds: [],
+          changedFiles: [],
+          clean: true,
         },
       },
     });

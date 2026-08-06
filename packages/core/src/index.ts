@@ -8,6 +8,7 @@ export * from "./runtime.js";
 export * from "./project.js";
 export * from "./schemas.js";
 export * from "./scheduler.js";
+export * from "./service-client.js";
 export * from "./artifacts.js";
 export * from "./checks.js";
 export * from "./checkpoints.js";

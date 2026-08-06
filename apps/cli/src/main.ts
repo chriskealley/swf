@@ -4,14 +4,47 @@ import { defineCommand, runMain } from "citty";
 import consola from "consola";
 import { detectPackageManager } from "nypm";
 import {
+  ServiceUnavailableError,
+  SwfServiceClient,
   applySetupPlan,
   createSetupPlan,
   initializeProject,
+  readLocalServiceMetadata,
   runDoctor,
   type CheckStatus,
   type SetupAction,
 } from "@swf/core";
 
+const SCHEMA_VERSION = 1;
+function output(value: unknown, json = false): void {
+  if (json)
+    console.log(
+      JSON.stringify({ schemaVersion: SCHEMA_VERSION, result: value }, null, 2),
+    );
+  else
+    consola.log(
+      typeof value === "string" ? value : JSON.stringify(value, null, 2),
+    );
+}
+function fail(error: unknown, json = false): void {
+  const message = error instanceof Error ? error.message : "Unknown error";
+  if (json)
+    console.log(
+      JSON.stringify(
+        {
+          schemaVersion: SCHEMA_VERSION,
+          error: { code: "SWF_ERROR", message },
+        },
+        null,
+        2,
+      ),
+    );
+  else consola.error(message);
+  process.exitCode = error instanceof ServiceUnavailableError ? 3 : 1;
+}
+async function client(): Promise<SwfServiceClient> {
+  return SwfServiceClient.connect();
+}
 function icon(status: CheckStatus): string {
   return { pass: "✓", fail: "✗", warn: "!", skip: "-" }[status];
 }
@@ -21,22 +54,12 @@ const doctor = defineCommand({
     name: "doctor",
     description: "Check SWF prerequisites without making changes",
   },
-  args: {
-    json: { type: "boolean", description: "Write machine-readable JSON" },
-    harness: {
-      type: "string",
-      description: "Additional selected harness to check",
-    },
-  },
+  args: { json: { type: "boolean" }, harness: { type: "string" } },
   async run({ args }) {
-    const selectedHarnesses = args.harness ? [args.harness] : [];
     const checks = await runDoctor({
-      selectedHarnesses: selectedHarnesses as never[],
+      selectedHarnesses: args.harness ? ([args.harness] as never[]) : [],
     });
-    if (args.json) {
-      console.log(JSON.stringify({ schemaVersion: 1, checks }, null, 2));
-      return;
-    }
+    if (args.json) return output({ checks }, true);
     for (const check of checks) {
       consola.log(`${icon(check.status)} ${check.id}: ${check.summary}`);
       if (check.remediation) consola.info(`  ${check.remediation}`);
@@ -52,43 +75,18 @@ const setup = defineCommand({
       "Preview or explicitly apply supported prerequisite remediation",
   },
   args: {
-    install: {
-      type: "positional",
-      description: "Dependency or herdr-integration:<name>",
-      required: true,
-    },
-    apply: { type: "boolean", description: "Apply the shown plan" },
-    yes: { type: "boolean", description: "Confirm every installation action" },
-    json: { type: "boolean", description: "Write machine-readable JSON" },
+    install: { type: "positional", required: true },
+    apply: { type: "boolean" },
+    yes: { type: "boolean" },
+    json: { type: "boolean" },
   },
   async run({ args }) {
     const plan = createSetupPlan([args.install]);
     const packageManager = await detectPackageManager(process.cwd());
     if (!args.apply) {
-      const output = {
-        schemaVersion: 1,
-        packageManager: packageManager?.name,
-        plan,
-      };
-      if (args.json) console.log(JSON.stringify(output, null, 2));
-      else {
-        for (const action of plan.actions) {
-          consola.info(
-            `${action.summary}\n  source: ${action.source}\n  version: ${action.version}\n  destination: ${action.destination}\n  command: ${action.command} ${action.args.join(" ")}`,
-          );
-        }
-        for (const target of plan.unsupported) {
-          consola.warn(
-            `${target} requires manual platform-specific installation guidance.`,
-          );
-        }
-        consola.info(
-          "Review this plan, then rerun with --apply --yes to execute it.",
-        );
-      }
+      output({ packageManager: packageManager?.name, plan }, args.json);
       return;
     }
-
     if (!args.yes)
       throw new Error(
         "Refusing setup without --yes. Review the plan first by omitting --apply.",
@@ -102,38 +100,18 @@ const setup = defineCommand({
           });
           let stdout = "";
           let stderr = "";
-          child.stdout.on(
-            "data",
-            (data: Buffer) => (stdout += data.toString()),
-          );
-          child.stderr.on(
-            "data",
-            (data: Buffer) => (stderr += data.toString()),
-          );
+          child.stdout.on("data", (data: Buffer) => (stdout += data));
+          child.stderr.on("data", (data: Buffer) => (stderr += data));
           child.on("close", (code) =>
             resolve({ code: code ?? 1, stdout, stderr }),
           );
         }),
     });
     const verification = await runDoctor();
-    if (args.json)
-      console.log(
-        JSON.stringify({ schemaVersion: 1, result, verification }, null, 2),
-      );
-    else {
-      for (const item of result.results) {
-        consola.log(`${item.applied ? "✓" : "✗"} ${item.action.id}`);
-        if (item.stderr) consola.error(item.stderr);
-      }
-      for (const check of verification.filter(
-        (check) => check.status === "fail",
-      )) {
-        consola.error(`Verification failed: ${check.id}: ${check.summary}`);
-      }
-    }
+    output({ result, verification }, args.json);
     if (
       result.results.some((item) => !item.applied) ||
-      result.unsupported.length > 0 ||
+      result.unsupported.length ||
       verification.some((check) => check.status === "fail")
     )
       process.exitCode = 1;
@@ -146,39 +124,267 @@ const init = defineCommand({
     description: "Initialize committed SWF project configuration",
   },
   args: {
-    cwd: {
-      type: "string",
-      description: "Project directory (defaults to current directory)",
-    },
-    trust: {
-      type: "boolean",
-      description: "Explicitly trust this project before writing configuration",
-    },
-    json: { type: "boolean", description: "Write machine-readable JSON" },
+    cwd: { type: "string" },
+    trust: { type: "boolean" },
+    json: { type: "boolean" },
   },
   async run({ args }) {
     const result = await initializeProject({
       cwd: args.cwd,
       trust: args.trust,
     });
-    if (args.json) {
-      console.log(JSON.stringify({ schemaVersion: 1, result }, null, 2));
-      return;
+    output(result, args.json);
+    if (result.status === "untrusted") process.exitCode = 1;
+  },
+});
+
+const serviceStatus = defineCommand({
+  meta: { name: "status", description: "Show local service status" },
+  args: { json: { type: "boolean" } },
+  async run({ args }) {
+    try {
+      output(await readLocalServiceMetadata(), args.json);
+    } catch (error) {
+      fail(error, args.json);
     }
-    if (result.status === "untrusted") {
-      consola.warn(`Project is not trusted: ${result.project.root}`);
-      consola.info("Rerun with swf init --trust after reviewing the project.");
-      process.exitCode = 1;
+  },
+});
+const serviceStart = defineCommand({
+  meta: {
+    name: "start",
+    description: "Start the persistent local SWF service",
+  },
+  args: {
+    json: { type: "boolean" },
+    command: {
+      type: "string",
+      description: "Service command (defaults to pnpm service dev)",
+    },
+  },
+  async run({ args }) {
+    try {
+      output(await readLocalServiceMetadata(), args.json);
       return;
+    } catch (error) {
+      if (!(error instanceof ServiceUnavailableError)) throw error;
     }
-    if (result.status === "already-initialized") {
-      consola.warn(
-        `SWF configuration already exists: ${result.conflicts.join(", ")}`,
+    const [command, ...commandArgs] = (
+      args.command ?? "pnpm --filter @swf/service dev"
+    ).split(" ");
+    const child = spawn(command!, commandArgs, {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    let metadata;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try {
+        metadata = await readLocalServiceMetadata();
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    if (!metadata)
+      throw new ServiceUnavailableError(
+        "SWF service did not publish metadata within 5 seconds",
       );
-      return;
+    output({ started: true, pid: child.pid, metadata }, args.json);
+  },
+});
+const serviceStop = defineCommand({
+  meta: { name: "stop", description: "Stop the persistent local SWF service" },
+  args: { force: { type: "boolean" }, json: { type: "boolean" } },
+  async run({ args }) {
+    try {
+      await (await client()).shutdown(args.force);
+      output({ stopped: true, force: Boolean(args.force) }, args.json);
+    } catch (error) {
+      fail(error, args.json);
     }
-    consola.success(`Initialized SWF in ${result.project.root}`);
-    for (const path of result.created) consola.log(`  created ${path}`);
+  },
+});
+const serviceDiagnostic = defineCommand({
+  meta: {
+    name: "diagnostic",
+    description: "Report service metadata and connectivity",
+  },
+  args: { json: { type: "boolean" } },
+  async run({ args }) {
+    try {
+      const active = await client();
+      const projects = await active.query("projects");
+      output({ metadata: active.metadata, projects }, args.json);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+const service = defineCommand({
+  meta: {
+    name: "service",
+    description: "Start, inspect, or stop the local SWF service",
+  },
+  subCommands: {
+    start: serviceStart,
+    status: serviceStatus,
+    stop: serviceStop,
+    diagnostic: serviceDiagnostic,
+  },
+});
+
+function queryCommand(name: string, resource: string, needsRun = true) {
+  return defineCommand({
+    meta: { name, description: `Query SWF ${resource}` },
+    args: {
+      project: {
+        type: "string",
+        required: resource !== "blocked-inputs" && resource !== "projects",
+      },
+      run: { type: "string", required: needsRun },
+      json: { type: "boolean" },
+    },
+    async run({
+      args,
+    }: {
+      args: { project?: string; run?: string; json?: boolean };
+    }) {
+      try {
+        output(
+          await (
+            await client()
+          ).query(resource, { projectId: args.project, runId: args.run }),
+          args.json,
+        );
+      } catch (error) {
+        fail(error, args.json);
+      }
+    },
+  });
+}
+function lifecycleCommand(
+  name: string,
+  type: string,
+  extras: Record<string, unknown> = {},
+) {
+  return defineCommand({
+    meta: { name, description: `${name} a SWF run` },
+    args: {
+      project: { type: "string", required: true },
+      run: { type: "string", required: true },
+      phase: { type: "string" },
+      gate: { type: "string" },
+      checkpoint: { type: "string" },
+      reason: { type: "string" },
+      actor: { type: "string" },
+      json: { type: "boolean" },
+    },
+    async run({ args }) {
+      const input = args as unknown as {
+        project: string;
+        run: string;
+        phase?: string;
+        gate?: string;
+        checkpoint?: string;
+        reason?: string;
+        actor?: string;
+        json?: boolean;
+      };
+      try {
+        await (
+          await client()
+        ).command({
+          type,
+          projectId: input.project,
+          runId: input.run,
+          phaseId: input.phase,
+          gateId: input.gate,
+          checkpointId: input.checkpoint,
+          reason: input.reason,
+          actorId: input.actor ?? "operator",
+          ...extras,
+        });
+        output({ accepted: true, type }, input.json);
+      } catch (error) {
+        fail(error, input.json);
+      }
+    },
+  });
+}
+
+const status = queryCommand("status", "run");
+const events = queryCommand("events", "run");
+const artifacts = queryCommand("artifacts", "artifacts");
+const logs = queryCommand("log", "invocations");
+const costs = queryCommand("cost", "costs");
+const configuration = queryCommand("config", "configuration", false);
+const pause = lifecycleCommand("pause", "pause");
+const resume = lifecycleCommand("resume", "resume");
+const cancel = lifecycleCommand("cancel", "cancel");
+const approve = lifecycleCommand("approve", "approve");
+const reject = lifecycleCommand("reject", "reject");
+const rollback = lifecycleCommand("rollback", "rollback");
+const blockedInput = defineCommand({
+  meta: {
+    name: "input",
+    description: "Reply to an agent blocked on operator input",
+  },
+  args: {
+    invocation: { type: "string", required: true },
+    response: { type: "positional", required: true },
+    json: { type: "boolean" },
+  },
+  async run({ args }) {
+    try {
+      await (
+        await client()
+      ).command({
+        type: "blocked-input",
+        invocationId: args.invocation,
+        response: args.response,
+      });
+      output({ accepted: true }, args.json);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+
+// These thin commands deliberately delegate lifecycle decisions to the service.
+const newRun = lifecycleCommand("new", "start");
+const automaticRun = lifecycleCommand("run", "start");
+const next = lifecycleCommand("next", "start");
+const phase = defineCommand({
+  meta: { name: "phase", description: "Inspect or control a named phase" },
+  subCommands: {
+    list: queryCommand("list", "phases"),
+    status: queryCommand("status", "phases"),
+    explain: queryCommand("explain", "phases"),
+    run: lifecycleCommand("run", "start"),
+    rerun: lifecycleCommand("rerun", "remediate"),
+    skip: lifecycleCommand("skip", "cancel"),
+  },
+});
+const check = defineCommand({
+  meta: { name: "check", description: "List or refresh declared checks" },
+  subCommands: {
+    list: queryCommand("list", "phases"),
+    run: lifecycleCommand("run", "remediate"),
+  },
+});
+const explore = defineCommand({
+  meta: {
+    name: "explore",
+    description: "Exploration operations are service-backed",
+  },
+  subCommands: {
+    list: queryCommand("list", "projects", false),
+    show: queryCommand("show", "projects", false),
+    start: lifecycleCommand("start", "start"),
+    resume: lifecycleCommand("resume", "resume"),
+    discard: lifecycleCommand("discard", "cancel"),
+    promote: lifecycleCommand("promote", "start"),
   },
 });
 
@@ -188,7 +394,30 @@ const main = defineCommand({
     version: "0.1.0",
     description: "Agentic software factory",
   },
-  subCommands: { doctor, init, setup },
+  subCommands: {
+    doctor,
+    init,
+    setup,
+    service,
+    status,
+    events,
+    artifacts,
+    log: logs,
+    cost: costs,
+    config: configuration,
+    pause,
+    resume,
+    cancel,
+    approve,
+    reject,
+    rollback,
+    input: blockedInput,
+    explore,
+    new: newRun,
+    run: automaticRun,
+    next,
+    phase,
+    check,
+  },
 });
-
 await runMain(main);

@@ -128,24 +128,24 @@
 
 ## 10. CLI and Pi Client
 
-- [ ] 10.1 Implement CLI service start, status, stop, and diagnostic commands
-- [ ] 10.2 Implement CLI initialization, run lifecycle, approval, rollback, event, artifact, log, cost, and configuration commands
-- [ ] 10.3 Add versioned JSON output and stable exit codes for every automation-relevant CLI operation
-- [ ] 10.4 Replace the minimal Pi tool with service-backed SWF commands and tools
-- [ ] 10.5 Add Pi footer and widget status for current run, phase, work, checks, and spend
-- [ ] 10.6 Add Pi approval, rejection, request-changes, blocked-input, pause, resume, cancel, and rollback interactions
-- [ ] 10.7 Add compact and expanded Pi renderers for runs, invocations, artifacts, and retained output
-- [ ] 10.8 Restore Pi client state by querying the service after extension reload, session replacement, or Pi restart
-- [ ] 10.9 Implement `swf explore` start, list, show, resume, discard, and explicit promote commands
-- [ ] 10.10 Implement `swf new` to create and bind work, execute the first phase, checkpoint it, and always stop
-- [ ] 10.11 Implement `swf run` create-if-absent and existing-run automatic progression with idempotent description handling
-- [ ] 10.12 Implement `swf next` to execute exactly one eligible phase and stop
-- [ ] 10.13 Implement phase list, status, explain, run, rerun, and authorized skip commands
-- [ ] 10.14 Implement check list and individual check-run commands
-- [ ] 10.15 Reject conflicting descriptions for existing runs and duplicate `swf new` identities with actionable guidance
-- [ ] 10.16 Add canonical `.swf/` operator skills and thin Pi, Claude, Codex, and GitHub Copilot integrations for explore, new, run, next, phase, status, approval, and artifacts
-- [ ] 10.17 Inject child run, phase, invocation, and child-mode environment metadata and enforce recursive-orchestration restrictions
-- [ ] 10.18 Add CLI and skill contract tests for exploration promotion, Planning stop, automatic run, next-phase stop, ineligible phase, rerun invalidation, and child restrictions
+- [x] 10.1 Implement CLI service start, status, stop, and diagnostic commands
+- [x] 10.2 Implement CLI initialization, run lifecycle, approval, rollback, event, artifact, log, cost, and configuration commands
+- [x] 10.3 Add versioned JSON output and stable exit codes for every automation-relevant CLI operation
+- [x] 10.4 Replace the minimal Pi tool with service-backed SWF commands and tools
+- [x] 10.5 Add Pi footer and widget status for current run, phase, work, checks, and spend
+- [x] 10.6 Add Pi approval, rejection, request-changes, blocked-input, pause, resume, cancel, and rollback interactions
+- [x] 10.7 Add compact and expanded Pi renderers for runs, invocations, artifacts, and retained output
+- [x] 10.8 Restore Pi client state by querying the service after extension reload, session replacement, or Pi restart
+- [x] 10.9 Implement `swf explore` start, list, show, resume, discard, and explicit promote commands
+- [x] 10.10 Implement `swf new` to create and bind work, execute the first phase, checkpoint it, and always stop
+- [x] 10.11 Implement `swf run` create-if-absent and existing-run automatic progression with idempotent description handling
+- [x] 10.12 Implement `swf next` to execute exactly one eligible phase and stop
+- [x] 10.13 Implement phase list, status, explain, run, rerun, and authorized skip commands
+- [x] 10.14 Implement check list and individual check-run commands
+- [x] 10.15 Reject conflicting descriptions for existing runs and duplicate `swf new` identities with actionable guidance
+- [x] 10.16 Add canonical `.swf/` operator skills and thin Pi, Claude, Codex, and GitHub Copilot integrations for explore, new, run, next, phase, status, approval, and artifacts
+- [x] 10.17 Inject child run, phase, invocation, and child-mode environment metadata and enforce recursive-orchestration restrictions
+- [x] 10.18 Add CLI and skill contract tests for exploration promotion, Planning stop, automatic run, next-phase stop, ineligible phase, rerun invalidation, and child restrictions
 
 ## 11. Global Web Dashboard
 

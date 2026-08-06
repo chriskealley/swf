@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/core" },
+    { "path": "./extensions/pi" },
     { "path": "./apps/cli" },
     { "path": "./apps/service" },
     { "path": "./apps/dashboard" }
