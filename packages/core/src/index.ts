@@ -9,5 +9,6 @@ export * from "./project.js";
 export * from "./schemas.js";
 export * from "./scheduler.js";
 export * from "./artifacts.js";
+export * from "./checks.js";
 export * from "./exploration.js";
 export * from "./setup.js";

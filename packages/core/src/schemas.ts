@@ -299,6 +299,18 @@ export const ApprovalSchema = z.object({
   actor: z.object({ type: z.string().min(1), id: z.string().min(1) }),
   createdAt: IsoDateTime,
   reason: z.string().min(1).optional(),
+  evidenceArtifactIds: z.array(z.string().uuid()).default([]),
+  authorization: z
+    .object({
+      authorizationId: z.string().uuid(),
+      delegatedBy: z.object({ type: z.literal("user"), id: z.string().min(1) }),
+      scope: z.enum(["gate", "phase", "run", "workflow", "project"]),
+      scopeId: z.string().min(1),
+      acknowledgedAt: IsoDateTime,
+      configurationSource: z.string().min(1),
+      expiresAt: IsoDateTime.optional(),
+    })
+    .optional(),
 });
 
 export const CheckpointSchema = z.object({

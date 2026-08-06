@@ -101,18 +101,18 @@
 
 ## 8. Checks, Gates, and Approval Policy
 
-- [ ] 8.1 Implement command checks backed by deterministic command-result artifacts
-- [ ] 8.2 Implement OpenSpec validation checks backed by OpenSpec evidence
-- [ ] 8.3 Implement schema-constrained agentic review checks and blocking finding records
-- [ ] 8.4 Implement human approval, rejection, and request-changes checks with actor and evidence context
-- [ ] 8.5 Implement `all`, `any`, threshold, advisory, and required-check transition gate evaluation
-- [ ] 8.6 Prevent stale, invalid, missing, or narrative-only evidence from satisfying required gates
-- [ ] 8.7 Implement delegated autonomous authorization with human identity, scope, acknowledgment, configuration source, and expiration
-- [ ] 8.8 Record automatic satisfaction as a policy `auto-approved` decision rather than a human decision
-- [ ] 8.9 Implement risk overrides for sensitive paths, destructive operations, secret findings, elevated risk, and budget thresholds
-- [ ] 8.10 Implement bounded retry and remediation loops with attempt, elapsed-time, and spend limits
-- [ ] 8.11 Implement individual declared-check refresh that records fresh evidence without completing the containing phase
-- [ ] 8.12 Test manual, autonomous, risk-overridden, unavailable-approver, timeout, individual check refresh, remediation, and budget-exhaustion scenarios
+- [x] 8.1 Implement command checks backed by deterministic command-result artifacts
+- [x] 8.2 Implement OpenSpec validation checks backed by OpenSpec evidence
+- [x] 8.3 Implement schema-constrained agentic review checks and blocking finding records
+- [x] 8.4 Implement human approval, rejection, and request-changes checks with actor and evidence context
+- [x] 8.5 Implement `all`, `any`, threshold, advisory, and required-check transition gate evaluation
+- [x] 8.6 Prevent stale, invalid, missing, or narrative-only evidence from satisfying required gates
+- [x] 8.7 Implement delegated autonomous authorization with human identity, scope, acknowledgment, configuration source, and expiration
+- [x] 8.8 Record automatic satisfaction as a policy `auto-approved` decision rather than a human decision
+- [x] 8.9 Implement risk overrides for sensitive paths, destructive operations, secret findings, elevated risk, and budget thresholds
+- [x] 8.10 Implement bounded retry and remediation loops with attempt, elapsed-time, and spend limits
+- [x] 8.11 Implement individual declared-check refresh that records fresh evidence without completing the containing phase
+- [x] 8.12 Test manual, autonomous, risk-overridden, unavailable-approver, timeout, individual check refresh, remediation, and budget-exhaustion scenarios
 
 ## 9. Phase Checkpoints, Rollback, and OpenSpec Dossier
 
