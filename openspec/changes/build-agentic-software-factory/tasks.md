@@ -54,14 +54,14 @@
 
 ## 5. Git and Herdr Runtime
 
-- [ ] 5.1 Implement Git repository, branch, worktree, status, diff, commit, reset, and clean-tree operations behind testable interfaces
-- [ ] 5.2 Implement one isolated SWF branch and Herdr-managed worktree per run
-- [ ] 5.3 Record ownership metadata for every SWF-created Herdr workspace, tab, pane, terminal, process, and worktree resource
-- [ ] 5.4 Implement Herdr launch, readiness wait, prompt submission, status observation, blocked detection, transcript collection, timeout, and cancellation
-- [ ] 5.5 Add Herdr integration diagnostics that verify required agent-status integrations and installed harness executables
-- [ ] 5.6 Implement reconciliation for missing, completed, blocked, and unknown Herdr resources after service restart
-- [ ] 5.7 Ensure cleanup only targets resources recorded as owned by the run
-- [ ] 5.8 Add isolated Herdr session integration tests for normal completion, blocking, timeout, cancellation, missing panes, and restart reconciliation
+- [x] 5.1 Implement Git repository, branch, worktree, status, diff, commit, reset, and clean-tree operations behind testable interfaces
+- [x] 5.2 Implement one isolated SWF branch and Herdr-managed worktree per run
+- [x] 5.3 Record ownership metadata for every SWF-created Herdr workspace, tab, pane, terminal, process, and worktree resource
+- [x] 5.4 Implement Herdr launch, readiness wait, prompt submission, status observation, blocked detection, transcript collection, timeout, and cancellation
+- [x] 5.5 Add Herdr integration diagnostics that verify required agent-status integrations and installed harness executables
+- [x] 5.6 Implement reconciliation for missing, completed, blocked, and unknown Herdr resources after service restart
+- [x] 5.7 Ensure cleanup only targets resources recorded as owned by the run
+- [x] 5.8 Add isolated Herdr session integration tests for normal completion, blocking, timeout, cancellation, missing panes, and restart reconciliation
 
 ## 6. Workflow Scheduler and Pi Reference Adapter
 
