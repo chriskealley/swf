@@ -256,7 +256,13 @@ export async function runDoctor(
   );
 
   const herdrStatus = execute("herdr", ["integration", "status"], cwd);
-  for (const integration of requiredHerdrIntegrations) {
+  const harnessIntegrations = [
+    ...requiredHerdrIntegrations,
+    ...(options.selectedHarnesses ?? []).filter((harness) =>
+      ["codex", "claude", "copilot"].includes(harness),
+    ),
+  ];
+  for (const integration of new Set(harnessIntegrations)) {
     const installed = new RegExp(`^${integration}: installed`, "m").test(
       herdrStatus.stdout,
     );

@@ -17,7 +17,7 @@ Ghostty is supported but optional. iTerm2, WezTerm, Kitty, macOS Terminal, GNOME
 | OpenSpec          | 1.6.0                     | Change planning artifacts             |
 | GitHub CLI (`gh`) | 2.0.0                     | Authentication and GitHub PR delivery |
 
-Codex CLI, Claude Code, and GitHub Copilot CLI are optional until a project workflow selects them.
+Codex CLI, Claude Code, and GitHub Copilot CLI are optional until a project workflow selects them. Their verified structured-output, resume, model, permission, and usage capabilities are documented in [harness-adapters.md](./harness-adapters.md); selected adapters also require their matching Herdr status integration.
 
 ## Bootstrap
 

@@ -167,6 +167,7 @@ export default function (pi: ExtensionAPI) {
       {
         resource: enumSchema([
           "projects",
+          "adapters",
           "runs",
           "run",
           "phases",

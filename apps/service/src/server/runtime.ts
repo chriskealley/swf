@@ -15,6 +15,14 @@ function runtime(): SwfRuntimeGlobal {
 
 export async function getService(): Promise<SwfService> {
   const state = runtime();
+  // Nitro can replace the class module while preserving globalThis. Gracefully
+  // retire an instance created by the previous module generation so newly
+  // added fields and adapters are initialized instead of serving stale code.
+  const existing = state.service as { shutdown(): Promise<void> } | undefined;
+  if (existing && !(existing instanceof SwfService)) {
+    await existing.shutdown();
+    state.service = undefined;
+  }
   state.service ??= new SwfService();
   await state.service.start();
   return state.service;

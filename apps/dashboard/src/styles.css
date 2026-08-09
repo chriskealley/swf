@@ -251,6 +251,38 @@ select {
   font-size: 0.83rem;
   line-height: 1.6;
 }
+.adapter-panel {
+  margin: 2rem 0;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  background: #131510;
+}
+.adapter-panel > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.adapter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.75rem;
+}
+.adapter-grid article {
+  padding: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.adapter-grid header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.adapter-grid p,
+.adapter-grid small {
+  color: var(--muted);
+  font: 0.68rem "DM Mono";
+  line-height: 1.6;
+}
 .project-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));

@@ -107,6 +107,10 @@ export class AdapterRegistry {
     if (!adapter) throw new Error(`No harness adapter is registered for ${id}`);
     return adapter;
   }
+
+  list(): HarnessAdapter[] {
+    return [...this.adapters.values()];
+  }
 }
 
 function shellQuote(value: string): string {
@@ -444,6 +448,84 @@ export interface WorkExecutor {
     unit: WorkflowWorkUnit,
     context: { phase: WorkflowPhase; resolved: Record<string, unknown> },
   ): Promise<{ status: "completed" | "blocked" | "failed"; output?: string }>;
+}
+
+export class HarnessWorkExecutor implements WorkExecutor {
+  constructor(
+    readonly adapters: AdapterRegistry,
+    readonly context: {
+      runId: string;
+      workspaceId: string;
+      cwd: string;
+      timeoutMs?: number;
+    },
+    readonly fallback?: WorkExecutor,
+  ) {}
+
+  async execute(
+    unit: WorkflowWorkUnit,
+    context: { phase: WorkflowPhase; resolved: Record<string, unknown> },
+  ): Promise<{ status: "completed" | "blocked" | "failed"; output?: string }> {
+    if (unit.type !== "agent") {
+      if (this.fallback) return this.fallback.execute(unit, context);
+      return { status: "failed", output: `No executor for ${unit.type}` };
+    }
+    const harness =
+      typeof context.resolved.harness === "string"
+        ? context.resolved.harness
+        : "pi";
+    const adapter = this.adapters.get(harness);
+    const model =
+      typeof context.resolved.model === "string"
+        ? context.resolved.model
+        : undefined;
+    const tools = Array.isArray(context.resolved.tools)
+      ? context.resolved.tools.filter(
+          (tool): tool is string => typeof tool === "string",
+        )
+      : undefined;
+    const excludeTools = Array.isArray(context.resolved.excludeTools)
+      ? context.resolved.excludeTools.filter(
+          (tool): tool is string => typeof tool === "string",
+        )
+      : undefined;
+    const validation = await adapter.validate(
+      { model, tools, excludeTools },
+      context.phase.requiredCapabilities,
+    );
+    if (!validation.valid)
+      return { status: "failed", output: validation.errors.join("; ") };
+    const prompt =
+      typeof unit.options.prompt === "string"
+        ? unit.options.prompt
+        : `${context.phase.title}: ${context.phase.id}`;
+    const invocation = await adapter.launch({
+      runId: this.context.runId,
+      phaseId: context.phase.id,
+      workUnitId: unit.id,
+      workspaceId: this.context.workspaceId,
+      cwd: this.context.cwd,
+      prompt,
+      model,
+      tools,
+      excludeTools,
+      timeoutMs:
+        typeof context.resolved.timeoutMs === "number"
+          ? context.resolved.timeoutMs
+          : this.context.timeoutMs,
+    });
+    const observation = await adapter.observe(invocation);
+    if (observation.status === "blocked")
+      return {
+        status: "blocked",
+        output: observation.blockedPrompt ?? observation.message,
+      };
+    const result = await adapter.collect(invocation);
+    return {
+      status: result.status === "completed" ? "completed" : "failed",
+      output: result.transcript,
+    };
+  }
 }
 
 export interface PhaseExecutionResult {

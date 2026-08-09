@@ -235,6 +235,49 @@ describe("user-scoped SWF service", () => {
     await service.shutdown();
   });
 
+  it("reports installed harness adapter capabilities through the service", async () => {
+    const home = await temporaryDirectory("swf-service-adapters-");
+    const adapter: HarnessAdapter = {
+      id: "codex",
+      capabilities: {
+        structuredEvents: true,
+        modelSelection: true,
+        toolSelection: false,
+        cancellation: true,
+        blockedInput: false,
+        resume: true,
+        usage: true,
+      },
+      availability: async () => ({ valid: true, errors: [] }),
+      validate: async () => ({ valid: true, errors: [] }),
+      launch: async () => {
+        throw new Error("not used");
+      },
+      submit: async () => undefined,
+      observe: async () => ({ status: "completed", structuredEvents: [] }),
+      cancel: async () => undefined,
+      collect: async () => ({
+        status: "completed",
+        transcript: "",
+        usage: { quality: "unknown" },
+      }),
+    };
+    const service = new SwfService({
+      serviceHome: home,
+      harnessAdapters: [adapter],
+    });
+    await service.start();
+    await expect(service.query({ resource: "adapters" })).resolves.toEqual([
+      {
+        id: "codex",
+        available: true,
+        errors: [],
+        capabilities: adapter.capabilities,
+      },
+    ]);
+    await service.shutdown();
+  });
+
   it("reconciles moved and unavailable project roots without copying project state", async () => {
     const { service, projectRoot } = await setup();
     const canonicalProjectRoot = await realpath(projectRoot);

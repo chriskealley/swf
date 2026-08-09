@@ -34,6 +34,21 @@ export interface ProjectSummary {
   costs: CostSummary;
 }
 
+export interface AdapterDiagnostic {
+  id: string;
+  available: boolean;
+  errors: string[];
+  capabilities: {
+    structuredEvents: boolean;
+    modelSelection: boolean;
+    toolSelection: boolean;
+    cancellation: boolean;
+    blockedInput: boolean;
+    resume: boolean;
+    usage: boolean;
+  };
+}
+
 export interface DashboardOverview {
   projects: ProjectSummary[];
   totals: CostSummary & {

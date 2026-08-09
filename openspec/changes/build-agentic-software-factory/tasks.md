@@ -178,14 +178,14 @@
 
 ## 13. Additional Harness Adapters
 
-- [ ] 13.1 Investigate and document Codex CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
-- [ ] 13.2 Implement the Codex CLI adapter and pass its advertised adapter conformance tests
-- [ ] 13.3 Investigate and document Claude Code CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
-- [ ] 13.4 Implement the Claude Code adapter and pass its advertised adapter conformance tests
-- [ ] 13.5 Investigate and document GitHub Copilot CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
-- [ ] 13.6 Implement the GitHub Copilot CLI adapter and pass its advertised adapter conformance tests
-- [ ] 13.7 Add per-phase harness/model switching tests across a single sequential run
-- [ ] 13.8 Add diagnostics and dashboard capability reporting for every installed adapter
+- [x] 13.1 Investigate and document Codex CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
+- [x] 13.2 Implement the Codex CLI adapter and pass its advertised adapter conformance tests
+- [x] 13.3 Investigate and document Claude Code CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
+- [x] 13.4 Implement the Claude Code CLI adapter and pass its advertised adapter conformance tests
+- [x] 13.5 Investigate and document GitHub Copilot CLI capabilities, structured output, native session, model, tool-policy, and usage interfaces
+- [x] 13.6 Implement the GitHub Copilot CLI adapter and pass its advertised adapter conformance tests
+- [x] 13.7 Add per-phase harness/model switching tests across a single sequential run
+- [x] 13.8 Add diagnostics and dashboard capability reporting for every installed adapter
 
 ## 14. Security, Retention, and Operational Hardening
 

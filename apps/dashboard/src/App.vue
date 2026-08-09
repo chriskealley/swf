@@ -9,6 +9,7 @@ import {
   formatInvocationCost,
 } from "./model.js";
 import type {
+  AdapterDiagnostic,
   DashboardOverview,
   OutputResult,
   PruningPreview,
@@ -21,6 +22,7 @@ const endpoint = ref("http://127.0.0.1:34671");
 const credential = ref("");
 const api = ref<DashboardApi>();
 const overview = ref<DashboardOverview>();
+const adapters = ref<AdapterDiagnostic[]>([]);
 const project = ref<ProjectSummary>();
 const runs = ref<Run[]>([]);
 const detail = ref<RunDetail>();
@@ -83,9 +85,15 @@ async function busy<T>(operation: () => Promise<T>): Promise<T | undefined> {
 async function loadOverview() {
   if (!api.value) return;
   const result = await busy(() =>
-    api.value!.query<DashboardOverview>("overview"),
+    Promise.all([
+      api.value!.query<DashboardOverview>("overview"),
+      api.value!.query<AdapterDiagnostic[]>("adapters"),
+    ]),
   );
-  if (result) overview.value = result;
+  if (result) {
+    overview.value = result[0];
+    adapters.value = result[1];
+  }
 }
 
 async function connect() {
@@ -277,6 +285,22 @@ function backToRuns() {
   detail.value = undefined;
   output.value = undefined;
 }
+function capabilityNames(adapter: AdapterDiagnostic): string {
+  const labels: Record<string, string> = {
+    structuredEvents: "events",
+    modelSelection: "models",
+    toolSelection: "tools",
+    cancellation: "cancel",
+    blockedInput: "input",
+    resume: "resume",
+    usage: "usage",
+  };
+  return Object.entries(adapter.capabilities)
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => labels[name] ?? name)
+    .join(" · ");
+}
+
 function phaseCosts(phaseId: string) {
   return formatAggregateCosts(
     aggregateCosts(
@@ -376,6 +400,30 @@ onUnmounted(() => {
             }}</strong>
           </article>
         </div>
+        <section class="adapter-panel" aria-labelledby="adapters-title">
+          <div>
+            <div class="eyebrow">Harness capability report</div>
+            <h2 id="adapters-title">Installed adapters</h2>
+          </div>
+          <div class="adapter-grid">
+            <article v-for="adapter in adapters" :key="adapter.id">
+              <header>
+                <strong>{{ adapter.id }}</strong>
+                <span
+                  class="status"
+                  :data-status="adapter.available ? 'available' : 'unavailable'"
+                  >{{ adapter.available ? "ready" : "unavailable" }}</span
+                >
+              </header>
+              <p>
+                {{ capabilityNames(adapter) || "No advertised capabilities" }}
+              </p>
+              <small v-if="adapter.errors.length">{{
+                adapter.errors.join(" · ")
+              }}</small>
+            </article>
+          </div>
+        </section>
         <div class="project-grid">
           <article
             v-for="item in overview.projects"

@@ -214,8 +214,11 @@ const serviceDiagnostic = defineCommand({
   async run({ args }) {
     try {
       const active = await client();
-      const projects = await active.query("projects");
-      output({ metadata: active.metadata, projects }, args.json);
+      const [projects, adapters] = await Promise.all([
+        active.query("projects"),
+        active.query("adapters"),
+      ]);
+      output({ metadata: active.metadata, projects, adapters }, args.json);
     } catch (error) {
       fail(error, args.json);
     }

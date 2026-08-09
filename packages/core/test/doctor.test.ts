@@ -47,6 +47,9 @@ describe("runDoctor", () => {
     expect(checks.find((check) => check.id === "tool.node")).toMatchObject({
       status: "fail",
     });
+    expect(
+      checks.find((check) => check.id === "herdr.integration.codex"),
+    ).toMatchObject({ status: "warn" });
   });
 
   it("reports unauthenticated GitHub and missing Herdr integration", async () => {

@@ -4,6 +4,7 @@ import type { ServiceQuery } from "../../swf-service.js";
 
 const resources = new Set<ServiceQuery["resource"]>([
   "overview",
+  "adapters",
   "projects",
   "runs",
   "run",

@@ -19,6 +19,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import {
   ArtifactStore,
   BlockedAgentRouter,
+  HerdrClient,
+  PiHarnessAdapter,
   DeliveryOrchestrator,
   DeliveryPreflightError,
   RunEventStore,
@@ -40,7 +42,12 @@ import {
   type Run,
   type RunState,
 } from "@swf/core";
-import { GitHubAdapter } from "@swf/integrations";
+import {
+  ClaudeHarnessAdapter,
+  CodexHarnessAdapter,
+  CopilotHarnessAdapter,
+  GitHubAdapter,
+} from "@swf/integrations";
 
 const SERVICE_SCHEMA_VERSION = 1;
 
@@ -351,11 +358,13 @@ export interface ServiceOptions {
   endpoint?: string;
   hostingAdapter?: HostingAdapter;
   deliveryPollIntervalMs?: number;
+  harnessAdapters?: HarnessAdapter[];
 }
 
 export interface ServiceQuery {
   resource:
     | "overview"
+    | "adapters"
     | "projects"
     | "runs"
     | "run"
@@ -445,6 +454,7 @@ export class SwfService {
   private readonly pendingPruning = new Map<string, PendingPruning>();
   private readonly deliveryMonitors = new Map<string, AbortController>();
   private readonly hostingAdapter: HostingAdapter;
+  private readonly harnessAdapters: HarnessAdapter[];
   private readonly deliveryPollIntervalMs: number;
   private lock?: Awaited<ReturnType<typeof open>>;
   private metadata?: ServiceMetadata;
@@ -460,6 +470,13 @@ export class SwfService {
       `http://${host}:${port}`;
     this.registry = new ProjectRegistry(this.serviceHome);
     this.hostingAdapter = options.hostingAdapter ?? new GitHubAdapter();
+    const herdr = new HerdrClient();
+    this.harnessAdapters = options.harnessAdapters ?? [
+      new PiHarnessAdapter(herdr),
+      new CodexHarnessAdapter(herdr),
+      new ClaudeHarnessAdapter(herdr),
+      new CopilotHarnessAdapter(herdr),
+    ];
     this.deliveryPollIntervalMs = options.deliveryPollIntervalMs ?? 30_000;
   }
 
@@ -805,6 +822,25 @@ export class SwfService {
   async query(query: ServiceQuery): Promise<unknown> {
     this.requireRunning();
     if (query.resource === "overview") return this.overview();
+    if (query.resource === "adapters")
+      return Promise.all(
+        this.harnessAdapters.map(async (adapter) => {
+          const availability = await adapter.availability().catch((error) => ({
+            valid: false,
+            errors: [
+              error instanceof Error
+                ? error.message
+                : "adapter diagnostics failed",
+            ],
+          }));
+          return {
+            id: adapter.id,
+            available: availability.valid,
+            errors: availability.errors,
+            capabilities: adapter.capabilities,
+          };
+        }),
+      );
     if (query.resource === "projects") return this.registry.reconcile();
     if (query.resource === "blocked-inputs") return this.blockedInputs();
     if (!query.projectId)

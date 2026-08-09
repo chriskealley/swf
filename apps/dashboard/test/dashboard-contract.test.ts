@@ -32,6 +32,8 @@ describe("dashboard operator contract", () => {
     expect(app).toContain("formatInvocationCost");
     expect(app).toContain("formatAggregateCosts");
     expect(app).toContain("reconnecting");
+    expect(app).toContain("Installed adapters");
+    expect(app).toContain("capabilityNames");
     expect(api).toContain('headers.set("last-event-id"');
   });
 });
