@@ -17,20 +17,30 @@ import {
 } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import {
+  ArtifactStore,
   BlockedAgentRouter,
+  DeliveryOrchestrator,
+  DeliveryPreflightError,
   RunEventStore,
   createRunEvent,
   findProjectRoot,
+  loadProjectDeliverySettings,
   reduceRunState,
+  resolveDeliveryPlan,
+  retainDeliveryUpdate,
   validateProjectConfiguration,
   type AdapterInvocation,
   type AdapterObservation,
+  type DeliveryRequest,
+  type DeliveryUpdate,
   type EventDraft,
   type EventType,
   type HarnessAdapter,
+  type HostingAdapter,
   type Run,
   type RunState,
 } from "@swf/core";
+import { GitHubAdapter } from "@swf/integrations";
 
 const SERVICE_SCHEMA_VERSION = 1;
 
@@ -339,6 +349,8 @@ export type RecoveryReconciler = (
 export interface ServiceOptions {
   serviceHome?: string;
   endpoint?: string;
+  hostingAdapter?: HostingAdapter;
+  deliveryPollIntervalMs?: number;
 }
 
 export interface ServiceQuery {
@@ -416,7 +428,12 @@ export type ServiceCommand =
       checkpointId: string;
       invalidatedPhaseIds?: string[];
     }
-  | { type: "blocked-input"; invocationId: string; response: string };
+  | { type: "blocked-input"; invocationId: string; response: string }
+  | {
+      type: "deliver" | "refresh-delivery";
+      projectId: string;
+      runId: string;
+    };
 
 export class SwfService {
   readonly serviceHome: string;
@@ -426,6 +443,9 @@ export class SwfService {
   private readonly blockedAgents = new BlockedAgentRouter();
   private readonly activeWork = new Map<string, WorkRegistration>();
   private readonly pendingPruning = new Map<string, PendingPruning>();
+  private readonly deliveryMonitors = new Map<string, AbortController>();
+  private readonly hostingAdapter: HostingAdapter;
+  private readonly deliveryPollIntervalMs: number;
   private lock?: Awaited<ReturnType<typeof open>>;
   private metadata?: ServiceMetadata;
   private acceptingWork = false;
@@ -439,6 +459,8 @@ export class SwfService {
       process.env.SWF_SERVICE_ENDPOINT ??
       `http://${host}:${port}`;
     this.registry = new ProjectRegistry(this.serviceHome);
+    this.hostingAdapter = options.hostingAdapter ?? new GitHubAdapter();
+    this.deliveryPollIntervalMs = options.deliveryPollIntervalMs ?? 30_000;
   }
 
   private get lockPath(): string {
@@ -1023,6 +1045,232 @@ export class SwfService {
     return { pruned, bytes };
   }
 
+  private async deliveryRequest(
+    projectId: string,
+    runId: string,
+    options: { preflightOnly?: boolean } = {},
+  ): Promise<{
+    request: DeliveryRequest;
+    existing?: RunState["deliveries"][string];
+  }> {
+    const { project, store } = await this.runStore(projectId);
+    const loaded = await store.load(runId);
+    const location = await findProjectRoot(project.root);
+    if (!location?.initialized)
+      throw new Error("Delivery requires initialized project configuration");
+    const delegatedAuthorization = loaded.events.some(
+      (event) =>
+        event.type === "gate.decided" &&
+        event.actor.type === "policy" &&
+        event.data.status === "satisfied",
+    );
+    const policyId =
+      loaded.state.run.policyId ??
+      (delegatedAuthorization ? "autonomous" : "manual");
+    const settings = await loadProjectDeliverySettings(
+      location,
+      loaded.state.run.workflowId,
+      policyId,
+    );
+    const plan = resolveDeliveryPlan({
+      configuredMode: settings.workflow.delivery.mode,
+      mergeMethod: settings.workflow.delivery.mergeMethod,
+      explicitlyConfigured: true,
+      authorization: {
+        approvalMode:
+          settings.policy.approvalMode === "automatic" ? "automatic" : "manual",
+        delegatedAuthorization:
+          delegatedAuthorization ||
+          Boolean(
+            options.preflightOnly &&
+            settings.policy.approvalMode === "automatic",
+          ),
+        directMergeAuthorized: settings.policy.allowDirectMerge === true,
+      },
+    });
+    const runtime = await readJson<{ branch?: string; worktreePath?: string }>(
+      join(project.stateDirectory, "runs", runId, "runtime.json"),
+    );
+    const checkpoints = Object.values(loaded.state.checkpoints).sort(
+      (left, right) => right.createdAt.localeCompare(left.createdAt),
+    );
+    const existing = Object.values(loaded.state.deliveries)[0];
+    return {
+      existing,
+      request: {
+        cwd: options.preflightOnly
+          ? project.root
+          : (runtime?.worktreePath ??
+            join(project.stateDirectory, "worktrees", runId)),
+        remote: settings.config.git.remote,
+        sourceBranch: runtime?.branch ?? `swf/${runId}`,
+        targetBranch: settings.config.git.targetBranch,
+        title: `[SWF] ${loaded.state.run.changeName}`,
+        body: `${loaded.state.run.description}\n\nRun: ${runId}\nOpenSpec change: ${loaded.state.run.changeName}`,
+        runId,
+        deliveryId: existing?.deliveryId,
+        executionStatus: loaded.state.run.status,
+        sourceCommit: checkpoints[0]?.afterCommit ?? "unknown",
+        phaseId: settings.workflow.phases.at(-1)!.id,
+        plan,
+        failureAction: settings.policy.deliveryFailureAction ?? "escalate",
+      },
+    };
+  }
+
+  private async recordDeliveryUpdate(
+    projectId: string,
+    request: DeliveryRequest,
+    update: DeliveryUpdate,
+  ): Promise<void> {
+    const { project } = await this.runStore(projectId);
+    const artifact = await retainDeliveryUpdate({
+      artifacts: new ArtifactStore(project.stateDirectory, request.runId),
+      update,
+      sourceCommit: request.sourceCommit,
+      phaseId: request.phaseId,
+    });
+    const actor = { type: "service" as const, id: "swf-delivery" };
+    await this.append(projectId, request.runId, {
+      type: "artifact.recorded",
+      actor,
+      context: { phaseId: request.phaseId },
+      data: { artifact },
+    });
+    await this.append(projectId, request.runId, {
+      type: "delivery.recorded",
+      actor,
+      context: { phaseId: request.phaseId },
+      data: { delivery: update.delivery },
+    });
+    if (update.action === "remediate") {
+      const { store } = await this.runStore(projectId);
+      const state = (await store.load(request.runId)).state;
+      if (state.run.status === "completed") {
+        await this.append(projectId, request.runId, {
+          type: "run.transitioned",
+          actor,
+          context: {},
+          data: {
+            from: "completed",
+            to: "pending",
+            reason: `delivery ${update.delivery.status}: remediation required`,
+          },
+        });
+      }
+      const attemptId = randomUUID();
+      const number =
+        (state.phases[request.phaseId ?? "releasing"]?.attemptIds.length ?? 0) +
+        1;
+      await this.append(projectId, request.runId, {
+        type: "attempt.started",
+        actor,
+        context: { phaseId: request.phaseId, attemptId },
+        data: {
+          attemptId,
+          phaseId: request.phaseId ?? "releasing",
+          number,
+          kind: "remediation",
+        },
+      });
+      await this.append(projectId, request.runId, {
+        type: "run.remediated",
+        actor,
+        context: { phaseId: request.phaseId, attemptId },
+        data: {
+          phaseId: request.phaseId ?? "releasing",
+          attemptId,
+          reason: update.delivery.failureReason,
+        },
+      });
+    }
+  }
+
+  private startDeliveryMonitor(
+    projectId: string,
+    request: DeliveryRequest,
+    delivery: RunState["deliveries"][string],
+  ): void {
+    if (!delivery.pullRequestNumber || this.deliveryMonitors.has(request.runId))
+      return;
+    const controller = new AbortController();
+    this.deliveryMonitors.set(request.runId, controller);
+    const orchestrator = new DeliveryOrchestrator(
+      this.hostingAdapter,
+      (update) => this.recordDeliveryUpdate(projectId, request, update),
+    );
+    void orchestrator
+      .monitor({
+        ...request,
+        delivery,
+        pollIntervalMs: this.deliveryPollIntervalMs,
+        signal: controller.signal,
+      })
+      .catch((error) => {
+        this.broker.publish({
+          type: "delivery.monitor-error",
+          projectId,
+          runId: request.runId,
+          data: {
+            message:
+              error instanceof Error
+                ? error.message
+                : "delivery monitor failed",
+          },
+        });
+      })
+      .finally(() => this.deliveryMonitors.delete(request.runId));
+  }
+
+  async preflightDelivery(
+    projectId: string,
+    runId: string,
+  ): Promise<Awaited<ReturnType<HostingAdapter["preflight"]>>> {
+    const { request } = await this.deliveryRequest(projectId, runId, {
+      preflightOnly: true,
+    });
+    const result = await this.hostingAdapter.preflight({
+      cwd: request.cwd,
+      mode: request.plan.mode,
+      remote: request.remote,
+      targetBranch: request.targetBranch,
+      sourceBranch: request.sourceBranch,
+      requireMergePermission:
+        request.plan.action !== "open-pull-request" &&
+        request.plan.action !== "record-local-branch",
+      requireAutoMerge:
+        request.plan.action === "open-pull-request-and-auto-merge",
+    });
+    if (!result.valid) throw new DeliveryPreflightError(result);
+    return result;
+  }
+
+  async deliver(
+    projectId: string,
+    runId: string,
+    options: { refreshOnly?: boolean } = {},
+  ): Promise<RunState["deliveries"][string]> {
+    const { request, existing } = await this.deliveryRequest(projectId, runId);
+    if (!options.refreshOnly && request.executionStatus !== "completed")
+      throw new Error("Pull-request delivery requires completed execution");
+    const orchestrator = new DeliveryOrchestrator(
+      this.hostingAdapter,
+      (update) => this.recordDeliveryUpdate(projectId, request, update),
+    );
+    if (options.refreshOnly) {
+      if (!existing) throw new Error("No delivery exists to refresh");
+      return orchestrator.monitor({
+        ...request,
+        delivery: existing,
+        pollIntervalMs: 0,
+        maxPolls: 1,
+      });
+    }
+    const delivery = await orchestrator.start(request);
+    this.startDeliveryMonitor(projectId, request, delivery);
+    return delivery;
+  }
+
   private async append<T extends EventType>(
     projectId: string,
     runId: string,
@@ -1044,6 +1292,24 @@ export class SwfService {
         runId,
         data: { event: result.event },
       });
+      if (
+        result.event.type === "run.transitioned" &&
+        result.event.data.to === "completed"
+      ) {
+        void this.deliver(projectId, runId).catch((error) => {
+          this.broker.publish({
+            type: "delivery.start-error",
+            projectId,
+            runId,
+            data: {
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "delivery start failed",
+            },
+          });
+        });
+      }
     }
   }
 
@@ -1053,10 +1319,18 @@ export class SwfService {
       await this.submitBlockedInput(command.invocationId, command.response);
       return;
     }
+    if (command.type === "deliver" || command.type === "refresh-delivery") {
+      await this.deliver(command.projectId, command.runId, {
+        refreshOnly: command.type === "refresh-delivery",
+      });
+      return;
+    }
     if (!this.acceptingWork && command.type === "start")
       throw new Error("SWF service is draining and cannot start new work");
     const { store } = await this.runStore(command.projectId);
     const loaded = await store.load(command.runId);
+    if (command.type === "start")
+      await this.preflightDelivery(command.projectId, command.runId);
     const actor = { type: "service" as const, id: "swf-service" };
     if (
       command.type === "start" ||
@@ -1139,6 +1413,8 @@ export class SwfService {
       data: { activeWork: this.activeWork.size },
     });
     const work = [...this.activeWork.values()];
+    for (const controller of this.deliveryMonitors.values()) controller.abort();
+    this.deliveryMonitors.clear();
     if (force) await Promise.all(work.map((item) => item.interrupt()));
     else await Promise.all(work.map((item) => item.safeBoundary));
 
@@ -1200,6 +1476,32 @@ export class SwfService {
       for (const run of await this.listRuns(project)) {
         const store = new RunEventStore(project.stateDirectory);
         const state = (await store.load(run.runId)).state;
+        for (const delivery of Object.values(state.deliveries)) {
+          if (
+            delivery.status === "awaiting-merge" ||
+            delivery.status === "auto-merge-requested"
+          ) {
+            try {
+              const { request } = await this.deliveryRequest(
+                project.projectId,
+                run.runId,
+              );
+              this.startDeliveryMonitor(project.projectId, request, delivery);
+            } catch (error) {
+              this.broker.publish({
+                type: "delivery.recovery-error",
+                projectId: project.projectId,
+                runId: run.runId,
+                data: {
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : "delivery recovery failed",
+                },
+              });
+            }
+          }
+        }
         if (!["running", "blocked", "paused"].includes(state.run.status))
           continue;
         const action = await reconcile(project, state);

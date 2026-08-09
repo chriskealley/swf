@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/core" },
+    { "path": "./packages/integrations" },
     { "path": "./extensions/pi" },
     { "path": "./apps/cli" },
     { "path": "./apps/service" },

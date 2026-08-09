@@ -241,6 +241,8 @@ export default function (pi: ExtensionAPI) {
           "remediate",
           "rollback",
           "blocked-input",
+          "deliver",
+          "refresh-delivery",
         ]),
         projectId: { type: "string" },
         runId: { type: "string" },

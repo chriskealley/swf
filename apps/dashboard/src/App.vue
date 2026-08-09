@@ -186,6 +186,26 @@ async function runCommand(type: "start" | "pause" | "resume" | "cancel") {
   await refreshCurrent();
 }
 
+async function deliveryCommand(type: "deliver" | "refresh-delivery") {
+  if (!project.value || !detail.value) return;
+  if (
+    type === "deliver" &&
+    !window.confirm(
+      "Start the configured delivery? This may push the run branch and create or update a pull request.",
+    )
+  )
+    return;
+  await busy(() =>
+    api.value!.command({
+      type,
+      projectId: project.value!.projectId,
+      runId: detail.value!.state.run.runId,
+    }),
+  );
+  message.value = `${type === "deliver" ? "Delivery started" : "Delivery refreshed"}.`;
+  await refreshCurrent();
+}
+
 async function decide(
   type: "approve" | "reject",
   phaseId: string,
@@ -599,8 +619,22 @@ onUnmounted(() => {
         <div class="controls" aria-label="Run controls">
           <button type="button" @click="runCommand('start')">Start</button
           ><button type="button" @click="runCommand('pause')">Pause</button
-          ><button type="button" @click="runCommand('resume')">Resume</button
-          ><button type="button" class="danger" @click="runCommand('cancel')">
+          ><button type="button" @click="runCommand('resume')">Resume</button>
+          <button
+            v-if="detail.state.run.status === 'completed'"
+            type="button"
+            @click="deliveryCommand('deliver')"
+          >
+            Deliver
+          </button>
+          <button
+            v-if="Object.keys(detail.state.deliveries).length"
+            type="button"
+            @click="deliveryCommand('refresh-delivery')"
+          >
+            Refresh delivery
+          </button>
+          <button type="button" class="danger" @click="runCommand('cancel')">
             Cancel
           </button>
         </div>
@@ -709,8 +743,40 @@ onUnmounted(() => {
                 :key="delivery.deliveryId"
               >
                 <div>
-                  <strong>{{ delivery.status }}</strong
-                  ><span>{{ delivery.mergeMethod }}</span>
+                  <strong
+                    >Execution {{ delivery.executionStatus }} · Delivery
+                    {{ delivery.status }}</strong
+                  >
+                  <span
+                    >{{ delivery.mode }} · {{ delivery.mergeMethod }} ·
+                    {{ delivery.branch }} → {{ delivery.targetBranch }}</span
+                  >
+                  <span v-if="delivery.mergeState"
+                    >Merge state: {{ delivery.mergeState }}</span
+                  >
+                  <span v-if="delivery.hostedChecks.length"
+                    >{{ delivery.hostedChecks.length }} hosted checks ·
+                    {{
+                      delivery.hostedChecks
+                        .map((check) => check.conclusion || check.status)
+                        .join(", ")
+                    }}</span
+                  >
+                  <span v-if="delivery.reviews.length"
+                    >Reviews:
+                    {{
+                      delivery.reviews
+                        .map((review) => `${review.actor} ${review.state}`)
+                        .join(", ")
+                    }}</span
+                  >
+                  <span v-if="delivery.failureReason"
+                    >{{ delivery.failureReason }} ·
+                    {{ delivery.failureAction || "escalate" }}</span
+                  >
+                  <span v-if="delivery.cleanup?.branchDeleted"
+                    >Source branch cleaned up</span
+                  >
                 </div>
                 <a
                   v-if="delivery.pullRequestUrl"

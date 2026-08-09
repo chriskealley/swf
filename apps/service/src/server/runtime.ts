@@ -1,14 +1,27 @@
 import { SwfService } from "./swf-service.js";
 
-let service: SwfService | undefined;
+interface SwfRuntimeGlobal {
+  service?: SwfService;
+}
+
+const runtimeKey = "__SWF_SERVICE_RUNTIME__";
+const runtimeGlobal = globalThis as typeof globalThis & {
+  [runtimeKey]?: SwfRuntimeGlobal;
+};
+
+function runtime(): SwfRuntimeGlobal {
+  return (runtimeGlobal[runtimeKey] ??= {});
+}
 
 export async function getService(): Promise<SwfService> {
-  if (!service) service = new SwfService();
-  await service.start();
-  return service;
+  const state = runtime();
+  state.service ??= new SwfService();
+  await state.service.start();
+  return state.service;
 }
 
 export async function resetServiceForTests(): Promise<void> {
-  await service?.shutdown({ force: true });
-  service = undefined;
+  const state = runtime();
+  await state.service?.shutdown({ force: true });
+  state.service = undefined;
 }

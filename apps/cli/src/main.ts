@@ -373,6 +373,17 @@ const check = defineCommand({
     run: lifecycleCommand("run", "remediate"),
   },
 });
+const delivery = defineCommand({
+  meta: {
+    name: "delivery",
+    description: "Inspect, start, or refresh configured delivery",
+  },
+  subCommands: {
+    status: queryCommand("status", "delivery"),
+    start: lifecycleCommand("start", "deliver"),
+    refresh: lifecycleCommand("refresh", "refresh-delivery"),
+  },
+});
 const explore = defineCommand({
   meta: {
     name: "explore",
@@ -418,6 +429,7 @@ const main = defineCommand({
     next,
     phase,
     check,
+    delivery,
   },
 });
 await runMain(main);

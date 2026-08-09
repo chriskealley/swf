@@ -74,6 +74,9 @@ importers:
       '@swf/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@swf/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       h3:
         specifier: ^1.15.4
         version: 1.15.11
@@ -107,6 +110,12 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+
+  packages/integrations:
+    dependencies:
+      '@swf/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

@@ -2,6 +2,7 @@ export * from "./domain.js";
 export * from "./event-store.js";
 export * from "./git.js";
 export * from "./herdr.js";
+export * from "./hosting.js";
 export * from "./doctor.js";
 export * from "./requirements.js";
 export * from "./runtime.js";

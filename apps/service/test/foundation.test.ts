@@ -26,6 +26,15 @@ describe("Nitro service foundation", () => {
     expect(middleware).toContain("Dashboard origin must be local");
   });
 
+  it("keeps the service singleton across Nitro hot reloads", () => {
+    const runtime = readFileSync(
+      new URL("../src/server/runtime.ts", import.meta.url),
+      "utf8",
+    );
+    expect(runtime).toContain("globalThis");
+    expect(runtime).toContain("__SWF_SERVICE_RUNTIME__");
+  });
+
   it("terminates the hosting process after authenticated service shutdown", () => {
     const route = readFileSync(
       new URL("../src/server/api/v1/service.post.ts", import.meta.url),

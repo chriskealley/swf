@@ -110,9 +110,25 @@ export interface RunDetail {
       string,
       {
         deliveryId: string;
+        executionStatus: string;
         status: string;
+        mode: string;
+        branch: string;
+        targetBranch: string;
         pullRequestUrl?: string;
         mergeMethod: string;
+        mergeState?: string;
+        autoMergeRequested: boolean;
+        hostedChecks: Array<{
+          name: string;
+          status: string;
+          conclusion?: string;
+          url?: string;
+        }>;
+        reviews: Array<{ actor: string; state: string }>;
+        cleanup?: { branchDeleted: boolean; recordedAt: string };
+        failureReason?: string;
+        failureAction?: "remediate" | "escalate" | "fail";
       }
     >;
   };

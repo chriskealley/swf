@@ -33,3 +33,11 @@ Arrays replace lower-precedence arrays. Nested objects merge recursively. The re
 ## Validation
 
 Before execution, SWF parses the selected workflow and project configuration, validates its versioned schemas, verifies profile and guideline references, and verifies profile capabilities requested by a phase. Invalid references stop before Herdr resources are created.
+
+## Pull-request delivery
+
+The default workflow explicitly selects `delivery.mode: pull-request` and `mergeMethod: merge`. Before expensive execution, the GitHub adapter verifies the configured remote and target branch, GitHub URL, network, `gh` authentication, branch push, pull-request creation, and any required merge or auto-merge permissions.
+
+Manual policy opens or updates a pull request and waits for a human merge. Automatic policy requires recorded delegated authorization before requesting auto-merge. Projects may select `squash`, `rebase`, or `repository-default` merge behavior. `local-branch` bypasses GitHub checks only when explicitly configured. `direct-merge` additionally requires `allowDirectMerge: true` in the resolved policy.
+
+Delivery failures use the policy's `deliveryFailureAction`, which is one of `remediate`, `escalate`, or `fail`. Execution status remains distinct from delivery status, so a completed run can continue to report `awaiting-merge` while the service monitors hosted checks and reviews.

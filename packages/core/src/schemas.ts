@@ -50,6 +50,8 @@ export const PolicySchema = z.object({
   timeoutMinutes: z.number().int().positive().optional(),
   budgetUsd: z.number().nonnegative().optional(),
   riskOverrides: z.array(z.string().min(1)).default([]),
+  allowDirectMerge: z.boolean().optional(),
+  deliveryFailureAction: z.enum(["remediate", "escalate", "fail"]).optional(),
 });
 
 export const WorkUnitSchema = z.object({
@@ -154,6 +156,7 @@ export const RunSchema = z.object({
   projectId: z.string().uuid(),
   changeName: Identifier,
   workflowId: Identifier,
+  policyId: Identifier.optional(),
   changeIdentity: z.string().min(1).optional(),
   phaseIds: z.array(Identifier).optional(),
   description: z.string().min(1),
@@ -335,10 +338,58 @@ export const DeliverySchema = z.object({
   schemaVersion: SchemaVersion,
   deliveryId: z.string().uuid(),
   runId: z.string().uuid(),
-  provider: z.literal("github"),
-  status: z.enum(["pending", "awaiting-merge", "merged", "failed", "closed"]),
+  provider: z.enum(["github", "local"]),
+  mode: z
+    .enum(["pull-request", "local-branch", "direct-merge"])
+    .default("pull-request"),
+  executionStatus: RunStatusSchema,
+  status: z.enum([
+    "pending",
+    "awaiting-merge",
+    "auto-merge-requested",
+    "checks-failed",
+    "rejected",
+    "merged",
+    "local-branch",
+    "failed",
+    "closed",
+  ]),
+  remote: z.string().min(1).default("origin"),
+  branch: z.string().min(1),
+  targetBranch: z.string().min(1),
+  pullRequestNumber: z.number().int().positive().optional(),
   pullRequestUrl: z.string().url().optional(),
   mergeMethod: z.enum(["merge", "squash", "rebase", "repository-default"]),
+  mergeState: z.string().min(1).optional(),
+  autoMergeRequested: z.boolean().default(false),
+  hostedChecks: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        status: z.string().min(1),
+        conclusion: z.string().optional(),
+        url: z.string().url().optional(),
+      }),
+    )
+    .default([]),
+  reviews: z
+    .array(
+      z.object({
+        actor: z.string().min(1),
+        state: z.string().min(1),
+        submittedAt: IsoDateTime.optional(),
+      }),
+    )
+    .default([]),
+  cleanup: z
+    .object({
+      branchDeleted: z.boolean(),
+      recordedAt: IsoDateTime,
+    })
+    .optional(),
+  failureReason: z.string().min(1).optional(),
+  failureAction: z.enum(["remediate", "escalate", "fail"]).optional(),
+  updatedAt: IsoDateTime,
 });
 
 export const documents = {

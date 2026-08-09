@@ -211,6 +211,8 @@ function defaultPolicies(): DocumentValue<"policy">[] {
       approvalMode: "manual",
       maxAttempts: 1,
       riskOverrides: [],
+      allowDirectMerge: false,
+      deliveryFailureAction: "escalate",
     },
     {
       schemaVersion: 1,
@@ -218,6 +220,8 @@ function defaultPolicies(): DocumentValue<"policy">[] {
       approvalMode: "automatic",
       maxAttempts: 2,
       riskOverrides: [],
+      allowDirectMerge: false,
+      deliveryFailureAction: "remediate",
     },
     {
       schemaVersion: 1,
@@ -229,6 +233,8 @@ function defaultPolicies(): DocumentValue<"policy">[] {
         "secret-finding",
         "destructive-operation",
       ],
+      allowDirectMerge: false,
+      deliveryFailureAction: "escalate",
     },
   ];
 }
@@ -499,6 +505,31 @@ export interface ConfigurationIssue {
 
 async function parseYamlFile(path: string): Promise<unknown> {
   return parseYaml(await readFile(path, "utf8"));
+}
+
+export async function loadProjectDeliverySettings(
+  project: ProjectLocation,
+  workflowId: string,
+  policyId = "manual",
+): Promise<{
+  config: DocumentValue<"projectConfig">;
+  workflow: DocumentValue<"workflow">;
+  policy: DocumentValue<"policy">;
+}> {
+  const config = ProjectConfigSchema.parse(
+    await parseYamlFile(join(project.configDirectory, "config.yaml")),
+  );
+  const workflow = WorkflowSchema.parse(
+    await parseYamlFile(
+      join(project.configDirectory, "workflows", `${workflowId}.yaml`),
+    ),
+  );
+  const policy = PolicySchema.parse(
+    await parseYamlFile(
+      join(project.configDirectory, "policies", `${policyId}.yaml`),
+    ),
+  );
+  return { config, workflow, policy };
 }
 
 export async function validateProjectConfiguration(

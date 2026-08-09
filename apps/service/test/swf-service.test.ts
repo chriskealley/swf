@@ -8,6 +8,10 @@ import {
   type AdapterResult,
   type AdapterValidation,
   type HarnessAdapter,
+  type HostingAdapter,
+  type HostingPreflightInput,
+  type HostingPreflightResult,
+  type PullRequestObservation,
 } from "@swf/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -32,7 +36,20 @@ async function setup(): Promise<{ service: SwfService; projectRoot: string }> {
   const home = await temporaryDirectory("swf-service-");
   const projectRoot = await temporaryDirectory("swf-service-project-");
   await mkdir(join(projectRoot, ".git"));
-  await mkdir(join(projectRoot, ".swf"));
+  await mkdir(join(projectRoot, ".swf", "workflows"), { recursive: true });
+  await mkdir(join(projectRoot, ".swf", "policies"), { recursive: true });
+  await writeFile(
+    join(projectRoot, ".swf", "config.yaml"),
+    `schemaVersion: 1\nprojectId: ${projectId}\ndefaultWorkflow: default\ngit:\n  remote: origin\n  targetBranch: main\npaths:\n  state: .swf-state\n`,
+  );
+  await writeFile(
+    join(projectRoot, ".swf", "workflows", "default.yaml"),
+    `schemaVersion: 1\nid: default\ndescription: Service test\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: []\n    work: []\n    checks: []\n    gate:\n      mode: manual\ndelivery:\n  mode: local-branch\n  mergeMethod: merge\n`,
+  );
+  await writeFile(
+    join(projectRoot, ".swf", "policies", "manual.yaml"),
+    `schemaVersion: 1\nid: manual\napprovalMode: manual\nmaxAttempts: 1\nriskOverrides: []\n`,
+  );
   const service = new SwfService({
     serviceHome: home,
     endpoint: "http://127.0.0.1:45001",
@@ -57,6 +74,131 @@ async function createRun(projectRoot: string): Promise<void> {
     description: "Add token authentication",
     phaseIds: ["planning"],
   });
+}
+
+class FakeHostingAdapter implements HostingAdapter {
+  readonly id = "fake-github";
+  upserts = 0;
+  autoMerges = 0;
+  cleanups = 0;
+  private resolveObservation!: (value: PullRequestObservation) => void;
+  private observation = new Promise<PullRequestObservation>((resolve) => {
+    this.resolveObservation = resolve;
+  });
+
+  release(observation: Partial<PullRequestObservation> = {}): void {
+    this.resolveObservation({
+      number: 4,
+      url: "https://github.com/acme/repo/pull/4",
+      sourceBranch: `swf/${runId}`,
+      targetBranch: "main",
+      created: false,
+      state: "merged",
+      mergeState: "MERGED",
+      checks: [],
+      reviews: [],
+      autoMergeEnabled: false,
+      ...observation,
+    });
+  }
+
+  async preflight(
+    _input: HostingPreflightInput,
+  ): Promise<HostingPreflightResult> {
+    return {
+      valid: true,
+      skipped: false,
+      repository: "acme/repo",
+      checks: [],
+    };
+  }
+  async createOrUpdatePullRequest() {
+    this.upserts += 1;
+    return {
+      number: 4,
+      url: "https://github.com/acme/repo/pull/4",
+      sourceBranch: `swf/${runId}`,
+      targetBranch: "main",
+      created: this.upserts === 1,
+    };
+  }
+  async observePullRequest() {
+    return this.observation;
+  }
+  async requestAutoMerge() {
+    this.autoMerges += 1;
+  }
+  async mergePullRequest() {}
+  async directMerge() {}
+  async cleanupBranch() {
+    this.cleanups += 1;
+  }
+}
+
+async function setupDelivery(
+  adapter: HostingAdapter,
+  failureAction: "remediate" | "escalate" | "fail" = "escalate",
+): Promise<{ service: SwfService; projectRoot: string }> {
+  const home = await temporaryDirectory("swf-service-delivery-");
+  const projectRoot = await temporaryDirectory("swf-service-delivery-project-");
+  await mkdir(join(projectRoot, ".git"));
+  await mkdir(join(projectRoot, ".swf", "workflows"), { recursive: true });
+  await mkdir(join(projectRoot, ".swf", "policies"), { recursive: true });
+  await writeFile(
+    join(projectRoot, ".swf", "config.yaml"),
+    `schemaVersion: 1\nprojectId: ${projectId}\ndefaultWorkflow: default\ngit:\n  remote: origin\n  targetBranch: main\npaths:\n  state: .swf-state\n`,
+  );
+  await writeFile(
+    join(projectRoot, ".swf", "workflows", "default.yaml"),
+    `schemaVersion: 1\nid: default\ndescription: Delivery test\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: []\n    work: []\n    checks: []\n    gate:\n      mode: manual\ndelivery:\n  mode: pull-request\n  mergeMethod: merge\n`,
+  );
+  await writeFile(
+    join(projectRoot, ".swf", "policies", "manual.yaml"),
+    `schemaVersion: 1\nid: manual\napprovalMode: manual\nmaxAttempts: 1\nriskOverrides: []\nallowDirectMerge: false\ndeliveryFailureAction: ${failureAction}\n`,
+  );
+  const service = new SwfService({
+    serviceHome: home,
+    hostingAdapter: adapter,
+    deliveryPollIntervalMs: 0,
+  });
+  await service.start();
+  await service.registerProject({
+    projectId,
+    displayName: "Delivery project",
+    root: projectRoot,
+  });
+  await createRun(projectRoot);
+  const store = new RunEventStore(join(projectRoot, ".swf-state"));
+  await store.append(runId, {
+    type: "run.transitioned",
+    actor: { type: "service", id: "test" },
+    context: {},
+    data: { from: "pending", to: "running" },
+  });
+  await store.append(runId, {
+    type: "run.transitioned",
+    actor: { type: "service", id: "test" },
+    context: {},
+    data: { from: "running", to: "completed" },
+  });
+  const worktreePath = join(projectRoot, ".swf-state", "worktrees", runId);
+  await mkdir(worktreePath, { recursive: true });
+  await writeFile(
+    join(projectRoot, ".swf-state", "runs", runId, "runtime.json"),
+    JSON.stringify({ branch: `swf/${runId}`, worktreePath }),
+  );
+  return { service, projectRoot };
+}
+
+async function waitFor(
+  predicate: () => Promise<boolean>,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for state");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 afterEach(async () => {
@@ -291,6 +433,156 @@ describe("user-scoped SWF service", () => {
     ).resolves.toMatchObject({
       available: false,
       reason: "Output was pruned or is unavailable",
+    });
+    await service.shutdown();
+  });
+
+  it("persists idempotent pull-request delivery while execution remains completed", async () => {
+    const adapter = new FakeHostingAdapter();
+    const { service, projectRoot } = await setupDelivery(adapter);
+    await service.command({ type: "deliver", projectId, runId });
+    await service.command({ type: "deliver", projectId, runId });
+    const active = (await service.query({
+      resource: "run",
+      projectId,
+      runId,
+    })) as {
+      state: {
+        run: { status: string };
+        deliveries: Record<string, { status: string; executionStatus: string }>;
+      };
+    };
+    expect(active.state.run.status).toBe("completed");
+    expect(Object.values(active.state.deliveries)).toEqual([
+      expect.objectContaining({
+        status: "awaiting-merge",
+        executionStatus: "completed",
+      }),
+    ]);
+    expect(adapter.upserts).toBe(2);
+
+    adapter.release({
+      state: "merged",
+      checks: [{ name: "ci", status: "completed", conclusion: "success" }],
+      reviews: [{ actor: "reviewer", state: "APPROVED" }],
+    });
+    await waitFor(async () => {
+      const deliveries = (await service.query({
+        resource: "delivery",
+        projectId,
+        runId,
+      })) as Record<
+        string,
+        { status: string; cleanup?: { branchDeleted: boolean } }
+      >;
+      const delivery = Object.values(deliveries)[0];
+      return (
+        delivery?.status === "merged" &&
+        delivery.cleanup?.branchDeleted === true
+      );
+    });
+    expect(adapter.cleanups).toBe(1);
+    const loaded = await new RunEventStore(
+      join(projectRoot, ".swf-state"),
+    ).load(runId);
+    expect(
+      loaded.events.filter(({ type }) => type === "delivery.recorded").length,
+    ).toBeGreaterThanOrEqual(4);
+    expect(
+      loaded.events.filter(({ type }) => type === "artifact.recorded").length,
+    ).toBeGreaterThanOrEqual(4);
+    await service.shutdown();
+  });
+
+  it("restores delivery monitoring after service restart", async () => {
+    const firstAdapter = new FakeHostingAdapter();
+    const { service } = await setupDelivery(firstAdapter);
+    await service.command({ type: "deliver", projectId, runId });
+    await service.shutdown();
+    firstAdapter.release({ state: "open" });
+
+    const recoveredAdapter = new FakeHostingAdapter();
+    const recovered = new SwfService({
+      serviceHome: service.serviceHome,
+      hostingAdapter: recoveredAdapter,
+      deliveryPollIntervalMs: 10,
+    });
+    await recovered.start();
+    recoveredAdapter.release({ state: "merged", mergeState: "MERGED" });
+    await waitFor(async () => {
+      const deliveries = (await recovered.query({
+        resource: "delivery",
+        projectId,
+        runId,
+      })) as Record<string, { cleanup?: { branchDeleted: boolean } }>;
+      return Object.values(deliveries)[0]?.cleanup?.branchDeleted === true;
+    });
+    expect(recoveredAdapter.cleanups).toBe(1);
+    await recovered.shutdown();
+  });
+
+  it("fails GitHub preflight before starting execution and preserves run state", async () => {
+    class FailingPreflightAdapter extends FakeHostingAdapter {
+      override async preflight() {
+        return {
+          valid: false,
+          skipped: false,
+          checks: [
+            {
+              id: "authentication" as const,
+              status: "failed" as const,
+              detail: "GitHub authentication is invalid",
+            },
+          ],
+        };
+      }
+    }
+    const adapter = new FailingPreflightAdapter();
+    const { service } = await setupDelivery(adapter);
+    await expect(
+      service.command({ type: "start", projectId, runId }),
+    ).rejects.toThrow("GitHub authentication is invalid");
+    const run = (await service.query({
+      resource: "run",
+      projectId,
+      runId,
+    })) as {
+      state: { run: { status: string } };
+    };
+    expect(run.state.run.status).toBe("completed");
+    expect(adapter.upserts).toBe(0);
+    await service.shutdown();
+  });
+
+  it("applies configured delivery remediation after hosted checks fail", async () => {
+    const adapter = new FakeHostingAdapter();
+    const { service } = await setupDelivery(adapter, "remediate");
+    await service.command({ type: "deliver", projectId, runId });
+    adapter.release({
+      state: "open",
+      checks: [{ name: "ci", status: "completed", conclusion: "failure" }],
+    });
+    await waitFor(async () => {
+      const run = (await service.query({
+        resource: "run",
+        projectId,
+        runId,
+      })) as {
+        state: { run: { status: string }; attempts: Record<string, unknown> };
+      };
+      return (
+        run.state.run.status === "pending" &&
+        Object.keys(run.state.attempts).length === 1
+      );
+    });
+    const delivery = (await service.query({
+      resource: "delivery",
+      projectId,
+      runId,
+    })) as Record<string, { status: string; failureReason?: string }>;
+    expect(Object.values(delivery)[0]).toMatchObject({
+      status: "checks-failed",
+      failureReason: "Hosted checks failed",
     });
     await service.shutdown();
   });

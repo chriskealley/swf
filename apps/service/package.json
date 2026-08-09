@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@swf/core": "workspace:*",
+    "@swf/integrations": "workspace:*",
     "h3": "^1.15.4",
     "nitropack": "^2.13.4"
   }

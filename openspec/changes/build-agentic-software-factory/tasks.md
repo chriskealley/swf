@@ -162,19 +162,19 @@
 
 ## 12. Pull-Request Delivery
 
-- [ ] 12.1 Define the Git hosting adapter contract and implement the initial GitHub adapter using required `gh` authentication and operations
-- [ ] 12.2 Implement idempotent create-or-update pull-request delivery from the run branch to the configured target
-- [ ] 12.3 Record pull request, hosted checks, reviews, merge state, and cleanup as artifacts and events
-- [ ] 12.4 Track execution status separately from delivery status
-- [ ] 12.5 Implement manual-policy behavior that opens a PR and awaits human merge by default
-- [ ] 12.6 Implement autonomous-policy behavior that requests repository-supported auto-merge after final gates pass
-- [ ] 12.7 Use merge commits by default and implement configurable squash, rebase, and repository-default pull-request merge methods
-- [ ] 12.8 Require explicit configuration and resolved-policy authorization for local-branch-only or direct-merge delivery
-- [ ] 12.9 Continue monitoring hosted checks and merge state after agent execution completes
-- [ ] 12.10 Apply configured remediation or escalation when hosted checks fail or a PR is rejected or closed
-- [ ] 12.11 Implement early GitHub delivery preflight for configurable remote, repository URL, network, target branch, `gh` authentication, push, PR creation, and merge permissions
-- [ ] 12.12 Allow explicit local-branch workflows to bypass GitHub remote, authentication, and permission checks
-- [ ] 12.13 Test missing remotes, non-GitHub remotes, authentication failures, permission failures, duplicate delivery, manual merge, auto-merge, merge-method selection, failed hosted checks, unsupported auto-merge, and direct-merge safeguards
+- [x] 12.1 Define the Git hosting adapter contract and implement the initial GitHub adapter using required `gh` authentication and operations
+- [x] 12.2 Implement idempotent create-or-update pull-request delivery from the run branch to the configured target
+- [x] 12.3 Record pull request, hosted checks, reviews, merge state, and cleanup as artifacts and events
+- [x] 12.4 Track execution status separately from delivery status
+- [x] 12.5 Implement manual-policy behavior that opens a PR and awaits human merge by default
+- [x] 12.6 Implement autonomous-policy behavior that requests repository-supported auto-merge after final gates pass
+- [x] 12.7 Use merge commits by default and implement configurable squash, rebase, and repository-default pull-request merge methods
+- [x] 12.8 Require explicit configuration and resolved-policy authorization for local-branch-only or direct-merge delivery
+- [x] 12.9 Continue monitoring hosted checks and merge state after agent execution completes
+- [x] 12.10 Apply configured remediation or escalation when hosted checks fail or a PR is rejected or closed
+- [x] 12.11 Implement early GitHub delivery preflight for configurable remote, repository URL, network, target branch, `gh` authentication, push, PR creation, and merge permissions
+- [x] 12.12 Allow explicit local-branch workflows to bypass GitHub remote, authentication, and permission checks
+- [x] 12.13 Test missing remotes, non-GitHub remotes, authentication failures, permission failures, duplicate delivery, manual merge, auto-merge, merge-method selection, failed hosted checks, unsupported auto-merge, and direct-merge safeguards
 
 ## 13. Additional Harness Adapters
 
