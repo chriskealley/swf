@@ -458,6 +458,11 @@ export class HarnessWorkExecutor implements WorkExecutor {
       workspaceId: string;
       cwd: string;
       timeoutMs?: number;
+      beforeLaunch?: (request: AdapterLaunchRequest) => Promise<void>;
+      afterCollect?: (
+        invocation: AdapterInvocation,
+        result: AdapterResult,
+      ) => Promise<void>;
     },
     readonly fallback?: WorkExecutor,
   ) {}
@@ -499,7 +504,7 @@ export class HarnessWorkExecutor implements WorkExecutor {
       typeof unit.options.prompt === "string"
         ? unit.options.prompt
         : `${context.phase.title}: ${context.phase.id}`;
-    const invocation = await adapter.launch({
+    const request: AdapterLaunchRequest = {
       runId: this.context.runId,
       phaseId: context.phase.id,
       workUnitId: unit.id,
@@ -513,7 +518,9 @@ export class HarnessWorkExecutor implements WorkExecutor {
         typeof context.resolved.timeoutMs === "number"
           ? context.resolved.timeoutMs
           : this.context.timeoutMs,
-    });
+    };
+    await this.context.beforeLaunch?.(request);
+    const invocation = await adapter.launch(request);
     const observation = await adapter.observe(invocation);
     if (observation.status === "blocked")
       return {
@@ -521,6 +528,7 @@ export class HarnessWorkExecutor implements WorkExecutor {
         output: observation.blockedPrompt ?? observation.message,
       };
     const result = await adapter.collect(invocation);
+    await this.context.afterCollect?.(invocation, result);
     return {
       status: result.status === "completed" ? "completed" : "failed",
       output: result.transcript,

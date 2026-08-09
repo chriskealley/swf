@@ -34,6 +34,12 @@ Arrays replace lower-precedence arrays. Nested objects merge recursively. The re
 
 Before execution, SWF parses the selected workflow and project configuration, validates its versioned schemas, verifies profile and guideline references, and verifies profile capabilities requested by a phase. Invalid references stop before Herdr resources are created.
 
+## Budgets and sensitive data
+
+Optional `budgets` in `.swf/config.yaml` sets invocation, phase, named-phase, run, and project `maxCostUsd` or `maxTokens` ceilings. Budget evaluation fails closed on unknown telemetry unless `strictUnknown: false` is explicitly selected. Policy `budgetUsd` and `budgetTokens` act as phase-level fallbacks. See [operations.md](./operations.md) for precedence and diagnostics.
+
+Do not commit credentials or secret values to `.swf/`. Configure runtime redaction and inject credentials through explicit local authentication or the process environment.
+
 ## Pull-request delivery
 
 The default workflow explicitly selects `delivery.mode: pull-request` and `mergeMethod: merge`. Before expensive execution, the GitHub adapter verifies the configured remote and target branch, GitHub URL, network, `gh` authentication, branch push, pull-request creation, and any required merge or auto-merge permissions.

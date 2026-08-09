@@ -21,6 +21,7 @@ import {
   parseRunEvent,
 } from "./domain.js";
 import { RunSchema, SnapshotSchema, type DocumentValue } from "./schemas.js";
+import { Redactor, type RedactionOptions } from "./security.js";
 
 const RUNS_DIRECTORY = "runs";
 const EVENTS_FILE = "events.jsonl";
@@ -146,8 +147,36 @@ export interface AppendResult<T extends EventType = EventType> {
   appended: boolean;
 }
 
+export type EventStoreWritePoint =
+  "run" | "initial-event" | "bindings" | "event" | "snapshot";
+
+export interface RunEventStoreOptions {
+  redaction?: RedactionOptions | Redactor;
+  beforeWrite?: (
+    point: EventStoreWritePoint,
+    path: string,
+  ) => void | Promise<void>;
+}
+
 export class RunEventStore {
-  constructor(readonly stateDirectory: string) {}
+  readonly redactor: Redactor;
+
+  constructor(
+    readonly stateDirectory: string,
+    readonly options: RunEventStoreOptions = {},
+  ) {
+    this.redactor =
+      options.redaction instanceof Redactor
+        ? options.redaction
+        : new Redactor(options.redaction);
+  }
+
+  private async beforeWrite(
+    point: EventStoreWritePoint,
+    path: string,
+  ): Promise<void> {
+    await this.options.beforeWrite?.(point, path);
+  }
 
   private runDirectory(runId: string): string {
     return join(this.stateDirectory, RUNS_DIRECTORY, runId);
@@ -198,19 +227,22 @@ export class RunEventStore {
         throw new DuplicateRunError(input.changeIdentity, existingRunId);
 
       const createdAt = input.createdAt ?? new Date().toISOString();
-      const run = RunSchema.parse({
-        schemaVersion: 1,
-        runId: input.runId ?? randomUUID(),
-        projectId: input.projectId,
-        changeName: input.changeName,
-        changeIdentity: input.changeIdentity,
-        workflowId: input.workflowId,
-        phaseIds: input.phaseIds,
-        description: input.description,
-        status: "pending",
-        createdAt,
-        updatedAt: createdAt,
-      });
+      const run = RunSchema.parse(
+        this.redactor.value({
+          schemaVersion: 1,
+          runId: input.runId ?? randomUUID(),
+          projectId: input.projectId,
+          changeName: input.changeName,
+          changeIdentity: input.changeIdentity,
+          workflowId: input.workflowId,
+          phaseIds: input.phaseIds,
+          description: input.description,
+          status: "pending",
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      );
+      await this.beforeWrite("run", this.runPath(run.runId));
       await writeAtomically(
         this.runPath(run.runId),
         `${JSON.stringify(run, null, 2)}\n`,
@@ -224,11 +256,13 @@ export class RunEventStore {
         context: {},
         data: { changeIdentity: input.changeIdentity },
       });
+      await this.beforeWrite("initial-event", this.eventsPath(run.runId));
       await writeAtomically(
         this.eventsPath(run.runId),
         `${JSON.stringify(created)}\n`,
       );
       bindings.byChangeIdentity[input.changeIdentity] = run.runId;
+      await this.beforeWrite("bindings", this.bindingsPath());
       await writeAtomically(
         this.bindingsPath(),
         `${JSON.stringify(bindings, null, 2)}\n`,
@@ -327,9 +361,11 @@ export class RunEventStore {
 
       const event = createRunEvent({
         ...draft,
+        data: this.redactor.value(draft.data),
         runId,
         sequence: (existing.at(-1)?.sequence ?? -1) + 1,
       });
+      await this.beforeWrite("event", this.eventsPath(runId));
       const handle = await open(this.eventsPath(runId), "a", 0o600);
       try {
         await handle.writeFile(`${JSON.stringify(event)}\n`, "utf8");
@@ -374,6 +410,7 @@ export class RunEventStore {
       createdAt: new Date().toISOString(),
       state,
     });
+    await this.beforeWrite("snapshot", this.snapshotPath(runId));
     await writeAtomically(
       this.snapshotPath(runId),
       `${JSON.stringify(snapshot, null, 2)}\n`,

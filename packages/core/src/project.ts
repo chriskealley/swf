@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
   access,
+  chmod,
   mkdir,
   readdir,
   readFile,
@@ -392,6 +393,7 @@ export async function initializeProject(
     await writeFile(path, contents, "utf8");
   }
   await mkdir(project.stateDirectory, { recursive: true, mode: 0o700 });
+  await chmod(project.stateDirectory, 0o700);
   const ignored = await ensureGitignore(project.root);
   const created = files.map(([path]) => path);
   created.push(project.stateDirectory);

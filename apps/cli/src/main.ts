@@ -45,6 +45,10 @@ function fail(error: unknown, json = false): void {
 async function client(): Promise<SwfServiceClient> {
   return SwfServiceClient.connect();
 }
+function publicServiceMetadata<T extends { credential?: string }>(metadata: T) {
+  const { credential: _credential, ...safe } = metadata;
+  return { ...safe, credentialConfigured: Boolean(_credential) };
+}
 function icon(status: CheckStatus): string {
   return { pass: "✓", fail: "✗", warn: "!", skip: "-" }[status];
 }
@@ -143,7 +147,10 @@ const serviceStatus = defineCommand({
   args: { json: { type: "boolean" } },
   async run({ args }) {
     try {
-      output(await readLocalServiceMetadata(), args.json);
+      output(
+        publicServiceMetadata(await readLocalServiceMetadata()),
+        args.json,
+      );
     } catch (error) {
       fail(error, args.json);
     }
@@ -163,7 +170,10 @@ const serviceStart = defineCommand({
   },
   async run({ args }) {
     try {
-      output(await readLocalServiceMetadata(), args.json);
+      output(
+        publicServiceMetadata(await readLocalServiceMetadata()),
+        args.json,
+      );
       return;
     } catch (error) {
       if (!(error instanceof ServiceUnavailableError)) throw error;
@@ -190,7 +200,14 @@ const serviceStart = defineCommand({
       throw new ServiceUnavailableError(
         "SWF service did not publish metadata within 5 seconds",
       );
-    output({ started: true, pid: child.pid, metadata }, args.json);
+    output(
+      {
+        started: true,
+        pid: child.pid,
+        metadata: publicServiceMetadata(metadata),
+      },
+      args.json,
+    );
   },
 });
 const serviceStop = defineCommand({
@@ -218,7 +235,14 @@ const serviceDiagnostic = defineCommand({
         active.query("projects"),
         active.query("adapters"),
       ]);
-      output({ metadata: active.metadata, projects, adapters }, args.json);
+      output(
+        {
+          metadata: publicServiceMetadata(active.metadata),
+          projects,
+          adapters,
+        },
+        args.json,
+      );
     } catch (error) {
       fail(error, args.json);
     }
@@ -321,6 +345,8 @@ const events = queryCommand("events", "run");
 const artifacts = queryCommand("artifacts", "artifacts");
 const logs = queryCommand("log", "invocations");
 const costs = queryCommand("cost", "costs");
+const budgets = queryCommand("budget", "budgets");
+const operations = queryCommand("operations", "operations", false);
 const configuration = queryCommand("config", "configuration", false);
 const pause = lifecycleCommand("pause", "pause");
 const resume = lifecycleCommand("resume", "resume");
@@ -376,6 +402,148 @@ const check = defineCommand({
     run: lifecycleCommand("run", "remediate"),
   },
 });
+const prune = defineCommand({
+  meta: {
+    name: "prune",
+    description: "Preview or confirm raw-output retention pruning",
+  },
+  args: {
+    project: { type: "string", required: true },
+    age: { type: "string" },
+    run: { type: "string" },
+    budget: { type: "string" },
+    confirm: { type: "string" },
+    json: { type: "boolean" },
+  },
+  async run({ args }) {
+    try {
+      const active = await client();
+      const result = args.confirm
+        ? await active.confirmPruning(args.project, args.confirm)
+        : await active.previewPruning(args.project, {
+            ageDays: args.age ? Number(args.age) : undefined,
+            runId: args.run,
+            budgetBytes: args.budget ? Number(args.budget) : undefined,
+          });
+      output(result, args.json);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+const reconcile = defineCommand({
+  meta: {
+    name: "reconcile",
+    description: "Report stuck agents and orphaned owned resources",
+  },
+  args: {
+    project: { type: "string", required: true },
+    apply: { type: "boolean" },
+    "stale-after-ms": { type: "string" },
+    json: { type: "boolean" },
+  },
+  async run({ args }) {
+    try {
+      const result = await (
+        await client()
+      ).command({
+        type: "reconcile",
+        projectId: args.project,
+        apply: Boolean(args.apply),
+        staleAfterMs: args["stale-after-ms"]
+          ? Number(args["stale-after-ms"])
+          : undefined,
+      });
+      output(result, args.json);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+const migrate = defineCommand({
+  meta: {
+    name: "migrate",
+    description: "Preview, apply, or roll back state migrations",
+  },
+  args: {
+    project: { type: "string", required: true },
+    target: { type: "string" },
+    apply: { type: "boolean" },
+    rollback: { type: "string" },
+    json: { type: "boolean" },
+  },
+  async run({ args }) {
+    try {
+      const result = await (
+        await client()
+      ).command({
+        type: "migrate",
+        projectId: args.project,
+        target: args.target ? Number(args.target) : undefined,
+        dryRun: !args.apply,
+        rollbackBackupId: args.rollback,
+      });
+      output(result, args.json);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+const transfer = defineCommand({
+  meta: { name: "transfer", description: "Export or import complete runs" },
+  subCommands: {
+    export: defineCommand({
+      meta: { name: "export", description: "Export complete run history" },
+      args: {
+        project: { type: "string", required: true },
+        run: { type: "string", required: true },
+        path: { type: "positional", required: true },
+        json: { type: "boolean" },
+      },
+      async run({ args }) {
+        try {
+          output(
+            await (
+              await client()
+            ).command({
+              type: "export-run",
+              projectId: args.project,
+              runId: args.run,
+              path: args.path,
+            }),
+            args.json,
+          );
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
+    import: defineCommand({
+      meta: { name: "import", description: "Import complete run history" },
+      args: {
+        project: { type: "string", required: true },
+        path: { type: "positional", required: true },
+        json: { type: "boolean" },
+      },
+      async run({ args }) {
+        try {
+          output(
+            await (
+              await client()
+            ).command({
+              type: "import-run",
+              projectId: args.project,
+              path: args.path,
+            }),
+            args.json,
+          );
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
+  },
+});
 const delivery = defineCommand({
   meta: {
     name: "delivery",
@@ -418,6 +586,12 @@ const main = defineCommand({
     artifacts,
     log: logs,
     cost: costs,
+    budget: budgets,
+    operations,
+    prune,
+    reconcile,
+    migrate,
+    transfer,
     config: configuration,
     pause,
     resume,

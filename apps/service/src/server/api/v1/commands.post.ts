@@ -14,6 +14,10 @@ const commandTypes = new Set<ServiceCommand["type"]>([
   "blocked-input",
   "deliver",
   "refresh-delivery",
+  "reconcile",
+  "migrate",
+  "export-run",
+  "import-run",
 ]);
 
 export default defineEventHandler(async (event) => {
@@ -40,8 +44,8 @@ export default defineEventHandler(async (event) => {
     });
   }
   try {
-    await service.command(command as ServiceCommand);
-    return { schemaVersion: 1, status: "accepted" };
+    const result = await service.command(command as ServiceCommand);
+    return { schemaVersion: 1, status: "accepted", result };
   } catch (error) {
     throw createError({
       statusCode: 400,

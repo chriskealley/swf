@@ -174,6 +174,8 @@ export default function (pi: ExtensionAPI) {
           "invocations",
           "artifacts",
           "costs",
+          "budgets",
+          "operations",
           "configuration",
           "delivery",
           "blocked-inputs",
@@ -244,6 +246,10 @@ export default function (pi: ExtensionAPI) {
           "blocked-input",
           "deliver",
           "refresh-delivery",
+          "reconcile",
+          "migrate",
+          "export-run",
+          "import-run",
         ]),
         projectId: { type: "string" },
         runId: { type: "string" },
@@ -254,6 +260,11 @@ export default function (pi: ExtensionAPI) {
         actorId: { type: "string" },
         invocationId: { type: "string" },
         response: { type: "string" },
+        path: { type: "string" },
+        apply: { type: "boolean" },
+        dryRun: { type: "boolean" },
+        target: { type: "number" },
+        rollbackBackupId: { type: "string" },
       },
       ["action"],
     ) as never,
@@ -293,6 +304,11 @@ export default function (pi: ExtensionAPI) {
         actorId?: string;
         invocationId?: string;
         response?: string;
+        path?: string;
+        apply?: boolean;
+        dryRun?: boolean;
+        target?: number;
+        rollbackBackupId?: string;
       },
       _signal,
       _update,
@@ -310,6 +326,11 @@ export default function (pi: ExtensionAPI) {
           actorId: params.actorId ?? "pi-operator",
           invocationId: params.invocationId,
           response: params.response,
+          path: params.path,
+          apply: params.apply,
+          dryRun: params.dryRun,
+          target: params.target,
+          rollbackBackupId: params.rollbackBackupId,
         }),
       );
       await refresh(ctx);

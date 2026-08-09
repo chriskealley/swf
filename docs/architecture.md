@@ -32,9 +32,9 @@ No core module may import a client framework, Nitro, Vue, Pi, Herdr, or GitHub S
 
 ```text
 project/.swf/        committed configuration and operator skills
-project/.swf-state/  ignored events, snapshots, logs, and artifacts
+project/.swf-state/  ignored events, snapshots, logs, artifacts, backups, and exports
 openspec/changes/    planning and portable evidence dossier
-~/.config/swf/       user-scoped service registry and endpoint metadata
+~/.config/swf/       private service registry, endpoint metadata, trust, and audit log
 ```
 
 ## Tooling

@@ -7,6 +7,11 @@ const SchemaVersion = z.literal(CURRENT_SCHEMA_VERSION);
 const Identifier = z.string().regex(/^[a-z][a-z0-9-]*$/, "must be kebab-case");
 const IsoDateTime = z.string().datetime({ offset: true });
 const JsonObject = z.record(z.string(), z.unknown());
+const BudgetLimitSchema = z.object({
+  maxCostUsd: z.number().nonnegative().optional(),
+  maxTokens: z.number().int().nonnegative().optional(),
+  strictUnknown: z.boolean().default(true),
+});
 
 export const HarnessSchema = z.enum(["pi", "codex", "claude", "copilot"]);
 export const GateModeSchema = z.enum(["manual", "automatic", "advisory"]);
@@ -49,6 +54,7 @@ export const PolicySchema = z.object({
   maxAttempts: z.number().int().positive().default(1),
   timeoutMinutes: z.number().int().positive().optional(),
   budgetUsd: z.number().nonnegative().optional(),
+  budgetTokens: z.number().int().nonnegative().optional(),
   riskOverrides: z.array(z.string().min(1)).default([]),
   allowDirectMerge: z.boolean().optional(),
   deliveryFailureAction: z.enum(["remediate", "escalate", "fail"]).optional(),
@@ -104,6 +110,15 @@ export const ProjectConfigSchema = z.object({
   paths: z.object({
     state: z.literal(".swf-state"),
   }),
+  budgets: z
+    .object({
+      invocation: BudgetLimitSchema.optional(),
+      phase: BudgetLimitSchema.optional(),
+      phases: z.record(Identifier, BudgetLimitSchema).optional(),
+      run: BudgetLimitSchema.optional(),
+      project: BudgetLimitSchema.optional(),
+    })
+    .optional(),
 });
 
 export const RunStatusSchema = z.enum([
@@ -231,6 +246,13 @@ export const InvocationSchema = z.object({
     amountUsd: z.number().nonnegative().optional(),
     quality: z.enum(["exact", "estimated", "unknown"]),
   }),
+  usage: z
+    .object({
+      inputTokens: z.number().int().nonnegative().optional(),
+      outputTokens: z.number().int().nonnegative().optional(),
+      totalTokens: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
 });
 
 export const ArtifactSchema = z.object({
@@ -246,6 +268,9 @@ export const ArtifactSchema = z.object({
   outputRef: z.string().min(1),
   producerAttemptId: z.string().uuid().optional(),
   rawOutputRef: z.string().min(1).optional(),
+  rawOutputAvailable: z.boolean().optional(),
+  rawOutputPrunedAt: IsoDateTime.optional(),
+  rawOutputUnavailableReason: z.enum(["retention-policy"]).optional(),
   summary: z.string().min(1).max(2_000).optional(),
   consumers: z.array(Identifier).default([]),
   invalidReason: z.string().min(1).optional(),

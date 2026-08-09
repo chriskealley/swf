@@ -189,13 +189,13 @@
 
 ## 14. Security, Retention, and Operational Hardening
 
-- [ ] 14.1 Enforce local binding, service authentication, project trust, filesystem permissions, and mutating-operation audit events
-- [ ] 14.2 Implement configurable secret and sensitive-value redaction before logs, events, artifacts, or API responses are persisted
-- [ ] 14.3 Implement user-controlled dry-run and confirmed raw-output pruning by age, selected run, and storage budget while preserving required audit summaries and marking pruned references
-- [ ] 14.4 Implement cost and token budgets at invocation, phase, run, project, and service scopes
-- [ ] 14.5 Add stuck-agent detection, orphaned-resource reporting, and operator reconciliation commands
-- [ ] 14.6 Implement versioned state migrations with dry-run, backup, and rollback support
-- [ ] 14.7 Implement complete run export and import for operational-history backup and transfer
-- [ ] 14.8 Add fault-injection tests for service crashes, partial events, full disks, permission failures, network failures, and harness version changes
-- [ ] 14.9 Add an end-to-end acceptance suite using disposable repositories, isolated Herdr sessions, simulated models, and selected live harness smoke tests
-- [ ] 14.10 Document installation, required and optional dependencies, GitHub remote setup, initialization, service operation, autonomous-policy implications, recovery, dashboard use, and adapter support matrix
+- [x] 14.1 Enforce local binding, service authentication, project trust, filesystem permissions, and mutating-operation audit events
+- [x] 14.2 Implement configurable secret and sensitive-value redaction before logs, events, artifacts, or API responses are persisted
+- [x] 14.3 Implement user-controlled dry-run and confirmed raw-output pruning by age, selected run, and storage budget while preserving required audit summaries and marking pruned references
+- [x] 14.4 Implement cost and token budgets at invocation, phase, run, project, and service scopes
+- [x] 14.5 Add stuck-agent detection, orphaned-resource reporting, and operator reconciliation commands
+- [x] 14.6 Implement versioned state migrations with dry-run, backup, and rollback support
+- [x] 14.7 Implement complete run export and import for operational-history backup and transfer
+- [x] 14.8 Add fault-injection tests for service crashes, partial events, full disks, permission failures, network failures, and harness version changes
+- [x] 14.9 Add an end-to-end acceptance suite using disposable repositories, isolated Herdr sessions, simulated models, and selected live harness smoke tests
+- [x] 14.10 Document installation, required and optional dependencies, GitHub remote setup, initialization, service operation, autonomous-policy implications, recovery, dashboard use, and adapter support matrix

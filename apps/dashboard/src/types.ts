@@ -34,6 +34,16 @@ export interface ProjectSummary {
   costs: CostSummary;
 }
 
+export interface BudgetDecision {
+  scope: "invocation" | "phase" | "run" | "project" | "service";
+  scopeId: string;
+  status: "available" | "exhausted" | "indeterminate";
+  allowed: boolean;
+  reasons: string[];
+  consumed: { costUsd: number; tokens: number };
+  limits: { maxCostUsd?: number; maxTokens?: number; strictUnknown?: boolean };
+}
+
 export interface AdapterDiagnostic {
   id: string;
   available: boolean;

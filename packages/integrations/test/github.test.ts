@@ -135,6 +135,21 @@ describe("GitHub hosting adapter", () => {
     ]);
   });
 
+  it("fails closed when the GitHub network preflight is unreachable", async () => {
+    const adapter = new GitHubAdapter(
+      new FakeRunner((command, args) => {
+        if (command === "gh" && args.join(" ").startsWith("api rate_limit"))
+          return { code: 1, stderr: "network unreachable" };
+        return successful(command, args);
+      }),
+    );
+    const result = await adapter.preflight(preflight);
+    expect(result.valid).toBe(false);
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({ id: "network", status: "failed" }),
+    );
+  });
+
   it("bypasses all GitHub checks for explicitly selected local-branch delivery", async () => {
     const runner = new FakeRunner(() => ({ code: 1 }));
     const result = await new GitHubAdapter(runner).preflight({

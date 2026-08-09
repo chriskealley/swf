@@ -46,16 +46,19 @@ export const requirements = {
   },
   codex: {
     command: "codex",
+    minimumVersion: "0.146.0",
     required: false,
     reason: "Codex CLI is an optional harness unless selected by a workflow.",
   },
   claude: {
     command: "claude",
+    minimumVersion: "2.1.222",
     required: false,
     reason: "Claude Code is an optional harness unless selected by a workflow.",
   },
   copilot: {
     command: "copilot",
+    minimumVersion: "0.0.358",
     required: false,
     reason:
       "GitHub Copilot CLI is an optional harness unless selected by a workflow.",

@@ -51,4 +51,26 @@ Setup never silently downloads a terminal emulator, invents a Git remote, or cre
 gh auth login
 ```
 
-A default pull-request workflow additionally requires a GitHub remote, branch push permission, pull-request creation permission, and merge or auto-merge permission required by its policy. A workflow explicitly configured for local-branch delivery does not require GitHub delivery access.
+A default pull-request workflow additionally requires a GitHub remote, branch push permission, pull-request creation permission, and merge or auto-merge permission required by its policy. Configure and verify the default remote explicitly:
+
+```sh
+git remote add origin git@github.com:<owner>/<repository>.git
+git remote -v
+gh repo view
+gh auth status
+```
+
+SWF never invents or replaces a remote. A workflow explicitly configured for local-branch delivery does not require GitHub delivery access.
+
+## Initialize and operate
+
+```sh
+swf init --trust
+swf service start
+swf service status
+swf service diagnostic
+```
+
+Use `swf new`, `swf run`, or `swf explore` to begin work. The service continues after CLI, Pi, or dashboard clients disconnect. Use `swf service stop` for safe draining or `swf service stop --force` only when owned execution must be interrupted.
+
+The dashboard connects only to the loopback endpoint and credential published in the private service metadata. Adapter versions and capability limitations are in [harness-adapters.md](./harness-adapters.md). Security, autonomous-policy implications, pruning, budgets, reconciliation, migration, export/import, and crash recovery are covered in [operations.md](./operations.md).

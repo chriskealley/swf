@@ -27,7 +27,7 @@ describe("SWF service client", () => {
         schemaVersion: 1,
         serviceId: "s",
         pid: 1,
-        endpoint: "http://swf.test",
+        endpoint: "http://127.0.0.1:34671",
         credential: "secret",
         startedAt: "2026-04-02T12:00:00.000Z",
       }),
@@ -49,10 +49,13 @@ describe("SWF service client", () => {
     await client.command({ type: "pause", projectId: "p", runId: "r" });
     expect(calls).toMatchObject([
       {
-        url: "http://swf.test/api/v1/query?resource=run&projectId=p&runId=r",
+        url: "http://127.0.0.1:34671/api/v1/query?resource=run&projectId=p&runId=r",
         init: { headers: { authorization: "Bearer secret" } },
       },
-      { url: "http://swf.test/api/v1/commands", init: { method: "POST" } },
+      {
+        url: "http://127.0.0.1:34671/api/v1/commands",
+        init: { method: "POST" },
+      },
     ]);
   });
 

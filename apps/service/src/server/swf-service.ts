@@ -18,14 +18,28 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import {
   ArtifactStore,
+  AuditLog,
   BlockedAgentRouter,
+  GitClient,
   HerdrClient,
   PiHarnessAdapter,
+  Redactor,
+  RunRuntime,
+  RuntimeOwnershipStore,
+  StateMigrationManager,
   DeliveryOrchestrator,
   DeliveryPreflightError,
   RunEventStore,
+  assertBudgetsAvailable,
+  assertLoopbackHttpEndpoint,
   createRunEvent,
+  enforcePrivatePermissions,
+  evaluateBudgets,
+  exportRun,
   findProjectRoot,
+  importRun,
+  inspectOperationalHealth,
+  isProjectTrusted,
   loadProjectDeliverySettings,
   reduceRunState,
   resolveDeliveryPlan,
@@ -33,12 +47,15 @@ import {
   validateProjectConfiguration,
   type AdapterInvocation,
   type AdapterObservation,
+  type BudgetConfiguration,
+  type BudgetUsage,
   type DeliveryRequest,
   type DeliveryUpdate,
   type EventDraft,
   type EventType,
   type HarnessAdapter,
   type HostingAdapter,
+  type RedactionOptions,
   type Run,
   type RunState,
 } from "@swf/core";
@@ -112,15 +129,17 @@ export interface ServiceSubscription extends AsyncIterable<ServiceEvent> {
 
 class EventBroker {
   private nextId = 1;
+
+  constructor(readonly redactor: Redactor) {}
   private readonly retained: ServiceEvent[] = [];
   private readonly subscribers = new Set<AsyncEventSubscription>();
 
   publish(event: Omit<ServiceEvent, "id" | "timestamp">): ServiceEvent {
-    const published: ServiceEvent = {
+    const published = this.redactor.value<ServiceEvent>({
       id: this.nextId++,
       timestamp: new Date().toISOString(),
       ...event,
-    };
+    });
     this.retained.push(published);
     if (this.retained.length > 1_000) this.retained.shift();
     for (const subscriber of this.subscribers) subscriber.push(published);
@@ -359,6 +378,10 @@ export interface ServiceOptions {
   hostingAdapter?: HostingAdapter;
   deliveryPollIntervalMs?: number;
   harnessAdapters?: HarnessAdapter[];
+  redaction?: RedactionOptions;
+  serviceBudget?: BudgetConfiguration["service"];
+  projectTrust?: (root: string) => Promise<boolean>;
+  stuckAfterMs?: number;
 }
 
 export interface ServiceQuery {
@@ -375,11 +398,14 @@ export interface ServiceQuery {
     | "configuration"
     | "delivery"
     | "output"
+    | "budgets"
+    | "operations"
     | "blocked-inputs";
   projectId?: string;
   runId?: string;
   ref?: string;
   raw?: boolean;
+  phaseId?: string;
 }
 
 export interface PruningCriteria {
@@ -412,6 +438,7 @@ export type ServiceCommand =
       type: "start" | "pause" | "resume" | "cancel";
       projectId: string;
       runId: string;
+      phaseId?: string;
     }
   | {
       type: "approve" | "reject";
@@ -442,13 +469,39 @@ export type ServiceCommand =
       type: "deliver" | "refresh-delivery";
       projectId: string;
       runId: string;
+    }
+  | {
+      type: "reconcile";
+      projectId: string;
+      apply?: boolean;
+      staleAfterMs?: number;
+    }
+  | {
+      type: "migrate";
+      projectId: string;
+      target?: number;
+      dryRun?: boolean;
+      rollbackBackupId?: string;
+    }
+  | {
+      type: "export-run";
+      projectId: string;
+      runId: string;
+      path: string;
+    }
+  | {
+      type: "import-run";
+      projectId: string;
+      path: string;
     };
 
 export class SwfService {
   readonly serviceHome: string;
   readonly endpoint: string;
   readonly registry: ProjectRegistry;
-  private readonly broker = new EventBroker();
+  private readonly broker: EventBroker;
+  private readonly redactor: Redactor;
+  private readonly audit: AuditLog;
   private readonly blockedAgents = new BlockedAgentRouter();
   private readonly activeWork = new Map<string, WorkRegistration>();
   private readonly pendingPruning = new Map<string, PendingPruning>();
@@ -456,6 +509,9 @@ export class SwfService {
   private readonly hostingAdapter: HostingAdapter;
   private readonly harnessAdapters: HarnessAdapter[];
   private readonly deliveryPollIntervalMs: number;
+  private readonly serviceBudget?: BudgetConfiguration["service"];
+  private readonly projectTrust: (root: string) => Promise<boolean>;
+  private readonly stuckAfterMs: number;
   private lock?: Awaited<ReturnType<typeof open>>;
   private metadata?: ServiceMetadata;
   private acceptingWork = false;
@@ -468,6 +524,13 @@ export class SwfService {
       options.endpoint ??
       process.env.SWF_SERVICE_ENDPOINT ??
       `http://${host}:${port}`;
+    assertLoopbackHttpEndpoint(this.endpoint);
+    this.redactor = new Redactor(options.redaction);
+    this.broker = new EventBroker(this.redactor);
+    this.audit = new AuditLog(
+      join(this.serviceHome, "audit.jsonl"),
+      this.redactor,
+    );
     this.registry = new ProjectRegistry(this.serviceHome);
     this.hostingAdapter = options.hostingAdapter ?? new GitHubAdapter();
     const herdr = new HerdrClient();
@@ -478,6 +541,11 @@ export class SwfService {
       new CopilotHarnessAdapter(herdr),
     ];
     this.deliveryPollIntervalMs = options.deliveryPollIntervalMs ?? 30_000;
+    this.serviceBudget = options.serviceBudget;
+    this.projectTrust =
+      options.projectTrust ??
+      ((root) => isProjectTrusted(root, { configHome: this.serviceHome }));
+    this.stuckAfterMs = options.stuckAfterMs ?? 30 * 60_000;
   }
 
   private get lockPath(): string {
@@ -490,7 +558,7 @@ export class SwfService {
 
   async start(): Promise<ServiceMetadata> {
     if (this.metadata) return this.metadata;
-    await mkdir(this.serviceHome, { recursive: true, mode: 0o700 });
+    await enforcePrivatePermissions({ directories: [this.serviceHome] });
     try {
       this.lock = await open(this.lockPath, "wx", 0o600);
     } catch (error) {
@@ -514,11 +582,21 @@ export class SwfService {
         this.metadataPath,
         `${JSON.stringify(metadata, null, 2)}\n`,
       );
+      await enforcePrivatePermissions({
+        directories: [this.serviceHome],
+        files: [this.lockPath, this.metadataPath],
+      });
       this.metadata = metadata;
       this.acceptingWork = true;
       this.broker.publish({
         type: "service.started",
         data: { serviceId: metadata.serviceId, endpoint: metadata.endpoint },
+      });
+      await this.audit.append({
+        operation: "service.start",
+        actor: { type: "service", id: metadata.serviceId },
+        outcome: "completed",
+        details: { endpoint: metadata.endpoint, pid: metadata.pid },
       });
       await this.recover();
       return metadata;
@@ -589,7 +667,29 @@ export class SwfService {
     root: string;
   }): Promise<RegisteredProject> {
     this.requireRunning();
+    if (!(await this.projectTrust(input.root))) {
+      await this.audit.append({
+        operation: "project.register",
+        actor: { type: "user", id: "operator" },
+        projectId: input.projectId,
+        outcome: "rejected",
+        details: { root: input.root, reason: "project is not trusted" },
+      });
+      throw new Error(
+        `Project is not trusted: ${input.root}. Run swf init --trust first.`,
+      );
+    }
     const project = await this.registry.register(input);
+    await enforcePrivatePermissions({
+      directories: [project.stateDirectory],
+    });
+    await this.audit.append({
+      operation: "project.register",
+      actor: { type: "user", id: "operator" },
+      projectId: project.projectId,
+      outcome: "completed",
+      details: { root: project.root, availability: project.availability },
+    });
     this.broker.publish({
       type: "project.registered",
       projectId: project.projectId,
@@ -627,6 +727,8 @@ export class SwfService {
     if (!project) throw new Error(`Unknown project: ${projectId}`);
     if (project.availability !== "available")
       throw new Error(`Project ${projectId} is ${project.availability}`);
+    if (!(await this.projectTrust(project.root)))
+      throw new Error(`Project ${projectId} is no longer trusted`);
     return project;
   }
 
@@ -634,7 +736,12 @@ export class SwfService {
     projectId: string,
   ): Promise<{ project: RegisteredProject; store: RunEventStore }> {
     const project = await this.project(projectId);
-    return { project, store: new RunEventStore(project.stateDirectory) };
+    return {
+      project,
+      store: new RunEventStore(project.stateDirectory, {
+        redaction: this.redactor,
+      }),
+    };
   }
 
   private async listRuns(project: RegisteredProject): Promise<Run[]> {
@@ -642,7 +749,9 @@ export class SwfService {
       const entries = await readdir(join(project.stateDirectory, "runs"), {
         withFileTypes: true,
       });
-      const store = new RunEventStore(project.stateDirectory);
+      const store = new RunEventStore(project.stateDirectory, {
+        redaction: this.redactor,
+      });
       return (
         await Promise.all(
           entries
@@ -680,6 +789,67 @@ export class SwfService {
     );
   }
 
+  private async budgetUsage(): Promise<BudgetUsage[]> {
+    const usage: BudgetUsage[] = [];
+    for (const project of await this.registry.reconcile()) {
+      if (project.availability !== "available") continue;
+      const store = new RunEventStore(project.stateDirectory, {
+        redaction: this.redactor,
+      });
+      for (const run of await this.listRuns(project)) {
+        const state = (await store.load(run.runId)).state;
+        for (const invocation of Object.values(state.invocations))
+          usage.push({
+            invocationId: invocation.invocationId,
+            projectId: project.projectId,
+            runId: run.runId,
+            phaseId: invocation.phaseId,
+            costUsd: invocation.cost.amountUsd,
+            costQuality: invocation.cost.quality,
+            tokens: invocation.usage?.totalTokens,
+          });
+      }
+    }
+    return usage;
+  }
+
+  private async budgetReport(
+    projectId: string,
+    runId: string,
+    phaseId?: string,
+  ) {
+    const { project, store } = await this.runStore(projectId);
+    const state = (await store.load(runId)).state;
+    const location = await findProjectRoot(project.root);
+    if (!location?.initialized)
+      throw new Error("Budget evaluation requires initialized configuration");
+    const settings = await loadProjectDeliverySettings(
+      location,
+      state.run.workflowId,
+      state.run.policyId ?? "manual",
+    );
+    const configured = settings.config.budgets ?? {};
+    const configuration: BudgetConfiguration = {
+      ...configured,
+      service: this.serviceBudget,
+      phase:
+        configured.phase ??
+        (settings.policy.budgetUsd !== undefined ||
+        settings.policy.budgetTokens !== undefined
+          ? {
+              maxCostUsd: settings.policy.budgetUsd,
+              maxTokens: settings.policy.budgetTokens,
+              strictUnknown: true,
+            }
+          : undefined),
+    };
+    return evaluateBudgets(configuration, await this.budgetUsage(), {
+      projectId,
+      runId,
+      phaseId,
+    });
+  }
+
   private async overview(): Promise<unknown> {
     const projects = await this.registry.reconcile();
     const summaries = await Promise.all(
@@ -694,7 +864,9 @@ export class SwfService {
             costs: { exactUsd: 0, estimatedUsd: 0, unknown: 0 },
           };
         const runs = await this.listRuns(project);
-        const store = new RunEventStore(project.stateDirectory);
+        const store = new RunEventStore(project.stateDirectory, {
+          redaction: this.redactor,
+        });
         const states = await Promise.all(
           runs.map((run) =>
             store.load(run.runId).then((loaded) => loaded.state),
@@ -802,7 +974,7 @@ export class SwfService {
       return {
         ref: reference,
         available: true,
-        content: returned.toString("utf8"),
+        content: this.redactor.text(returned.toString("utf8")),
         bytes: contents.byteLength,
         returnedBytes: returned.byteLength,
         truncated: contents.byteLength > returned.byteLength,
@@ -813,13 +985,17 @@ export class SwfService {
         return {
           ref: reference,
           available: false,
-          reason: "Output was pruned or is unavailable",
+          reason: "Output was pruned by retention policy or is unavailable",
         };
       throw error;
     }
   }
 
   async query(query: ServiceQuery): Promise<unknown> {
+    return this.redactor.value(await this.queryUnredacted(query));
+  }
+
+  private async queryUnredacted(query: ServiceQuery): Promise<unknown> {
     this.requireRunning();
     if (query.resource === "overview") return this.overview();
     if (query.resource === "adapters")
@@ -847,6 +1023,11 @@ export class SwfService {
       throw new Error(`projectId is required for ${query.resource}`);
     const { project, store } = await this.runStore(query.projectId);
     if (query.resource === "runs") return this.listRuns(project);
+    if (query.resource === "operations")
+      return inspectOperationalHealth(
+        project.stateDirectory,
+        this.stuckAfterMs,
+      );
     if (query.resource === "configuration") {
       const location = await findProjectRoot(project.root);
       return {
@@ -880,11 +1061,19 @@ export class SwfService {
       case "invocations":
         return loaded.state.invocations;
       case "artifacts":
-        return loaded.state.artifacts;
+        return (
+          await new ArtifactStore(
+            project.stateDirectory,
+            query.runId,
+            this.redactor,
+          ).load()
+        ).artifacts;
       case "delivery":
         return loaded.state.deliveries;
       case "costs":
         return this.summarizeCosts(loaded.state.invocations);
+      case "budgets":
+        return this.budgetReport(query.projectId, query.runId, query.phaseId);
       default:
         throw new Error(
           `Unsupported query resource: ${query.resource satisfies never}`,
@@ -1059,24 +1248,56 @@ export class SwfService {
     let pruned = 0;
     let bytes = 0;
     for (const [index, path] of preview.paths.entries()) {
+      const candidate = preview.candidates[index];
+      let removed = false;
       try {
         const info = await stat(path);
         if (!info.isFile()) continue;
         await rm(path);
+        removed = true;
         pruned += 1;
         bytes += info.size;
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
-      const candidate = preview.candidates[index];
-      if (candidate)
+      if (candidate && removed) {
+        const project = await this.project(projectId);
+        const prunedAt = new Date().toISOString();
+        await new ArtifactStore(
+          project.stateDirectory,
+          candidate.runId,
+          this.redactor,
+        ).markRawOutputPruned(candidate.ref, prunedAt);
+        const ledgerPath = join(
+          project.stateDirectory,
+          "runs",
+          candidate.runId,
+          "retention.jsonl",
+        );
+        const ledger = await open(ledgerPath, "a", 0o600);
+        try {
+          await ledger.writeFile(
+            `${JSON.stringify({ schemaVersion: 1, type: "raw-output.pruned", prunedAt, ref: candidate.ref, bytes: candidate.bytes, confirmationId })}\n`,
+          );
+          await ledger.sync();
+        } finally {
+          await ledger.close();
+        }
         this.broker.publish({
           type: "output.pruned",
           projectId,
           runId: candidate.runId,
           data: { ref: candidate.ref, bytes: candidate.bytes },
         });
+      }
     }
+    await this.audit.append({
+      operation: "output.prune",
+      actor: { type: "user", id: "operator" },
+      projectId,
+      outcome: "completed",
+      details: { confirmationId, pruned, bytes, criteria: preview.criteria },
+    });
     this.pendingPruning.delete(confirmationId);
     return { pruned, bytes };
   }
@@ -1161,7 +1382,11 @@ export class SwfService {
   ): Promise<void> {
     const { project } = await this.runStore(projectId);
     const artifact = await retainDeliveryUpdate({
-      artifacts: new ArtifactStore(project.stateDirectory, request.runId),
+      artifacts: new ArtifactStore(
+        project.stateDirectory,
+        request.runId,
+        this.redactor,
+      ),
       update,
       sourceCommit: request.sourceCommit,
       phaseId: request.phaseId,
@@ -1349,8 +1574,29 @@ export class SwfService {
     }
   }
 
-  async command(command: ServiceCommand): Promise<void> {
+  async command(command: ServiceCommand): Promise<unknown> {
+    return this.redactor.value(await this.commandUnredacted(command));
+  }
+
+  private async commandUnredacted(command: ServiceCommand): Promise<unknown> {
     this.requireRunning();
+    await this.audit.append({
+      operation: `command.${command.type}`,
+      actor: {
+        type:
+          "actorId" in command && typeof command.actorId === "string"
+            ? "user"
+            : "service-client",
+        id:
+          "actorId" in command && typeof command.actorId === "string"
+            ? command.actorId
+            : "authenticated-client",
+      },
+      projectId: "projectId" in command ? command.projectId : undefined,
+      runId: "runId" in command ? command.runId : undefined,
+      outcome: "accepted",
+      details: { type: command.type },
+    });
     if (command.type === "blocked-input") {
       await this.submitBlockedInput(command.invocationId, command.response);
       return;
@@ -1361,12 +1607,134 @@ export class SwfService {
       });
       return;
     }
+    if (command.type === "reconcile") {
+      const project = await this.project(command.projectId);
+      const report = await inspectOperationalHealth(
+        project.stateDirectory,
+        command.staleAfterMs ?? this.stuckAfterMs,
+      );
+      const actions: Array<Record<string, unknown>> = [];
+      if (command.apply) {
+        const store = new RunEventStore(project.stateDirectory, {
+          redaction: this.redactor,
+        });
+        for (const stuck of report.stuck) {
+          const state = (await store.load(stuck.runId)).state;
+          if (state.run.status === "running") {
+            await this.append(project.projectId, stuck.runId, {
+              type: "run.transitioned",
+              actor: { type: "service", id: "swf-reconciler" },
+              context: { phaseId: stuck.phaseId },
+              data: {
+                from: "running",
+                to: "blocked",
+                reason: `stuck invocation ${stuck.invocationId}`,
+              },
+            });
+            actions.push({ action: "blocked", runId: stuck.runId });
+          }
+        }
+        for (const orphan of report.orphans) {
+          const runtime = new RunRuntime(
+            new GitClient(project.root),
+            new HerdrClient(),
+            new RuntimeOwnershipStore(project.stateDirectory),
+          );
+          try {
+            const cleaned = await runtime.cleanup(orphan.runId);
+            actions.push({
+              action: "cleaned-owned-resources",
+              runId: orphan.runId,
+              resources: cleaned,
+            });
+          } catch (error) {
+            actions.push({
+              action: "cleanup-failed",
+              runId: orphan.runId,
+              error: error instanceof Error ? error.message : "cleanup failed",
+            });
+          }
+        }
+      }
+      await this.audit.append({
+        operation: "operations.reconcile",
+        actor: { type: "user", id: "operator" },
+        projectId: project.projectId,
+        outcome: "completed",
+        details: { apply: Boolean(command.apply), actions },
+      });
+      return { report, applied: Boolean(command.apply), actions };
+    }
+    if (command.type === "migrate") {
+      const project = await this.project(command.projectId);
+      const manager = new StateMigrationManager(project.stateDirectory);
+      const result = command.rollbackBackupId
+        ? await manager
+            .rollback(command.rollbackBackupId)
+            .then(() => ({ rolledBack: command.rollbackBackupId }))
+        : await manager.migrate({
+            target: command.target,
+            dryRun: command.dryRun ?? true,
+          });
+      await this.audit.append({
+        operation: command.rollbackBackupId
+          ? "state.rollback-migration"
+          : "state.migrate",
+        actor: { type: "user", id: "operator" },
+        projectId: project.projectId,
+        outcome: "completed",
+        details: { result },
+      });
+      return result;
+    }
+    if (command.type === "export-run") {
+      const project = await this.project(command.projectId);
+      const result = await exportRun(
+        project.stateDirectory,
+        command.runId,
+        command.path,
+      );
+      await this.audit.append({
+        operation: "run.export",
+        actor: { type: "user", id: "operator" },
+        projectId: project.projectId,
+        runId: command.runId,
+        outcome: "completed",
+        details: { path: command.path, files: result.files.length },
+      });
+      return {
+        runId: result.runId,
+        path: command.path,
+        files: result.files.length,
+      };
+    }
+    if (command.type === "import-run") {
+      const project = await this.project(command.projectId);
+      const result = await importRun(project.stateDirectory, command.path);
+      await this.audit.append({
+        operation: "run.import",
+        actor: { type: "user", id: "operator" },
+        projectId: project.projectId,
+        runId: result.runId,
+        outcome: "completed",
+        details: { path: command.path, files: result.files },
+      });
+      return result;
+    }
     if (!this.acceptingWork && command.type === "start")
       throw new Error("SWF service is draining and cannot start new work");
     const { store } = await this.runStore(command.projectId);
     const loaded = await store.load(command.runId);
-    if (command.type === "start")
+    if (command.type === "start") {
+      assertBudgetsAvailable(
+        await this.budgetReport(
+          command.projectId,
+          command.runId,
+          command.phaseId,
+        ),
+      );
       await this.preflightDelivery(command.projectId, command.runId);
+    }
     const actor = { type: "service" as const, id: "swf-service" };
     if (
       command.type === "start" ||
@@ -1456,7 +1824,9 @@ export class SwfService {
 
     for (const project of await this.registry.reconcile()) {
       if (project.availability !== "available") continue;
-      const store = new RunEventStore(project.stateDirectory);
+      const store = new RunEventStore(project.stateDirectory, {
+        redaction: this.redactor,
+      });
       for (const run of await this.listRuns(project)) {
         try {
           const loaded = await store.load(run.runId);
@@ -1491,6 +1861,12 @@ export class SwfService {
       }
     }
     this.activeWork.clear();
+    await this.audit.append({
+      operation: "service.shutdown",
+      actor: { type: "service-client", id: "authenticated-client" },
+      outcome: "completed",
+      details: { force },
+    });
     this.broker.publish({ type: "service.stopped", data: { force } });
     await this.lock?.close();
     await rm(this.lockPath, { force: true });
@@ -1510,7 +1886,9 @@ export class SwfService {
     for (const project of projects) {
       if (project.availability !== "available") continue;
       for (const run of await this.listRuns(project)) {
-        const store = new RunEventStore(project.stateDirectory);
+        const store = new RunEventStore(project.stateDirectory, {
+          redaction: this.redactor,
+        });
         const state = (await store.load(run.runId)).state;
         for (const delivery of Object.values(state.deliveries)) {
           if (

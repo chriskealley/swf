@@ -1,4 +1,12 @@
-import { mkdir, realpath, rm, rename, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  rename,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -53,6 +61,7 @@ async function setup(): Promise<{ service: SwfService; projectRoot: string }> {
   const service = new SwfService({
     serviceHome: home,
     endpoint: "http://127.0.0.1:45001",
+    projectTrust: async () => true,
   });
   await service.start();
   await service.registerProject({
@@ -160,6 +169,7 @@ async function setupDelivery(
     serviceHome: home,
     hostingAdapter: adapter,
     deliveryPollIntervalMs: 0,
+    projectTrust: async () => true,
   });
   await service.start();
   await service.registerProject({
@@ -232,6 +242,32 @@ describe("user-scoped SWF service", () => {
       ServiceAuthenticationError,
     );
     expect(() => service.authenticate(metadata.credential)).not.toThrow();
+    await service.shutdown();
+  });
+
+  it("rejects non-loopback binding and untrusted project registration", async () => {
+    expect(
+      () =>
+        new SwfService({
+          serviceHome: "/tmp/not-used",
+          endpoint: "http://0.0.0.0:45001",
+        }),
+    ).toThrow("loopback");
+    const home = await temporaryDirectory("swf-service-trust-");
+    const projectRoot = await temporaryDirectory("swf-untrusted-project-");
+    await mkdir(join(projectRoot, ".git"));
+    const service = new SwfService({ serviceHome: home });
+    await service.start();
+    await expect(
+      service.registerProject({
+        projectId,
+        displayName: "Untrusted",
+        root: projectRoot,
+      }),
+    ).rejects.toThrow("not trusted");
+    expect(await readFile(join(home, "audit.jsonl"), "utf8")).toContain(
+      '"outcome":"rejected"',
+    );
     await service.shutdown();
   });
 
@@ -386,6 +422,28 @@ describe("user-scoped SWF service", () => {
     await service.shutdown();
   });
 
+  it("enforces configured run budgets before starting work", async () => {
+    const { service, projectRoot } = await setup();
+    await createRun(projectRoot);
+    await writeFile(
+      join(projectRoot, ".swf", "config.yaml"),
+      `schemaVersion: 1\nprojectId: ${projectId}\ndefaultWorkflow: default\ngit:\n  remote: origin\n  targetBranch: main\npaths:\n  state: .swf-state\nbudgets:\n  run:\n    maxCostUsd: 0\n`,
+    );
+    await expect(
+      service.command({ type: "start", projectId, runId }),
+    ).rejects.toThrow("Budget prevents execution");
+    await expect(
+      service.query({ resource: "budgets", projectId, runId }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        scope: "run",
+        status: "exhausted",
+        allowed: false,
+      }),
+    ]);
+    await service.shutdown();
+  });
+
   it("aggregates dashboard state and securely inspects and prunes retained output", async () => {
     const { service, projectRoot } = await setup();
     await createRun(projectRoot);
@@ -475,7 +533,7 @@ describe("user-scoped SWF service", () => {
       }),
     ).resolves.toMatchObject({
       available: false,
-      reason: "Output was pruned or is unavailable",
+      reason: "Output was pruned by retention policy or is unavailable",
     });
     await service.shutdown();
   });
@@ -549,6 +607,7 @@ describe("user-scoped SWF service", () => {
       serviceHome: service.serviceHome,
       hostingAdapter: recoveredAdapter,
       deliveryPollIntervalMs: 10,
+      projectTrust: async () => true,
     });
     await recovered.start();
     recoveredAdapter.release({ state: "merged", mergeState: "MERGED" });
@@ -697,7 +756,10 @@ describe("user-scoped SWF service", () => {
 
   it("replays ordered events to reconnecting subscribers", async () => {
     const home = await temporaryDirectory("swf-service-");
-    const service = new SwfService({ serviceHome: home });
+    const service = new SwfService({
+      serviceHome: home,
+      projectTrust: async () => true,
+    });
     await service.start();
     const first = service.subscribe();
     const started = await first[Symbol.asyncIterator]().next();
@@ -748,7 +810,10 @@ describe("user-scoped SWF service", () => {
     ).toBe("paused");
 
     const forceHome = await temporaryDirectory("swf-service-force-");
-    const forceService = new SwfService({ serviceHome: forceHome });
+    const forceService = new SwfService({
+      serviceHome: forceHome,
+      projectTrust: async () => true,
+    });
     await forceService.start();
     await forceService.registerProject({
       projectId,
@@ -779,7 +844,10 @@ describe("user-scoped SWF service", () => {
     await service.command({ type: "start", projectId, runId });
     await service.shutdown({ force: true });
 
-    const recovered = new SwfService({ serviceHome: service.serviceHome });
+    const recovered = new SwfService({
+      serviceHome: service.serviceHome,
+      projectTrust: async () => true,
+    });
     await recovered.start();
     await recovered.command({ type: "resume", projectId, runId });
     await recovered.recover(async () => ({

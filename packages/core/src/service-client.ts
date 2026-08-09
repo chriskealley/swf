@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { assertLoopbackHttpEndpoint } from "./security.js";
 
 export interface LocalServiceMetadata {
   schemaVersion: 1;
@@ -40,6 +41,7 @@ export async function readLocalServiceMetadata(
       !metadata.credential
     )
       throw new Error("Invalid service metadata");
+    assertLoopbackHttpEndpoint(metadata.endpoint);
     return metadata;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
@@ -86,19 +88,42 @@ export class SwfServiceClient {
 
   async query<T>(
     resource: string,
-    input: { projectId?: string; runId?: string } = {},
+    input: { projectId?: string; runId?: string; phaseId?: string } = {},
   ): Promise<T> {
     const query = new URLSearchParams({ resource });
     if (input.projectId) query.set("projectId", input.projectId);
     if (input.runId) query.set("runId", input.runId);
+    if (input.phaseId) query.set("phaseId", input.phaseId);
     return this.request<T>(`/api/v1/query?${query}`);
   }
 
-  async command(command: Record<string, unknown>): Promise<void> {
-    await this.request<unknown>("/api/v1/commands", {
+  async command<T = unknown>(command: Record<string, unknown>): Promise<T> {
+    return this.request<T>("/api/v1/commands", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(command),
+    });
+  }
+
+  async previewPruning(
+    projectId: string,
+    criteria: { ageDays?: number; runId?: string; budgetBytes?: number },
+  ): Promise<unknown> {
+    return this.request<unknown>("/api/v1/pruning", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId, criteria }),
+    });
+  }
+
+  async confirmPruning(
+    projectId: string,
+    confirmationId: string,
+  ): Promise<unknown> {
+    return this.request<unknown>("/api/v1/pruning", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId, confirmationId }),
     });
   }
 

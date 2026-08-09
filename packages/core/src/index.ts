@@ -15,3 +15,6 @@ export * from "./checks.js";
 export * from "./checkpoints.js";
 export * from "./exploration.js";
 export * from "./setup.js";
+export * from "./security.js";
+export * from "./budgets.js";
+export * from "./operations.js";

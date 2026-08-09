@@ -15,6 +15,8 @@ const resources = new Set<ServiceQuery["resource"]>([
   "configuration",
   "delivery",
   "output",
+  "budgets",
+  "operations",
   "blocked-inputs",
 ]);
 
@@ -47,6 +49,7 @@ export default defineEventHandler(async (event) => {
       runId: typeof query.runId === "string" ? query.runId : undefined,
       ref: typeof query.ref === "string" ? query.ref : undefined,
       raw: query.raw === "true",
+      phaseId: typeof query.phaseId === "string" ? query.phaseId : undefined,
     });
     return { schemaVersion: 1, result };
   } catch (error) {

@@ -10,6 +10,7 @@ import {
 } from "./model.js";
 import type {
   AdapterDiagnostic,
+  BudgetDecision,
   DashboardOverview,
   OutputResult,
   PruningPreview,
@@ -26,6 +27,7 @@ const adapters = ref<AdapterDiagnostic[]>([]);
 const project = ref<ProjectSummary>();
 const runs = ref<Run[]>([]);
 const detail = ref<RunDetail>();
+const budgetDecisions = ref<BudgetDecision[]>([]);
 const output = ref<OutputResult>();
 const pruning = ref<PruningPreview>();
 const ageDays = ref<number>();
@@ -137,6 +139,7 @@ async function openProject(projectId: string, clearRun = true) {
   project.value = selected;
   if (clearRun) {
     detail.value = undefined;
+    budgetDecisions.value = [];
     output.value = undefined;
     pruning.value = undefined;
   }
@@ -154,12 +157,21 @@ async function openProject(projectId: string, clearRun = true) {
 async function openRun(runId: string, clearOutput = true) {
   if (!project.value) return;
   const loaded = await busy(() =>
-    api.value!.query<RunDetail>("run", {
-      projectId: project.value!.projectId,
-      runId,
-    }),
+    Promise.all([
+      api.value!.query<RunDetail>("run", {
+        projectId: project.value!.projectId,
+        runId,
+      }),
+      api.value!.query<BudgetDecision[]>("budgets", {
+        projectId: project.value!.projectId,
+        runId,
+      }),
+    ]),
   );
-  if (loaded) detail.value = loaded;
+  if (loaded) {
+    detail.value = loaded[0];
+    budgetDecisions.value = loaded[1];
+  }
   if (clearOutput) output.value = undefined;
 }
 
@@ -661,6 +673,21 @@ onUnmounted(() => {
             <span>Run spend</span
             ><strong>{{
               formatAggregateCosts(detail.costs).join(" · ")
+            }}</strong>
+          </div>
+          <div>
+            <span>Budget status</span
+            ><strong>{{
+              budgetDecisions.length
+                ? budgetDecisions.every((decision) => decision.allowed)
+                  ? "available"
+                  : budgetDecisions
+                      .filter((decision) => !decision.allowed)
+                      .map(
+                        (decision) => `${decision.scope}: ${decision.status}`,
+                      )
+                      .join(" · ")
+                : "not configured"
             }}</strong>
           </div>
         </div>

@@ -52,6 +52,31 @@ describe("runDoctor", () => {
     ).toMatchObject({ status: "warn" });
   });
 
+  it("fails a selected harness whose version changed below compatibility", async () => {
+    const checks = await runDoctor({
+      cwd: process.cwd(),
+      environment: { PATH: process.env.PATH },
+      selectedHarnesses: ["codex"],
+      execute: (command, args) => {
+        if (args[0] === "--version")
+          return success(
+            command === "codex" ? "codex 0.1.0" : `${command} 99.0.0`,
+          );
+        if (command === "git" && args[0] === "rev-parse")
+          return success("true\n");
+        if (command === "git" && args[0] === "remote")
+          return success("https://github.com/example/swf.git\n");
+        if (command === "gh") return success("Logged in\n");
+        if (command === "herdr")
+          return success("pi: installed\ncodex: installed\n");
+        return success("");
+      },
+    });
+    expect(checks.find((check) => check.id === "tool.codex")).toMatchObject({
+      status: "fail",
+    });
+  });
+
   it("reports unauthenticated GitHub and missing Herdr integration", async () => {
     const execute = (command: string, args: string[]): CommandResult => {
       if (args[0] === "--version") return success(`${command} 99.0.0`);

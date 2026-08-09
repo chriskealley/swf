@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { HandoffSchema, type DocumentValue } from "./schemas.js";
 import type { Artifact } from "./domain.js";
 import type { GitClient, GitStatus } from "./git.js";
+import { Redactor, type RedactionOptions } from "./security.js";
 
 export interface ArtifactManifest {
   schemaVersion: 1;
@@ -66,10 +67,16 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 }
 
 export class ArtifactStore {
+  readonly redactor: Redactor;
+
   constructor(
     readonly stateDirectory: string,
     readonly runId: string,
-  ) {}
+    redaction: RedactionOptions | Redactor = {},
+  ) {
+    this.redactor =
+      redaction instanceof Redactor ? redaction : new Redactor(redaction);
+  }
 
   private runDirectory(): string {
     return join(this.stateDirectory, "runs", this.runId);
@@ -108,22 +115,45 @@ export class ArtifactStore {
   async record(artifact: Artifact): Promise<Artifact> {
     if (artifact.runId !== this.runId)
       throw new Error("Artifact belongs to another run");
+    const retained = this.redactor.value(artifact);
     const manifest = await this.load();
     const index = manifest.artifacts.findIndex(
-      ({ artifactId }) => artifactId === artifact.artifactId,
+      ({ artifactId }) => artifactId === retained.artifactId,
     );
-    if (index >= 0) manifest.artifacts[index] = artifact;
-    else manifest.artifacts.push(artifact);
+    if (index >= 0) manifest.artifacts[index] = retained;
+    else manifest.artifacts.push(retained);
     manifest.updatedAt = new Date().toISOString();
-    await atomicJson(this.manifestPath(), manifest);
-    return artifact;
+    await atomicJson(this.manifestPath(), this.redactor.value(manifest));
+    return retained;
   }
 
   async retainRaw(name: string, output: string): Promise<string> {
     const reference = `raw/${name}`;
     await mkdir(dirname(this.rawPath(name)), { recursive: true, mode: 0o700 });
-    await writeFile(this.rawPath(name), output, { mode: 0o600 });
+    await writeFile(this.rawPath(name), this.redactor.text(output), {
+      mode: 0o600,
+    });
     return reference;
+  }
+
+  async markRawOutputPruned(
+    reference: string,
+    prunedAt = new Date().toISOString(),
+  ): Promise<Artifact[]> {
+    const manifest = await this.load();
+    const affected = manifest.artifacts.filter(
+      (artifact) => artifact.rawOutputRef === reference,
+    );
+    for (const artifact of affected) {
+      artifact.rawOutputAvailable = false;
+      artifact.rawOutputPrunedAt = prunedAt;
+      artifact.rawOutputUnavailableReason = "retention-policy";
+    }
+    if (affected.length) {
+      manifest.updatedAt = prunedAt;
+      await atomicJson(this.manifestPath(), manifest);
+    }
+    return affected;
   }
 
   async captureCommand(input: {
@@ -156,7 +186,10 @@ export class ArtifactStore {
       rawOutputRef,
     };
     const outputRef = `artifacts/${artifactId}.json`;
-    await atomicJson(join(this.runDirectory(), outputRef), result);
+    await atomicJson(
+      join(this.runDirectory(), outputRef),
+      this.redactor.value(result),
+    );
     const artifact: Artifact = {
       schemaVersion: 1,
       artifactId,
@@ -199,7 +232,10 @@ export class ArtifactStore {
       clean: status.clean,
     };
     const outputRef = `artifacts/${artifactId}.json`;
-    await atomicJson(join(this.runDirectory(), outputRef), evidence);
+    await atomicJson(
+      join(this.runDirectory(), outputRef),
+      this.redactor.value(evidence),
+    );
     const artifact: Artifact = {
       schemaVersion: 1,
       artifactId,
@@ -241,10 +277,13 @@ export class ArtifactStore {
       rawOutputRef,
     };
     const outputRef = `artifacts/${artifactId}.json`;
-    await atomicJson(join(this.runDirectory(), outputRef), {
-      command: input.command,
-      ...evidence,
-    });
+    await atomicJson(
+      join(this.runDirectory(), outputRef),
+      this.redactor.value({
+        command: input.command,
+        ...evidence,
+      }),
+    );
     const artifact: Artifact = {
       schemaVersion: 1,
       artifactId,
@@ -269,7 +308,10 @@ export class ArtifactStore {
     if (handoff.runId !== this.runId)
       throw new Error("Handoff belongs to another run");
     const reference = `artifacts/handoffs/${handoff.handoffId}.json`;
-    await atomicJson(join(this.runDirectory(), reference), handoff);
+    await atomicJson(
+      join(this.runDirectory(), reference),
+      this.redactor.value(handoff),
+    );
     return reference;
   }
 
