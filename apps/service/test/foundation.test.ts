@@ -25,4 +25,13 @@ describe("Nitro service foundation", () => {
     expect(middleware).toContain('"localhost", "127.0.0.1", "::1"');
     expect(middleware).toContain("Dashboard origin must be local");
   });
+
+  it("terminates the hosting process after authenticated service shutdown", () => {
+    const route = readFileSync(
+      new URL("../src/server/api/v1/service.post.ts", import.meta.url),
+      "utf8",
+    );
+    expect(route).toContain("service.shutdown");
+    expect(route).toContain("process.exit(0)");
+  });
 });

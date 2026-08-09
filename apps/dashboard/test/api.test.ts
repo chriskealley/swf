@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DashboardApi,
   DashboardApiError,
@@ -7,6 +7,24 @@ import {
 } from "../src/api.js";
 
 describe("dashboard API security and compatibility", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("invokes the browser fetch function with its Window receiver", async () => {
+    vi.stubGlobal("fetch", function (this: unknown) {
+      if (this !== globalThis)
+        throw new TypeError(
+          "Can only call Window.fetch on instances of Window",
+        );
+      return Promise.resolve(
+        new Response(JSON.stringify({ schemaVersion: 1, result: [] }), {
+          status: 200,
+        }),
+      );
+    } as typeof fetch);
+    const api = new DashboardApi("http://127.0.0.1:34671", "secret");
+    await expect(api.query("projects")).resolves.toEqual([]);
+  });
+
   it("only sends bearer credentials to loopback HTTP services", async () => {
     expect(() => new DashboardApi("https://example.com", "secret")).toThrow(
       DashboardApiError,
@@ -28,6 +46,19 @@ describe("dashboard API security and compatibility", () => {
     await api.query("projects");
     expect(new Headers(requests[0]?.headers).get("authorization")).toBe(
       "Bearer secret",
+    );
+  });
+
+  it("reports an actionable error when the published service endpoint cannot be reached", async () => {
+    const api = new DashboardApi(
+      "http://127.0.0.1:34671",
+      "secret",
+      async () => {
+        throw new TypeError("Load failed");
+      },
+    );
+    await expect(api.query("overview")).rejects.toThrow(
+      "Cannot reach the SWF service at http://127.0.0.1:34671",
     );
   });
 

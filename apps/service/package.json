@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "nitro build",
-    "dev": "nitro dev"
+    "dev": "nitro dev --host=127.0.0.1 --port=34671"
   },
   "dependencies": {
     "@swf/core": "workspace:*",

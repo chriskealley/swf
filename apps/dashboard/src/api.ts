@@ -47,23 +47,33 @@ export function parseEventBlock(block: string): ServiceEvent | undefined {
 export class DashboardApi {
   readonly endpoint: string;
 
+  private readonly fetcher: typeof fetch;
+
   constructor(
     endpoint: string,
     private readonly credential: string,
-    private readonly fetcher: typeof fetch = fetch,
+    fetcher?: typeof fetch,
   ) {
     if (!credential.trim())
       throw new DashboardApiError("A service credential is required");
     this.endpoint = localServiceEndpoint(endpoint);
+    this.fetcher = fetcher ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${this.credential}`);
-    const response = await this.fetcher(`${this.endpoint}${path}`, {
-      ...init,
-      headers,
-    });
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.endpoint}${path}`, {
+        ...init,
+        headers,
+      });
+    } catch (error) {
+      throw new DashboardApiError(
+        `Cannot reach the SWF service at ${this.endpoint}. Restart it and verify its published endpoint. ${error instanceof Error ? error.message : "Network request failed"}`,
+      );
+    }
     const body = (await response.json().catch(() => ({}))) as {
       schemaVersion?: unknown;
       result?: T;

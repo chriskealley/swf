@@ -19,6 +19,8 @@ export default defineEventHandler(async (event) => {
       statusMessage: "Unsupported service action",
     });
   // Respond first; the Nitro process may otherwise close before serializing this response.
-  setTimeout(() => void service.shutdown({ force: body.force }), 0);
+  setTimeout(() => {
+    void service.shutdown({ force: body.force }).then(() => process.exit(0));
+  }, 0);
   return { schemaVersion: 1, status: "accepted" };
 });
