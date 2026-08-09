@@ -124,6 +124,7 @@ export interface CreateRunInput {
   /** A stable OpenSpec identity, such as its resolved change directory. */
   changeIdentity: string;
   workflowId: string;
+  policyId?: string;
   description: string;
   phaseIds: string[];
   runId?: string;
@@ -235,6 +236,7 @@ export class RunEventStore {
           changeName: input.changeName,
           changeIdentity: input.changeIdentity,
           workflowId: input.workflowId,
+          policyId: input.policyId,
           phaseIds: input.phaseIds,
           description: input.description,
           status: "pending",

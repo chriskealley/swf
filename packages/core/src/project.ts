@@ -509,6 +509,14 @@ async function parseYamlFile(path: string): Promise<unknown> {
   return parseYaml(await readFile(path, "utf8"));
 }
 
+export async function readProjectConfig(
+  project: ProjectLocation,
+): Promise<DocumentValue<"projectConfig">> {
+  return ProjectConfigSchema.parse(
+    await parseYamlFile(join(project.configDirectory, "config.yaml")),
+  );
+}
+
 export async function loadProjectDeliverySettings(
   project: ProjectLocation,
   workflowId: string,
@@ -518,9 +526,7 @@ export async function loadProjectDeliverySettings(
   workflow: DocumentValue<"workflow">;
   policy: DocumentValue<"policy">;
 }> {
-  const config = ProjectConfigSchema.parse(
-    await parseYamlFile(join(project.configDirectory, "config.yaml")),
-  );
+  const config = await readProjectConfig(project);
   const workflow = WorkflowSchema.parse(
     await parseYamlFile(
       join(project.configDirectory, "workflows", `${workflowId}.yaml`),
@@ -532,6 +538,45 @@ export async function loadProjectDeliverySettings(
     ),
   );
   return { config, workflow, policy };
+}
+
+export async function loadProjectExecutionSettings(
+  project: ProjectLocation,
+  workflowId: string,
+  policyId = "manual",
+): Promise<{
+  config: DocumentValue<"projectConfig">;
+  workflow: DocumentValue<"workflow">;
+  policy: DocumentValue<"policy">;
+  profiles: Record<string, DocumentValue<"profile">>;
+  guidelines: Record<string, string>;
+}> {
+  const settings = await loadProjectDeliverySettings(
+    project,
+    workflowId,
+    policyId,
+  );
+  const profiles: Record<string, DocumentValue<"profile">> = {};
+  for (const entry of await readdir(
+    join(project.configDirectory, "profiles"),
+  )) {
+    if (!entry.endsWith(".yaml")) continue;
+    const profile = ProfileSchema.parse(
+      await parseYamlFile(join(project.configDirectory, "profiles", entry)),
+    );
+    profiles[profile.id] = profile;
+  }
+  const guidelines: Record<string, string> = {};
+  for (const entry of await readdir(
+    join(project.configDirectory, "guidelines"),
+  )) {
+    if (!entry.endsWith(".md")) continue;
+    guidelines[entry.slice(0, -3)] = await readFile(
+      join(project.configDirectory, "guidelines", entry),
+      "utf8",
+    );
+  }
+  return { ...settings, profiles, guidelines };
 }
 
 export async function validateProjectConfiguration(

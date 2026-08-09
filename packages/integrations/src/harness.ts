@@ -172,11 +172,12 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
       cwd: request.cwd,
       label: `${this.id}-${request.phaseId}-${request.workUnitId}`,
       command: this.launchCommand(request),
+      environment: request.environment,
       timeoutMs: request.timeoutMs,
     });
     const transcript = await this.herdr.transcript(observation.paneId!, 400);
     const invocation: AdapterInvocation = {
-      invocationId: randomUUID(),
+      invocationId: request.invocationId ?? randomUUID(),
       runId: request.runId,
       phaseId: request.phaseId,
       workUnitId: request.workUnitId,

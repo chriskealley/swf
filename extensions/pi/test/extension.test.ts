@@ -19,6 +19,7 @@ describe("SWF Pi extension", () => {
       "swf-status",
       "swf-approve",
       "swf-reject",
+      "swf-request-changes",
       "swf-input",
       "swf-pause",
       "swf-resume",

@@ -88,20 +88,50 @@ export class SwfServiceClient {
 
   async query<T>(
     resource: string,
-    input: { projectId?: string; runId?: string; phaseId?: string } = {},
+    input: {
+      projectId?: string;
+      runId?: string;
+      phaseId?: string;
+      ref?: string;
+    } = {},
   ): Promise<T> {
     const query = new URLSearchParams({ resource });
     if (input.projectId) query.set("projectId", input.projectId);
     if (input.runId) query.set("runId", input.runId);
     if (input.phaseId) query.set("phaseId", input.phaseId);
+    if (input.ref) query.set("ref", input.ref);
     return this.request<T>(`/api/v1/query?${query}`);
   }
 
+  async registerProject(input: {
+    projectId: string;
+    displayName: string;
+    root: string;
+  }): Promise<unknown> {
+    return this.request<unknown>("/api/v1/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  }
+
   async command<T = unknown>(command: Record<string, unknown>): Promise<T> {
+    const childMode = process.env.SWF_CHILD_MODE === "1";
     return this.request<T>("/api/v1/commands", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(command),
+      body: JSON.stringify({
+        ...command,
+        childContext: childMode
+          ? {
+              childMode: true,
+              allowNested: process.env.SWF_ALLOW_NESTED_ORCHESTRATION === "1",
+              runId: process.env.SWF_RUN_ID,
+              phaseId: process.env.SWF_PHASE_ID,
+              invocationId: process.env.SWF_INVOCATION_ID,
+            }
+          : undefined,
+      }),
     });
   }
 

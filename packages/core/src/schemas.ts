@@ -85,7 +85,14 @@ export const PhaseSchema = z.object({
   requiredCapabilities: z.array(z.string().min(1)).default([]),
   work: z.array(WorkUnitSchema).default([]),
   checks: z.array(CheckSchema).default([]),
-  gate: z.object({ mode: GateModeSchema }).default({ mode: "manual" }),
+  gate: z
+    .object({
+      mode: GateModeSchema,
+      evaluation: z.enum(["all", "any", "threshold"]).optional(),
+      requiredChecks: z.array(Identifier).optional(),
+      threshold: z.number().int().positive().optional(),
+    })
+    .default({ mode: "manual", evaluation: "all" }),
 });
 
 export const WorkflowSchema = z.object({

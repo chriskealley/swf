@@ -241,6 +241,7 @@ export default function (pi: ExtensionAPI) {
           "cancel",
           "approve",
           "reject",
+          "request-changes",
           "remediate",
           "rollback",
           "blocked-input",
@@ -265,6 +266,7 @@ export default function (pi: ExtensionAPI) {
         dryRun: { type: "boolean" },
         target: { type: "number" },
         rollbackBackupId: { type: "string" },
+        authorized: { type: "boolean" },
       },
       ["action"],
     ) as never,
@@ -309,6 +311,7 @@ export default function (pi: ExtensionAPI) {
         dryRun?: boolean;
         target?: number;
         rollbackBackupId?: string;
+        authorized?: boolean;
       },
       _signal,
       _update,
@@ -331,6 +334,7 @@ export default function (pi: ExtensionAPI) {
           dryRun: params.dryRun,
           target: params.target,
           rollbackBackupId: params.rollbackBackupId,
+          authorized: params.authorized,
         }),
       );
       await refresh(ctx);
@@ -391,6 +395,35 @@ export default function (pi: ExtensionAPI) {
       await withClient((service) =>
         service.command({
           type: "reject",
+          projectId,
+          runId,
+          phaseId,
+          gateId,
+          actorId: "pi-operator",
+          reason,
+        }),
+      );
+      await refresh(ctx);
+    },
+  });
+  pi.registerCommand("swf-request-changes", {
+    description: "Request changes for a gate through the SWF service",
+    handler: async (args, ctx) => {
+      const [projectId, runId, phaseId, gateId] = args.split(/\s+/);
+      if (!projectId || !runId || !phaseId || !gateId) {
+        ctx.ui.notify(
+          "Usage: /swf-request-changes <project> <run> <phase> <gate>",
+          "warning",
+        );
+        return;
+      }
+      const reason = ctx.hasUI
+        ? await ctx.ui.input("Requested changes", "Explain required changes")
+        : undefined;
+      if (!reason) return;
+      await withClient((service) =>
+        service.command({
+          type: "request-changes",
           projectId,
           runId,
           phaseId,
@@ -465,6 +498,7 @@ export default function (pi: ExtensionAPI) {
           runId,
           phaseId,
           checkpointId,
+          authorized: true,
         }),
       );
       await refresh(ctx);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { basename } from "node:path";
 import { defineCommand, runMain } from "citty";
 import consola from "consola";
 import { detectPackageManager } from "nypm";
@@ -8,8 +9,10 @@ import {
   SwfServiceClient,
   applySetupPlan,
   createSetupPlan,
+  findProjectRoot,
   initializeProject,
   readLocalServiceMetadata,
+  readProjectConfig,
   runDoctor,
   type CheckStatus,
   type SetupAction,
@@ -44,6 +47,38 @@ function fail(error: unknown, json = false): void {
 }
 async function client(): Promise<SwfServiceClient> {
   return SwfServiceClient.connect();
+}
+async function connectedProject(cwd = process.cwd()): Promise<{
+  active: SwfServiceClient;
+  projectId: string;
+  root: string;
+}> {
+  const project = await findProjectRoot(cwd);
+  if (!project?.initialized)
+    throw new Error(
+      "No initialized SWF project was found from the current directory",
+    );
+  const config = await readProjectConfig(project);
+  const active = await client();
+  await active.registerProject({
+    projectId: config.projectId,
+    displayName: basename(project.root),
+    root: project.root,
+  });
+  return { active, projectId: config.projectId, root: project.root };
+}
+async function boundRunId(
+  active: SwfServiceClient,
+  projectId: string,
+  changeName: string,
+): Promise<string> {
+  const runs = await active.query<Array<{ runId: string; changeName: string }>>(
+    "runs",
+    { projectId },
+  );
+  const run = runs.find((candidate) => candidate.changeName === changeName);
+  if (!run) throw new Error(`No run is bound to ${changeName}`);
+  return run.runId;
 }
 function publicServiceMetadata<T extends { credential?: string }>(metadata: T) {
   const { credential: _credential, ...safe } = metadata;
@@ -137,7 +172,23 @@ const init = defineCommand({
       cwd: args.cwd,
       trust: args.trust,
     });
-    output(result, args.json);
+    let registration: unknown;
+    if (result.status !== "untrusted") {
+      try {
+        const config = await readProjectConfig(result.project);
+        registration = await (
+          await client()
+        ).registerProject({
+          projectId: config.projectId,
+          displayName: basename(result.project.root),
+          root: result.project.root,
+        });
+      } catch (error) {
+        if (!(error instanceof ServiceUnavailableError)) throw error;
+        registration = { status: "service-unavailable", deferred: true };
+      }
+    }
+    output({ ...result, registration }, args.json);
     if (result.status === "untrusted") process.exitCode = 1;
   },
 });
@@ -305,6 +356,7 @@ function lifecycleCommand(
       checkpoint: { type: "string" },
       reason: { type: "string" },
       actor: { type: "string" },
+      authorized: { type: "boolean" },
       json: { type: "boolean" },
     },
     async run({ args }) {
@@ -316,6 +368,7 @@ function lifecycleCommand(
         checkpoint?: string;
         reason?: string;
         actor?: string;
+        authorized?: boolean;
         json?: boolean;
       };
       try {
@@ -330,6 +383,7 @@ function lifecycleCommand(
           checkpointId: input.checkpoint,
           reason: input.reason,
           actorId: input.actor ?? "operator",
+          authorized: input.authorized,
           ...extras,
         });
         output({ accepted: true, type }, input.json);
@@ -353,6 +407,7 @@ const resume = lifecycleCommand("resume", "resume");
 const cancel = lifecycleCommand("cancel", "cancel");
 const approve = lifecycleCommand("approve", "approve");
 const reject = lifecycleCommand("reject", "reject");
+const requestChanges = lifecycleCommand("request-changes", "request-changes");
 const rollback = lifecycleCommand("rollback", "rollback");
 const blockedInput = defineCommand({
   meta: {
@@ -380,26 +435,185 @@ const blockedInput = defineCommand({
   },
 });
 
-// These thin commands deliberately delegate lifecycle decisions to the service.
-const newRun = lifecycleCommand("new", "start");
-const automaticRun = lifecycleCommand("run", "start");
-const next = lifecycleCommand("next", "start");
+function workflowEntryCommand(type: "new" | "run" | "next") {
+  return defineCommand({
+    meta: {
+      name: type,
+      description:
+        type === "new"
+          ? "Create a change/run, execute its first phase, and stop"
+          : type === "run"
+            ? "Create or resume a change/run with automatic progression"
+            : "Execute exactly the next eligible phase and stop",
+    },
+    args: {
+      change: { type: "positional", required: true },
+      description: { type: "string" },
+      workflow: { type: "string" },
+      policy: { type: "string" },
+      "authorize-autonomous": { type: "boolean" },
+      actor: { type: "string" },
+      "from-exploration": { type: "string" },
+      cwd: { type: "string" },
+      json: { type: "boolean" },
+    },
+    async run({ args }) {
+      try {
+        const { active, projectId } = await connectedProject(args.cwd);
+        const result = await active.command({
+          type,
+          projectId,
+          changeName: args.change,
+          description: args.description,
+          workflowId: args.workflow,
+          policyId: args.policy,
+          fromExplorationId: args["from-exploration"],
+          authorization: args["authorize-autonomous"]
+            ? {
+                authorizationId: crypto.randomUUID(),
+                delegatedBy: { type: "user", id: args.actor ?? "operator" },
+                scope: "project",
+                scopeId: projectId,
+                acknowledgedAt: new Date().toISOString(),
+                configurationSource: "cli:--authorize-autonomous",
+              }
+            : undefined,
+        });
+        output(result, args.json);
+      } catch (error) {
+        fail(error, args.json);
+      }
+    },
+  });
+}
+
+const newRun = workflowEntryCommand("new");
+const automaticRun = workflowEntryCommand("run");
+const next = workflowEntryCommand("next");
+const runNamedPhase = defineCommand({
+  meta: {
+    name: "run",
+    description: "Execute exactly one named eligible phase",
+  },
+  args: {
+    change: { type: "positional", required: true },
+    phase: { type: "positional", required: true },
+    cwd: { type: "string" },
+    json: { type: "boolean" },
+  },
+  async run({ args }) {
+    try {
+      const { active, projectId } = await connectedProject(args.cwd);
+      output(
+        await active.command({
+          type: "phase-run",
+          projectId,
+          changeName: args.change,
+          phaseId: args.phase,
+        }),
+        args.json,
+      );
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+function phaseQueryCommand(name: "list" | "status" | "explain") {
+  return defineCommand({
+    meta: { name, description: `${name} workflow phase state` },
+    args: {
+      change: { type: "positional", required: true },
+      phase: { type: "positional", required: name !== "list" },
+      cwd: { type: "string" },
+      json: { type: "boolean" },
+    },
+    async run({ args }) {
+      try {
+        const { active, projectId } = await connectedProject(args.cwd);
+        const runId = await boundRunId(active, projectId, args.change);
+        output(
+          await active.query("phases", {
+            projectId,
+            runId,
+            phaseId: args.phase,
+          }),
+          args.json,
+        );
+      } catch (error) {
+        fail(error, args.json);
+      }
+    },
+  });
+}
+function phaseMutationCommand(type: "phase-rerun" | "phase-skip") {
+  return defineCommand({
+    meta: { name: type.slice("phase-".length), description: `${type} a phase` },
+    args: {
+      change: { type: "positional", required: true },
+      phase: { type: "positional", required: true },
+      authorized: { type: "boolean" },
+      cwd: { type: "string" },
+      json: { type: "boolean" },
+    },
+    async run({ args }) {
+      try {
+        const { active, projectId } = await connectedProject(args.cwd);
+        output(
+          await active.command({
+            type,
+            projectId,
+            changeName: args.change,
+            phaseId: args.phase,
+            authorized: Boolean(args.authorized),
+          }),
+          args.json,
+        );
+      } catch (error) {
+        fail(error, args.json);
+      }
+    },
+  });
+}
 const phase = defineCommand({
   meta: { name: "phase", description: "Inspect or control a named phase" },
   subCommands: {
-    list: queryCommand("list", "phases"),
-    status: queryCommand("status", "phases"),
-    explain: queryCommand("explain", "phases"),
-    run: lifecycleCommand("run", "start"),
-    rerun: lifecycleCommand("rerun", "remediate"),
-    skip: lifecycleCommand("skip", "cancel"),
+    list: phaseQueryCommand("list"),
+    status: phaseQueryCommand("status"),
+    explain: phaseQueryCommand("explain"),
+    run: runNamedPhase,
+    rerun: phaseMutationCommand("phase-rerun"),
+    skip: phaseMutationCommand("phase-skip"),
   },
 });
 const check = defineCommand({
   meta: { name: "check", description: "List or refresh declared checks" },
   subCommands: {
-    list: queryCommand("list", "phases"),
-    run: lifecycleCommand("run", "remediate"),
+    list: phaseQueryCommand("list"),
+    run: defineCommand({
+      meta: { name: "run", description: "Refresh one declared check" },
+      args: {
+        change: { type: "positional", required: true },
+        check: { type: "positional", required: true },
+        cwd: { type: "string" },
+        json: { type: "boolean" },
+      },
+      async run({ args }) {
+        try {
+          const { active, projectId } = await connectedProject(args.cwd);
+          output(
+            await active.command({
+              type: "check-run",
+              projectId,
+              changeName: args.change,
+              checkId: args.check,
+            }),
+            args.json,
+          );
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
   },
 });
 const prune = defineCommand({
@@ -555,18 +769,84 @@ const delivery = defineCommand({
     refresh: lifecycleCommand("refresh", "refresh-delivery"),
   },
 });
+function explorationIdentityCommand(
+  name: "show" | "resume" | "discard" | "promote",
+) {
+  return defineCommand({
+    meta: { name, description: `${name} an explicit durable exploration` },
+    args: {
+      exploration: { type: "positional", required: true },
+      cwd: { type: "string" },
+      json: { type: "boolean" },
+    },
+    async run({ args }) {
+      try {
+        const { active, projectId } = await connectedProject(args.cwd);
+        const result =
+          name === "show"
+            ? await active.query("exploration", {
+                projectId,
+                ref: args.exploration,
+              })
+            : await active.command({
+                type: `explore-${name}`,
+                projectId,
+                explorationId: args.exploration,
+              });
+        output(result, args.json);
+      } catch (error) {
+        fail(error, args.json);
+      }
+    },
+  });
+}
 const explore = defineCommand({
   meta: {
     name: "explore",
-    description: "Exploration operations are service-backed",
+    description: "Create and manage durable read-only explorations",
   },
   subCommands: {
-    list: queryCommand("list", "projects", false),
-    show: queryCommand("show", "projects", false),
-    start: lifecycleCommand("start", "start"),
-    resume: lifecycleCommand("resume", "resume"),
-    discard: lifecycleCommand("discard", "cancel"),
-    promote: lifecycleCommand("promote", "start"),
+    start: defineCommand({
+      meta: { name: "start", description: "Start a read-only exploration" },
+      args: {
+        idea: { type: "positional", required: true },
+        candidate: { type: "string" },
+        cwd: { type: "string" },
+        json: { type: "boolean" },
+      },
+      async run({ args }) {
+        try {
+          const { active, projectId } = await connectedProject(args.cwd);
+          output(
+            await active.command({
+              type: "explore-start",
+              projectId,
+              idea: args.idea,
+              candidateChangeName: args.candidate,
+            }),
+            args.json,
+          );
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
+    list: defineCommand({
+      meta: { name: "list", description: "List durable explorations" },
+      args: { cwd: { type: "string" }, json: { type: "boolean" } },
+      async run({ args }) {
+        try {
+          const { active, projectId } = await connectedProject(args.cwd);
+          output(await active.query("explorations", { projectId }), args.json);
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
+    show: explorationIdentityCommand("show"),
+    resume: explorationIdentityCommand("resume"),
+    discard: explorationIdentityCommand("discard"),
+    promote: explorationIdentityCommand("promote"),
   },
 });
 
@@ -598,6 +878,7 @@ const main = defineCommand({
     cancel,
     approve,
     reject,
+    "request-changes": requestChanges,
     rollback,
     input: blockedInput,
     explore,

@@ -10,8 +10,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  HerdrClient,
+  NodeCommandRunner,
   RunEventStore,
+  produceDefaultPlanningArtifacts,
   type AdapterInvocation,
+  type AdapterLaunchRequest,
   type AdapterObservation,
   type AdapterResult,
   type AdapterValidation,
@@ -19,6 +23,9 @@ import {
   type HostingAdapter,
   type HostingPreflightInput,
   type HostingPreflightResult,
+  type CommandOptions,
+  type CommandRunner,
+  type ProcessResult,
   type PullRequestObservation,
 } from "@swf/core";
 import { afterEach, describe, expect, it } from "vitest";
@@ -83,6 +90,85 @@ async function createRun(projectRoot: string): Promise<void> {
     description: "Add token authentication",
     phaseIds: ["planning"],
   });
+}
+
+class SimulatedHerdrRunner implements CommandRunner {
+  async run(
+    command: string,
+    args: string[],
+    _options?: CommandOptions,
+  ): Promise<ProcessResult> {
+    if (command !== "herdr")
+      return { code: 1, stdout: "", stderr: "unexpected" };
+    if (args[0] === "workspace" && args[1] === "create")
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          workspace: { workspace_id: "service-workspace" },
+        }),
+        stderr: "",
+      };
+    if (args[0] === "worktree" && args[1] === "open")
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          worktree: { worktree_id: "service-worktree" },
+        }),
+        stderr: "",
+      };
+    return { code: 0, stdout: "{}", stderr: "" };
+  }
+}
+
+class FakePlanningAdapter implements HarnessAdapter {
+  readonly id = "pi";
+  readonly capabilities = {
+    structuredEvents: true,
+    modelSelection: true,
+    toolSelection: true,
+    cancellation: true,
+    blockedInput: true,
+    resume: false,
+    usage: true,
+  };
+  async availability(): Promise<AdapterValidation> {
+    return { valid: true, errors: [] };
+  }
+  async validate(): Promise<AdapterValidation> {
+    return { valid: true, errors: [] };
+  }
+  async launch(request: AdapterLaunchRequest): Promise<AdapterInvocation> {
+    const match = request.prompt.match(/OpenSpec change ([a-z][a-z0-9-]*)/);
+    const changeName = match?.[1];
+    if (!changeName)
+      throw new Error("Planning prompt did not identify the change");
+    await produceDefaultPlanningArtifacts({
+      changeRoot: join(request.cwd, "openspec", "changes", changeName),
+      changeName,
+      planning: { kind: "description", description: "Service-backed planning" },
+    });
+    return {
+      invocationId: crypto.randomUUID(),
+      runId: request.runId,
+      phaseId: request.phaseId,
+      workUnitId: request.workUnitId,
+      paneId: "service-pane",
+      status: "completed",
+      startedAt: new Date().toISOString(),
+    };
+  }
+  async submit(): Promise<void> {}
+  async observe(): Promise<AdapterObservation> {
+    return { status: "completed", structuredEvents: [] };
+  }
+  async cancel(): Promise<void> {}
+  async collect(): Promise<AdapterResult> {
+    return {
+      status: "completed",
+      transcript: "simulated planning complete",
+      usage: { quality: "unknown" },
+    };
+  }
 }
 
 class FakeHostingAdapter implements HostingAdapter {
@@ -220,6 +306,184 @@ afterEach(async () => {
 });
 
 describe("user-scoped SWF service", () => {
+  it("creates a durable run and executes Planning through the service-owned scheduler", async () => {
+    const home = await temporaryDirectory("swf-service-entry-");
+    const projectRoot = await temporaryDirectory("swf-service-entry-project-");
+    const runner = new NodeCommandRunner();
+    const git = async (args: string[]) => {
+      const result = await runner.run("git", args, { cwd: projectRoot });
+      if (result.code !== 0) throw new Error(result.stderr);
+    };
+    await git(["init", "-b", "main"]);
+    await git(["config", "user.email", "service@example.test"]);
+    await git(["config", "user.name", "SWF service test"]);
+    await mkdir(join(projectRoot, ".swf", "workflows"), { recursive: true });
+    await mkdir(join(projectRoot, ".swf", "policies"), { recursive: true });
+    await mkdir(join(projectRoot, ".swf", "profiles"), { recursive: true });
+    await mkdir(join(projectRoot, ".swf", "guidelines"), { recursive: true });
+    await mkdir(join(projectRoot, "openspec"), { recursive: true });
+    await writeFile(
+      join(projectRoot, ".swf", "config.yaml"),
+      `schemaVersion: 1\nprojectId: ${projectId}\ndefaultWorkflow: default\ngit:\n  remote: origin\n  targetBranch: main\npaths:\n  state: .swf-state\n`,
+    );
+    await writeFile(
+      join(projectRoot, ".swf", "workflows", "default.yaml"),
+      `schemaVersion: 1\nid: default\ndescription: Service entry test\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: [structured-events]\n    work:\n      - id: planning-agent\n        type: agent\n        profile: planner\n        options: {}\n      - id: planning-command\n        type: command\n        command: test -f openspec/changes/service-entry/proposal.md\n        options: {}\n    checks:\n      - id: planning-files\n        type: command\n        required: true\n        command: test -f openspec/changes/service-entry/tasks.md\n        options: {}\n    gate:\n      mode: automatic\ndelivery:\n  mode: local-branch\n  mergeMethod: merge\n`,
+    );
+    await writeFile(
+      join(projectRoot, ".swf", "policies", "manual.yaml"),
+      `schemaVersion: 1\nid: manual\napprovalMode: manual\nmaxAttempts: 1\nriskOverrides: []\n`,
+    );
+    await writeFile(
+      join(projectRoot, ".swf", "profiles", "planner.yaml"),
+      `schemaVersion: 1\nid: planner\ndescription: Planning test profile\nharness: pi\nguidelines: []\ncapabilities: [structured-events]\noptions: {}\n`,
+    );
+    await writeFile(
+      join(projectRoot, "openspec", "config.yaml"),
+      "schema: spec-driven\n",
+    );
+    await writeFile(join(projectRoot, ".gitignore"), "/.swf-state/\n");
+    await writeFile(join(projectRoot, "README.md"), "service entry test\n");
+    await git(["add", "."]);
+    await git(["commit", "-m", "initial project"]);
+
+    const service = new SwfService({
+      serviceHome: home,
+      endpoint: "http://127.0.0.1:45002",
+      projectTrust: async () => true,
+      harnessAdapters: [new FakePlanningAdapter()],
+      herdrClient: new HerdrClient(new SimulatedHerdrRunner()),
+      commandRunner: runner,
+      hostingAdapter: new FakeHostingAdapter(),
+    });
+    await service.start();
+    await service.registerProject({
+      projectId,
+      displayName: "Service entry project",
+      root: projectRoot,
+    });
+    const created = (await service.command({
+      type: "new",
+      projectId,
+      changeName: "service-entry",
+      description: "Create a service-backed Planning change",
+    })) as { runId: string; status: string };
+    expect(created.status).toBe("paused");
+
+    const loaded = (await service.query({
+      resource: "run",
+      projectId,
+      runId: created.runId,
+    })) as {
+      state: {
+        run: { status: string };
+        phases: { planning: { status: string } };
+        checkpoints: Record<
+          string,
+          { checkpointId: string; afterCommit: string }
+        >;
+      };
+      runtime: { branch: string; worktreePath: string };
+    };
+    expect(loaded.state.run.status).toBe("paused");
+    expect(loaded.state.phases.planning.status).toBe("completed");
+    expect(Object.keys(loaded.state.checkpoints)).toHaveLength(1);
+    expect(loaded.runtime.branch).toBe(`swf/${created.runId}`);
+    await expect(
+      stat(
+        join(
+          loaded.runtime.worktreePath,
+          "openspec",
+          "changes",
+          "service-entry",
+          "proposal.md",
+        ),
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      service.command({
+        type: "new",
+        projectId,
+        changeName: "service-entry",
+        description: "duplicate",
+      }),
+    ).rejects.toThrow(/already bound/);
+
+    const checkpoint = Object.values(loaded.state.checkpoints)[0]!;
+    await writeFile(join(loaded.runtime.worktreePath, "later.txt"), "later\n");
+    const worktreeGit = async (args: string[]) => {
+      const result = await runner.run("git", args, {
+        cwd: loaded.runtime.worktreePath,
+      });
+      if (result.code !== 0) throw new Error(result.stderr);
+      return result.stdout.trim();
+    };
+    await worktreeGit(["add", "."]);
+    await worktreeGit(["commit", "-m", "later work"]);
+    expect(await worktreeGit(["rev-parse", "HEAD"])).not.toBe(
+      checkpoint.afterCommit,
+    );
+    const artifactIds = (
+      (await service.query({
+        resource: "artifacts",
+        projectId,
+        runId: created.runId,
+      })) as Array<{ artifactId: string }>
+    ).map(({ artifactId }) => artifactId);
+    await service.command({
+      type: "rollback",
+      projectId,
+      runId: created.runId,
+      phaseId: "planning",
+      checkpointId: checkpoint.checkpointId,
+      invalidatedPhaseIds: [],
+      invalidatedArtifactIds: artifactIds,
+      authorized: true,
+    });
+    expect(await worktreeGit(["rev-parse", "HEAD"])).toBe(
+      checkpoint.afterCommit,
+    );
+    await expect(
+      stat(join(loaded.runtime.worktreePath, "later.txt")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      service.command({
+        type: "phase-run",
+        projectId,
+        changeName: "service-entry",
+        phaseId: "planning",
+      }),
+    ).rejects.toThrow(/already completed.*explicit rerun/);
+    await expect(
+      service.command({
+        type: "phase-rerun",
+        projectId,
+        changeName: "service-entry",
+        phaseId: "planning",
+      }),
+    ).resolves.toMatchObject({ requiresAuthorization: true });
+    await expect(
+      service.command({
+        type: "phase-rerun",
+        projectId,
+        changeName: "service-entry",
+        phaseId: "planning",
+        authorized: true,
+      }),
+    ).resolves.toMatchObject({ status: "completed" });
+    await expect(
+      service.command({
+        type: "check-run",
+        projectId,
+        changeName: "service-entry",
+        checkId: "planning-files",
+      }),
+    ).resolves.toMatchObject({ checkId: "planning-files", status: "passed" });
+    await service.shutdown();
+  });
+
   it("owns a user scope with private endpoint metadata and credentials", async () => {
     const home = await temporaryDirectory("swf-service-");
     const service = new SwfService({
@@ -372,34 +636,9 @@ describe("user-scoped SWF service", () => {
       phaseId: "planning",
       reason: "fix failing test",
     });
-    const store = new RunEventStore(join(projectRoot, ".swf-state"));
-    await store.append(runId, {
-      type: "checkpoint.recorded",
-      actor: { type: "service", id: "test" },
-      context: { phaseId: "planning" },
-      data: {
-        checkpoint: {
-          schemaVersion: 1,
-          checkpointId: "d1e83fa6-c01d-42ef-86c6-dd7c2db5eac4",
-          runId,
-          phaseId: "planning",
-          beforeCommit: "abc",
-          afterCommit: "def",
-          createdAt: "2026-04-02T12:00:01.000Z",
-          logical: false,
-          artifactIds: [],
-          changedFiles: [],
-          clean: true,
-        },
-      },
-    });
-    await service.command({
-      type: "rollback",
-      projectId,
-      runId,
-      phaseId: "planning",
-      checkpointId: "d1e83fa6-c01d-42ef-86c6-dd7c2db5eac4",
-    });
+    await expect(
+      service.query({ resource: "approvals", projectId, runId }),
+    ).resolves.toHaveLength(2);
     await service.command({ type: "cancel", projectId, runId });
 
     const run = (await service.query({
@@ -415,10 +654,34 @@ describe("user-scoped SWF service", () => {
     };
     expect(run.state.run.status).toBe("cancelled");
     expect(run.state.phases.planning?.gate?.status).toBe("satisfied");
-    expect(Object.keys(run.state.attempts)).toHaveLength(2);
+    expect(Object.keys(run.state.attempts)).toHaveLength(1);
     await expect(
       service.query({ resource: "costs", projectId, runId }),
     ).resolves.toEqual({ exactUsd: 0, estimatedUsd: 0, unknown: 0 });
+    await service.shutdown();
+  });
+
+  it("rejects recursive orchestration from child phase invocations", async () => {
+    const { service, projectRoot } = await setup();
+    await createRun(projectRoot);
+    await expect(
+      service.command({
+        type: "start",
+        projectId,
+        runId,
+        childContext: {
+          childMode: true,
+          allowNested: false,
+          runId,
+          phaseId: "planning",
+          invocationId: crypto.randomUUID(),
+        },
+      }),
+    ).rejects.toThrow(/Child phase invocations cannot mutate/);
+    expect(
+      (await new RunEventStore(join(projectRoot, ".swf-state")).load(runId))
+        .state.run.status,
+    ).toBe("pending");
     await service.shutdown();
   });
 
@@ -838,7 +1101,7 @@ describe("user-scoped SWF service", () => {
     ).toBe("paused");
   });
 
-  it("recovers active durable runs through a reconciliation hook", async () => {
+  it("reconciles active durable runs against recorded runtime resources", async () => {
     const { service, projectRoot } = await setup();
     await createRun(projectRoot);
     await service.command({ type: "start", projectId, runId });
@@ -850,10 +1113,7 @@ describe("user-scoped SWF service", () => {
     });
     await recovered.start();
     await recovered.command({ type: "resume", projectId, runId });
-    await recovered.recover(async () => ({
-      action: "block",
-      reason: "owned pane is missing",
-    }));
+    await recovered.recover();
     expect(
       (await new RunEventStore(join(projectRoot, ".swf-state")).load(runId))
         .state.run.status,

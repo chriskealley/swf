@@ -180,9 +180,10 @@ export class ArtifactStore {
       configurationFingerprint,
       commit: input.commit,
       exitCode: input.exitCode,
-      summary: boundedSummary(
-        `${input.stdout}${input.stderr ? `\n${input.stderr}` : ""}`,
-      ),
+      summary:
+        boundedSummary(
+          `${input.stdout}${input.stderr ? `\n${input.stderr}` : ""}`,
+        ) || `Command exited with status ${input.exitCode}`,
       rawOutputRef,
     };
     const outputRef = `artifacts/${artifactId}.json`;
@@ -273,7 +274,9 @@ export class ArtifactStore {
     );
     const evidence: OpenSpecEvidence = {
       status: input.exitCode === 0 ? "valid" : "invalid",
-      summary: boundedSummary(input.output),
+      summary:
+        boundedSummary(input.output) ||
+        `OpenSpec validation ${input.exitCode === 0 ? "passed" : "failed"}`,
       rawOutputRef,
     };
     const outputRef = `artifacts/${artifactId}.json`;

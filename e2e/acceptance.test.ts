@@ -1,4 +1,5 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,13 +11,20 @@ import {
   NodeCommandRunner,
   PiHarnessAdapter,
   RunEventStore,
+  produceDefaultPlanningArtifacts,
   RunRuntime,
   RuntimeOwnershipStore,
   WorkflowScheduler,
   exportRun,
   importRun,
+  type AdapterInvocation,
+  type AdapterLaunchRequest,
+  type AdapterObservation,
+  type AdapterResult,
+  type AdapterValidation,
   type CommandOptions,
   type CommandRunner,
+  type HarnessAdapter,
   type ProcessResult,
   type Workflow,
   type WorkExecutor,
@@ -26,6 +34,7 @@ import {
   CodexHarnessAdapter,
   CopilotHarnessAdapter,
 } from "../packages/integrations/src/index.ts";
+import { SwfService } from "../apps/service/src/server/swf-service.ts";
 
 const directories: string[] = [];
 const runId = "8c86919c-3569-4e97-9f09-1bba7b49ed3d";
@@ -107,6 +116,60 @@ class SimulatedHerdr implements CommandRunner {
   }
 }
 
+class AcceptancePlanningAdapter implements HarnessAdapter {
+  readonly id = "pi";
+  readonly capabilities = {
+    structuredEvents: true,
+    modelSelection: true,
+    toolSelection: true,
+    cancellation: true,
+    blockedInput: true,
+    resume: false,
+    usage: true,
+  };
+  async availability(): Promise<AdapterValidation> {
+    return { valid: true, errors: [] };
+  }
+  async validate(): Promise<AdapterValidation> {
+    return { valid: true, errors: [] };
+  }
+  async launch(request: AdapterLaunchRequest): Promise<AdapterInvocation> {
+    const changeName = request.prompt.match(
+      /OpenSpec change ([a-z][a-z0-9-]*)/,
+    )?.[1];
+    if (!changeName) throw new Error("Planning prompt omitted change identity");
+    await produceDefaultPlanningArtifacts({
+      changeRoot: join(request.cwd, "openspec", "changes", changeName),
+      changeName,
+      planning: {
+        kind: "description",
+        description: "CLI service acceptance planning",
+      },
+    });
+    return {
+      invocationId: crypto.randomUUID(),
+      runId: request.runId,
+      phaseId: request.phaseId,
+      workUnitId: request.workUnitId,
+      paneId: "acceptance-pane",
+      status: "completed",
+      startedAt: new Date().toISOString(),
+    };
+  }
+  async submit(): Promise<void> {}
+  async observe(): Promise<AdapterObservation> {
+    return { status: "completed", structuredEvents: [] };
+  }
+  async cancel(): Promise<void> {}
+  async collect(): Promise<AdapterResult> {
+    return {
+      status: "completed",
+      transcript: "acceptance planning completed",
+      usage: { quality: "unknown" },
+    };
+  }
+}
+
 async function initializeRepository() {
   const root = await temporaryDirectory("swf-acceptance-repo-");
   const runner = new NodeCommandRunner();
@@ -124,7 +187,245 @@ async function initializeRepository() {
   return root;
 }
 
+async function configurePlanningFactory(root: string): Promise<void> {
+  await mkdir(join(root, ".swf", "workflows"), { recursive: true });
+  await mkdir(join(root, ".swf", "policies"), { recursive: true });
+  await mkdir(join(root, ".swf", "profiles"), { recursive: true });
+  await mkdir(join(root, ".swf", "guidelines"), { recursive: true });
+  await mkdir(join(root, "openspec"), { recursive: true });
+  await writeFile(
+    join(root, ".swf", "config.yaml"),
+    `schemaVersion: 1\nprojectId: ${projectId}\ndefaultWorkflow: default\ngit:\n  remote: origin\n  targetBranch: main\npaths:\n  state: .swf-state\n`,
+  );
+  await writeFile(
+    join(root, ".swf", "workflows", "default.yaml"),
+    `schemaVersion: 1\nid: default\ndescription: CLI service acceptance\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: [structured-events]\n    work:\n      - id: planning-agent\n        type: agent\n        profile: planner\n        options: {}\n      - id: planning-command\n        type: command\n        command: test -f openspec/changes/*/proposal.md\n        options: {}\n    checks:\n      - id: planning-files\n        type: command\n        required: true\n        command: test -f openspec/changes/*/tasks.md\n        options: {}\n    gate:\n      mode: automatic\n  - id: building\n    title: Building\n    profile: planner\n    guidelines: []\n    requiredCapabilities: []\n    work:\n      - id: building-command\n        type: command\n        command: test -f openspec/changes/*/proposal.md\n        options: {}\n    checks: []\n    gate:\n      mode: automatic\ndelivery:\n  mode: local-branch\n  mergeMethod: merge\n`,
+  );
+  await writeFile(
+    join(root, ".swf", "policies", "manual.yaml"),
+    `schemaVersion: 1\nid: manual\napprovalMode: manual\nmaxAttempts: 1\nriskOverrides: []\n`,
+  );
+  await writeFile(
+    join(root, ".swf", "profiles", "planner.yaml"),
+    `schemaVersion: 1\nid: planner\ndescription: Acceptance planner\nharness: pi\nguidelines: []\ncapabilities: [structured-events]\noptions: {}\n`,
+  );
+  await writeFile(
+    join(root, "openspec", "config.yaml"),
+    "schema: spec-driven\n",
+  );
+  const runner = new NodeCommandRunner();
+  for (const args of [
+    ["add", "."],
+    ["commit", "-m", "configure SWF"],
+  ]) {
+    const result = await runner.run("git", args, { cwd: root });
+    if (result.code !== 0) throw new Error(result.stderr);
+  }
+}
+
 describe("disposable operational acceptance", () => {
+  it("executes swf new through the authenticated service API and stops after Planning", async () => {
+    const root = await initializeRepository();
+    await configurePlanningFactory(root);
+    const serviceHome = await temporaryDirectory("swf-acceptance-service-");
+    const serviceRef: { current?: SwfService } = {};
+    const server = createServer(async (request, response) => {
+      response.setHeader("content-type", "application/json");
+      try {
+        const service = serviceRef.current;
+        if (!service) throw new Error("Acceptance service is not ready");
+        const credential = request.headers.authorization?.replace(
+          /^Bearer /,
+          "",
+        );
+        service.authenticate(credential);
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const body = chunks.length
+          ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
+              string,
+              unknown
+            >)
+          : {};
+        let result: unknown;
+        if (request.url === "/api/v1/projects") {
+          result = await service.registerProject({
+            projectId: String(body.projectId),
+            displayName: String(body.displayName),
+            root: String(body.root),
+          });
+        } else if (request.url === "/api/v1/commands") {
+          result = await service.command(body as never);
+        } else {
+          response.statusCode = 404;
+          throw new Error("Not found");
+        }
+        response.end(JSON.stringify({ schemaVersion: 1, result }));
+      } catch (error) {
+        response.statusCode ||= 400;
+        response.end(
+          JSON.stringify({
+            statusMessage:
+              error instanceof Error ? error.message : "request failed",
+          }),
+        );
+      }
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Acceptance HTTP server did not bind");
+    const service = new SwfService({
+      serviceHome,
+      endpoint: `http://127.0.0.1:${address.port}`,
+      projectTrust: async () => true,
+      harnessAdapters: [new AcceptancePlanningAdapter()],
+      herdrClient: new HerdrClient(new SimulatedHerdr()),
+      commandRunner: new NodeCommandRunner(),
+    });
+    serviceRef.current = service;
+    await service.start();
+
+    try {
+      const repositoryRoot = process.cwd();
+      const explored = await new NodeCommandRunner().run(
+        process.execPath,
+        [
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/cli.mjs"),
+          join(repositoryRoot, "apps/cli/src/main.ts"),
+          "explore",
+          "start",
+          "Exercise Planning through CLI and service",
+          "--candidate",
+          "cli-service-entry",
+          "--json",
+        ],
+        {
+          cwd: root,
+          env: { SWF_SERVICE_HOME: serviceHome },
+          timeoutMs: 30_000,
+        },
+      );
+      expect(explored.code, explored.stderr).toBe(0);
+      const explorationId = (
+        JSON.parse(explored.stdout) as {
+          result: { exploration: { explorationId: string } };
+        }
+      ).result.exploration.explorationId;
+      const cli = await new NodeCommandRunner().run(
+        process.execPath,
+        [
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/cli.mjs"),
+          join(repositoryRoot, "apps/cli/src/main.ts"),
+          "new",
+          "cli-service-entry",
+          "--from-exploration",
+          explorationId,
+          "--json",
+        ],
+        {
+          cwd: root,
+          env: { SWF_SERVICE_HOME: serviceHome },
+          timeoutMs: 30_000,
+        },
+      );
+      expect(cli.code, cli.stderr).toBe(0);
+      const output = JSON.parse(cli.stdout) as {
+        schemaVersion: number;
+        result: { runId: string; status: string };
+      };
+      expect(output).toMatchObject({
+        schemaVersion: 1,
+        result: { status: "paused" },
+      });
+      const run = (await service.query({
+        resource: "run",
+        projectId,
+        runId: output.result.runId,
+      })) as {
+        state: {
+          phases: { planning: { status: string } };
+          checkpoints: Record<string, unknown>;
+        };
+      };
+      expect(run.state.phases.planning.status).toBe("completed");
+      expect(Object.keys(run.state.checkpoints)).toHaveLength(1);
+
+      const next = await new NodeCommandRunner().run(
+        process.execPath,
+        [
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/cli.mjs"),
+          join(repositoryRoot, "apps/cli/src/main.ts"),
+          "next",
+          "cli-service-entry",
+          "--json",
+        ],
+        {
+          cwd: root,
+          env: { SWF_SERVICE_HOME: serviceHome },
+          timeoutMs: 30_000,
+        },
+      );
+      expect(next.code, next.stderr).toBe(0);
+      expect(JSON.parse(next.stdout)).toMatchObject({
+        result: {
+          runId: output.result.runId,
+          phaseId: "building",
+          status: "completed",
+        },
+      });
+
+      const automatic = await new NodeCommandRunner().run(
+        process.execPath,
+        [
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/cli.mjs"),
+          join(repositoryRoot, "apps/cli/src/main.ts"),
+          "run",
+          "automatic-entry",
+          "--description",
+          "Run every eligible phase",
+          "--json",
+        ],
+        {
+          cwd: root,
+          env: { SWF_SERVICE_HOME: serviceHome },
+          timeoutMs: 30_000,
+        },
+      );
+      expect(automatic.code, automatic.stderr).toBe(0);
+      const automaticOutput = JSON.parse(automatic.stdout) as {
+        result: { runId: string; changeName: string; status: string };
+      };
+      expect(automaticOutput).toMatchObject({
+        result: { changeName: "automatic-entry", status: "completed" },
+      });
+      const automaticRun = (await service.query({
+        resource: "run",
+        projectId,
+        runId: automaticOutput.result.runId,
+      })) as { runtime: { worktreePath: string } };
+      await expect(
+        stat(
+          join(
+            automaticRun.runtime.worktreePath,
+            "openspec",
+            "changes",
+            "automatic-entry",
+            "evidence",
+            "dossier.json",
+          ),
+        ),
+      ).resolves.toBeDefined();
+    } finally {
+      await service.shutdown();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  }, 30_000);
+
   it("runs a simulated model in an isolated Herdr worktree and transfers its complete history", async () => {
     const root = await initializeRepository();
     const stateDirectory = join(root, ".swf-state");

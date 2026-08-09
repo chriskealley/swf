@@ -61,8 +61,8 @@ export class CheckpointManager {
   }
 
   async create(input: PhaseCheckpointInput): Promise<Checkpoint> {
-    if (input.gateDecision !== "satisfied")
-      throw new Error("A phase checkpoint requires a satisfied gate");
+    if (input.gateDecision !== "satisfied" && input.gateDecision !== "skipped")
+      throw new Error("A phase checkpoint requires a successful gate");
     const beforeStatus = await this.git.status();
     const committed = await this.git.commit(
       input.message ?? `swf(${input.phaseId}): checkpoint`,
@@ -197,6 +197,15 @@ export interface ChangeDossier {
   approvals: DocumentValue<"approval">[];
   checkpoints: Checkpoint[];
   deliveryReferences: DocumentValue<"delivery">[];
+  explorationFoundation?: {
+    explorationId: string;
+    problem: string;
+    goals: string[];
+    decisions: string[];
+    openQuestions: string[];
+    candidateScope: string;
+    candidateChangeName: string;
+  };
   finalReport: string;
 }
 
@@ -208,6 +217,7 @@ export async function persistChangeDossier(input: {
   approvals?: DocumentValue<"approval">[];
   checkpoints?: Checkpoint[];
   deliveries?: DocumentValue<"delivery">[];
+  explorationFoundation?: ChangeDossier["explorationFoundation"];
   finalReport: string;
 }): Promise<{ path: string; dossier: ChangeDossier }> {
   const manifest = await input.artifacts.load();
@@ -233,6 +243,7 @@ export async function persistChangeDossier(input: {
     })),
     checkpoints: input.checkpoints ?? [],
     deliveryReferences: input.deliveries ?? [],
+    explorationFoundation: input.explorationFoundation,
     finalReport: redactPortableText(input.finalReport).slice(0, 10_000),
   };
   const path = join(input.changeRoot, "evidence", "dossier.json");

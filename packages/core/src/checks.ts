@@ -316,7 +316,7 @@ export function evaluateGate(
   const passed = validPassed.length;
   const satisfied =
     definition.mode === "all"
-      ? required.length > 0 && passed === required.length
+      ? passed === required.length
       : definition.mode === "any"
         ? passed > 0
         : passed >= (definition.threshold ?? 1);

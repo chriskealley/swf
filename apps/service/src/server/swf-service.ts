@@ -17,38 +17,62 @@ import {
 } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import {
+  AdapterRegistry,
   ArtifactStore,
   AuditLog,
   BlockedAgentRouter,
+  CheckpointManager,
   GitClient,
+  HarnessWorkExecutor,
   HerdrClient,
+  NodeCommandRunner,
   PiHarnessAdapter,
   Redactor,
   RunRuntime,
   RuntimeOwnershipStore,
+  WorkflowScheduler,
   StateMigrationManager,
   DeliveryOrchestrator,
   DeliveryPreflightError,
+  ExplorationStore,
   RunEventStore,
   assertBudgetsAvailable,
   assertLoopbackHttpEndpoint,
   createRunEvent,
   enforcePrivatePermissions,
   evaluateBudgets,
+  evaluateGate,
+  evaluatePhaseEligibility,
   exportRun,
   findProjectRoot,
   importRun,
+  humanApprovalEvidence,
   inspectOperationalHealth,
   isProjectTrusted,
   loadProjectDeliverySettings,
+  loadProjectExecutionSettings,
+  readProjectConfig,
   reduceRunState,
+  persistChangeDossier,
+  previewPhaseRerun,
+  requestStructuredHandoff,
+  recordAgentReview,
+  recordAutoApproval,
+  recordHumanApproval,
+  resolveApprovalMode,
   resolveDeliveryPlan,
   retainDeliveryUpdate,
+  runCommandCheck,
+  runOpenSpecCheck,
+  validatePlanningArtifacts,
   validateProjectConfiguration,
   type AdapterInvocation,
   type AdapterObservation,
+  type ApprovalAuthorization,
   type BudgetConfiguration,
   type BudgetUsage,
+  type CheckEvidence,
+  type CommandRunner,
   type DeliveryRequest,
   type DeliveryUpdate,
   type EventDraft,
@@ -382,6 +406,8 @@ export interface ServiceOptions {
   serviceBudget?: BudgetConfiguration["service"];
   projectTrust?: (root: string) => Promise<boolean>;
   stuckAfterMs?: number;
+  herdrClient?: HerdrClient;
+  commandRunner?: CommandRunner;
 }
 
 export interface ServiceQuery {
@@ -394,13 +420,16 @@ export interface ServiceQuery {
     | "phases"
     | "invocations"
     | "artifacts"
+    | "approvals"
     | "costs"
     | "configuration"
     | "delivery"
     | "output"
     | "budgets"
     | "operations"
-    | "blocked-inputs";
+    | "blocked-inputs"
+    | "explorations"
+    | "exploration";
   projectId?: string;
   runId?: string;
   ref?: string;
@@ -433,7 +462,43 @@ interface PendingPruning extends PruningPreview {
   paths: string[];
 }
 
-export type ServiceCommand =
+export type ServiceCommand = (
+  | {
+      type: "new" | "run" | "next" | "phase-run";
+      projectId: string;
+      changeName: string;
+      phaseId?: string;
+      description?: string;
+      workflowId?: string;
+      policyId?: string;
+      fromExplorationId?: string;
+      authorization?: ApprovalAuthorization;
+    }
+  | {
+      type: "phase-rerun" | "phase-skip" | "check-run";
+      projectId: string;
+      changeName: string;
+      phaseId?: string;
+      checkId?: string;
+      authorized?: boolean;
+    }
+  | {
+      type: "explore-start";
+      projectId: string;
+      idea: string;
+      candidateChangeName?: string;
+    }
+  | {
+      type:
+        | "explore-resume"
+        | "explore-cancel"
+        | "explore-discard"
+        | "explore-promote"
+        | "explore-answer";
+      projectId: string;
+      explorationId: string;
+      answer?: string;
+    }
   | {
       type: "start" | "pause" | "resume" | "cancel";
       projectId: string;
@@ -441,13 +506,14 @@ export type ServiceCommand =
       phaseId?: string;
     }
   | {
-      type: "approve" | "reject";
+      type: "approve" | "reject" | "request-changes";
       projectId: string;
       runId: string;
       phaseId: string;
       gateId: string;
       reason?: string;
       actorId: string;
+      evidenceArtifactIds?: string[];
     }
   | {
       type: "remediate";
@@ -463,6 +529,8 @@ export type ServiceCommand =
       phaseId: string;
       checkpointId: string;
       invalidatedPhaseIds?: string[];
+      invalidatedArtifactIds?: string[];
+      authorized?: boolean;
     }
   | { type: "blocked-input"; invocationId: string; response: string }
   | {
@@ -493,7 +561,16 @@ export type ServiceCommand =
       type: "import-run";
       projectId: string;
       path: string;
-    };
+    }
+) & {
+  childContext?: {
+    childMode: boolean;
+    allowNested: boolean;
+    runId?: string;
+    phaseId?: string;
+    invocationId?: string;
+  };
+};
 
 export class SwfService {
   readonly serviceHome: string;
@@ -508,6 +585,8 @@ export class SwfService {
   private readonly deliveryMonitors = new Map<string, AbortController>();
   private readonly hostingAdapter: HostingAdapter;
   private readonly harnessAdapters: HarnessAdapter[];
+  private readonly herdr: HerdrClient;
+  private readonly commandRunner: CommandRunner;
   private readonly deliveryPollIntervalMs: number;
   private readonly serviceBudget?: BudgetConfiguration["service"];
   private readonly projectTrust: (root: string) => Promise<boolean>;
@@ -533,12 +612,13 @@ export class SwfService {
     );
     this.registry = new ProjectRegistry(this.serviceHome);
     this.hostingAdapter = options.hostingAdapter ?? new GitHubAdapter();
-    const herdr = new HerdrClient();
+    this.herdr = options.herdrClient ?? new HerdrClient();
+    this.commandRunner = options.commandRunner ?? new NodeCommandRunner();
     this.harnessAdapters = options.harnessAdapters ?? [
-      new PiHarnessAdapter(herdr),
-      new CodexHarnessAdapter(herdr),
-      new ClaudeHarnessAdapter(herdr),
-      new CopilotHarnessAdapter(herdr),
+      new PiHarnessAdapter(this.herdr),
+      new CodexHarnessAdapter(this.herdr),
+      new ClaudeHarnessAdapter(this.herdr),
+      new CopilotHarnessAdapter(this.herdr),
     ];
     this.deliveryPollIntervalMs = options.deliveryPollIntervalMs ?? 30_000;
     this.serviceBudget = options.serviceBudget;
@@ -1022,6 +1102,16 @@ export class SwfService {
     if (!query.projectId)
       throw new Error(`projectId is required for ${query.resource}`);
     const { project, store } = await this.runStore(query.projectId);
+    if (query.resource === "explorations")
+      return new ExplorationStore(project.stateDirectory).list();
+    if (query.resource === "exploration") {
+      if (!query.ref) throw new Error("ref is required for exploration");
+      const explorations = new ExplorationStore(project.stateDirectory);
+      return {
+        exploration: await explorations.get(query.ref),
+        events: await explorations.events(query.ref),
+      };
+    }
     if (query.resource === "runs") return this.listRuns(project);
     if (query.resource === "operations")
       return inspectOperationalHealth(
@@ -1056,8 +1146,56 @@ export class SwfService {
           costs: this.summarizeCosts(loaded.state.invocations),
         };
       }
-      case "phases":
-        return loaded.state.phases;
+      case "phases": {
+        if (!query.phaseId) return loaded.state.phases;
+        const location = await findProjectRoot(project.root);
+        if (!location?.initialized)
+          throw new Error("Project is not initialized");
+        const settings = await loadProjectExecutionSettings(
+          location,
+          loaded.state.run.workflowId,
+          loaded.state.run.policyId ?? "manual",
+        );
+        const phase = settings.workflow.phases.find(
+          ({ id }) => id === query.phaseId,
+        );
+        if (!phase) throw new Error(`Unknown phase: ${query.phaseId}`);
+        const profile = settings.profiles[phase.profile];
+        const adapter = this.adapter(profile?.harness ?? "pi");
+        const manifest = await new ArtifactStore(
+          project.stateDirectory,
+          query.runId,
+          this.redactor,
+        ).load();
+        const budget = await this.budgetReport(
+          query.projectId,
+          query.runId,
+          query.phaseId,
+        );
+        return {
+          phase: loaded.state.phases[query.phaseId],
+          eligibility: evaluatePhaseEligibility(
+            settings.workflow,
+            query.phaseId,
+            {
+              state: loaded.state,
+              activePhaseId: Object.values(loaded.state.phases).find(
+                ({ status }) => status === "running",
+              )?.id,
+              worktreeAtCheckpoint: true,
+              artifactsValid: !manifest.artifacts.some(
+                ({ status }) => status === "invalid" || status === "missing",
+              ),
+              entryChecksPass: !Object.values(
+                loaded.state.phases[query.phaseId]?.checks ?? {},
+              ).some(({ status }) => status === "failed"),
+              policyAllows: true,
+              budgetAvailable: budget.every(({ allowed }) => allowed),
+              adapter,
+            },
+          ),
+        };
+      }
       case "invocations":
         return loaded.state.invocations;
       case "artifacts":
@@ -1068,6 +1206,24 @@ export class SwfService {
             this.redactor,
           ).load()
         ).artifacts;
+      case "approvals": {
+        const directory = join(
+          project.stateDirectory,
+          "runs",
+          query.runId,
+          "approvals",
+        );
+        try {
+          return Promise.all(
+            (await readdir(directory))
+              .filter((entry) => entry.endsWith(".json"))
+              .map((entry) => readJson(join(directory, entry))),
+          );
+        } catch (error) {
+          if (isNotFound(error)) return [];
+          throw error;
+        }
+      }
       case "delivery":
         return loaded.state.deliveries;
       case "costs":
@@ -1315,12 +1471,21 @@ export class SwfService {
     const location = await findProjectRoot(project.root);
     if (!location?.initialized)
       throw new Error("Delivery requires initialized project configuration");
-    const delegatedAuthorization = loaded.events.some(
-      (event) =>
-        event.type === "gate.decided" &&
-        event.actor.type === "policy" &&
-        event.data.status === "satisfied",
+    const recordedAuthorization = await readJson<ApprovalAuthorization>(
+      join(project.stateDirectory, "runs", runId, "authorization.json"),
     );
+    const delegatedAuthorization =
+      loaded.events.some(
+        (event) =>
+          event.type === "gate.decided" &&
+          event.actor.type === "policy" &&
+          event.data.status === "satisfied",
+      ) ||
+      Boolean(
+        recordedAuthorization &&
+        (!recordedAuthorization.expiresAt ||
+          new Date(recordedAuthorization.expiresAt).getTime() > Date.now()),
+      );
     const policyId =
       loaded.state.run.policyId ??
       (delegatedAuthorization ? "autonomous" : "manual");
@@ -1532,6 +1697,1168 @@ export class SwfService {
     return delivery;
   }
 
+  private adapter(id: string): HarnessAdapter {
+    const adapter = this.harnessAdapters.find(
+      (candidate) => candidate.id === id,
+    );
+    if (!adapter) throw new Error(`No harness adapter is configured for ${id}`);
+    return adapter;
+  }
+
+  private async prepareRun(input: {
+    project: RegisteredProject;
+    changeName: string;
+    description: string;
+    workflowId?: string;
+    policyId?: string;
+    authorization?: ApprovalAuthorization;
+  }): Promise<{
+    run: Run;
+    settings: Awaited<ReturnType<typeof loadProjectExecutionSettings>>;
+    runtime: Awaited<ReturnType<RunRuntime["prepare"]>>;
+    location: NonNullable<Awaited<ReturnType<typeof findProjectRoot>>>;
+  }> {
+    const location = await findProjectRoot(input.project.root);
+    if (!location?.initialized)
+      throw new Error("Run creation requires an initialized SWF project");
+    const issues = await validateProjectConfiguration(location);
+    if (issues.length)
+      throw new Error(
+        `Project configuration is invalid: ${issues.map(({ path, message }) => `${path}: ${message}`).join("; ")}`,
+      );
+    const config = await readProjectConfig(location);
+    if (config.projectId !== input.project.projectId)
+      throw new Error(
+        `Registered project identity ${input.project.projectId} does not match ${config.projectId}`,
+      );
+    const workflowId = input.workflowId ?? config.defaultWorkflow;
+    const policyId = input.policyId ?? "manual";
+    const settings = await loadProjectExecutionSettings(
+      location,
+      workflowId,
+      policyId,
+    );
+    for (const phase of settings.workflow.phases) {
+      if (!phase.work.some((unit) => unit.type === "agent")) continue;
+      const profile = settings.profiles[phase.profile];
+      if (!profile) throw new Error(`Missing phase profile: ${phase.profile}`);
+      const adapter = this.adapter(profile.harness ?? "pi");
+      const availability = await adapter.availability();
+      if (!availability.valid)
+        throw new Error(
+          `Harness ${adapter.id} is unavailable for phase ${phase.id}: ${availability.errors.join("; ")}`,
+        );
+      const validation = await adapter.validate(
+        { model: profile.model },
+        phase.requiredCapabilities,
+      );
+      if (!validation.valid)
+        throw new Error(
+          `Harness ${adapter.id} is invalid for phase ${phase.id}: ${validation.errors.join("; ")}`,
+        );
+    }
+
+    const store = new RunEventStore(input.project.stateDirectory, {
+      redaction: this.redactor,
+    });
+    const changeIdentity = `openspec/changes/${input.changeName}`;
+    const existing = await store.findRunByChangeIdentity(changeIdentity);
+    if (existing)
+      throw new Error(
+        `OpenSpec change ${input.changeName} is already bound to run ${existing}; use swf run, swf next, or status`,
+      );
+    const runId = randomUUID();
+    if (settings.policy.approvalMode === "automatic" && !input.authorization)
+      throw new Error(
+        "Autonomous policy requires explicit recorded human authorization",
+      );
+    const run = await store.create({
+      projectId: input.project.projectId,
+      runId,
+      changeName: input.changeName,
+      changeIdentity,
+      workflowId,
+      policyId,
+      description: input.description,
+      phaseIds: settings.workflow.phases.map(({ id }) => id),
+    });
+
+    if (input.authorization) {
+      await writeAtomically(
+        join(
+          input.project.stateDirectory,
+          "runs",
+          run.runId,
+          "authorization.json",
+        ),
+        `${JSON.stringify(input.authorization, null, 2)}\n`,
+      );
+    }
+    await this.preflightDelivery(input.project.projectId, run.runId);
+    const runtimeManager = new RunRuntime(
+      new GitClient(input.project.root, this.commandRunner),
+      this.herdr,
+      new RuntimeOwnershipStore(input.project.stateDirectory),
+    );
+    const runtime = await runtimeManager.prepare({
+      runId: run.runId,
+      stateDirectory: input.project.stateDirectory,
+    });
+    const scaffold = await this.commandRunner.run(
+      "openspec",
+      ["new", "change", input.changeName, "--json"],
+      { cwd: runtime.worktree.path },
+    );
+    if (scaffold.code !== 0)
+      throw new Error(
+        `Unable to create OpenSpec change scaffold: ${scaffold.stderr.trim() || scaffold.stdout.trim()}`,
+      );
+    return { run, settings, runtime, location };
+  }
+
+  private async executePhase(input: {
+    project: RegisteredProject;
+    runId: string;
+    phaseId: string;
+    settings: Awaited<ReturnType<typeof loadProjectExecutionSettings>>;
+    runtime: Awaited<ReturnType<RunRuntime["prepare"]>>;
+  }): Promise<"completed" | "blocked" | "failed"> {
+    const { project, runId, phaseId, settings, runtime } = input;
+    const store = new RunEventStore(project.stateDirectory, {
+      redaction: this.redactor,
+    });
+    const loaded = await store.load(runId);
+    const phase = settings.workflow.phases.find(({ id }) => id === phaseId);
+    if (!phase) throw new Error(`Unknown phase: ${phaseId}`);
+    const profile = settings.profiles[phase.profile];
+    if (!profile) throw new Error(`Missing phase profile: ${phase.profile}`);
+    const adapter = this.adapter(profile.harness ?? "pi");
+    const artifacts = new ArtifactStore(
+      project.stateDirectory,
+      runId,
+      this.redactor,
+    );
+    const git = new GitClient(runtime.worktree.path, this.commandRunner);
+    const [gitStatus, head, manifest, budgets] = await Promise.all([
+      git.status(),
+      git.head(),
+      artifacts.load(),
+      this.budgetReport(project.projectId, runId, phaseId),
+    ]);
+    const phasePosition = settings.workflow.phases.findIndex(
+      ({ id }) => id === phaseId,
+    );
+    const predecessorIds = settings.workflow.phases
+      .slice(0, phasePosition)
+      .map(({ id }) => id);
+    const latestCheckpoint = Object.values(loaded.state.checkpoints)
+      .filter(({ phaseId: checkpointPhase }) =>
+        predecessorIds.includes(checkpointPhase),
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    const eligibility = evaluatePhaseEligibility(settings.workflow, phaseId, {
+      state: loaded.state,
+      worktreeAtCheckpoint:
+        !latestCheckpoint ||
+        (latestCheckpoint.afterCommit === head && gitStatus.clean),
+      artifactsValid: !manifest.artifacts.some(
+        ({ phaseId: artifactPhase, status }) =>
+          predecessorIds.includes(artifactPhase) &&
+          (status === "stale" || status === "invalid" || status === "missing"),
+      ),
+      entryChecksPass: true,
+      policyAllows: true,
+      budgetAvailable: budgets.every(({ allowed }) => allowed),
+      adapter,
+    });
+    if (!eligibility.eligible)
+      throw new Error(
+        `Phase ${phaseId} is ineligible: ${eligibility.reasons.join("; ")}`,
+      );
+
+    const actor = { type: "service" as const, id: "swf-scheduler" };
+    const attemptId = randomUUID();
+    const attemptNumber =
+      (loaded.state.phases[phaseId]?.attemptIds.length ?? 0) + 1;
+    await this.append(project.projectId, runId, {
+      type: "phase.transitioned",
+      actor,
+      context: { phaseId },
+      data: {
+        phaseId,
+        from: loaded.state.phases[phaseId]!.status,
+        to: "running",
+      },
+    });
+    const attemptKind = attemptNumber === 1 ? "initial" : "retry";
+    await this.append(project.projectId, runId, {
+      type: "attempt.started",
+      actor,
+      context: { phaseId, attemptId },
+      data: { attemptId, phaseId, number: attemptNumber, kind: attemptKind },
+    });
+    if (attemptKind === "retry")
+      await this.append(project.projectId, runId, {
+        type: "run.retried",
+        actor,
+        context: { phaseId, attemptId },
+        data: { phaseId, attemptId, reason: "bounded phase retry" },
+      });
+
+    const beforeCommit = head;
+    let active:
+      { adapter: HarnessAdapter; invocation: AdapterInvocation } | undefined;
+    const registry = new AdapterRegistry();
+    for (const candidate of this.harnessAdapters) registry.register(candidate);
+    const fallback = {
+      execute: async (unit: (typeof phase.work)[number]) => {
+        if (unit.type === "human")
+          return { status: "blocked" as const, output: "Human input required" };
+        if (unit.type === "command") {
+          if (!unit.command)
+            return {
+              status: "failed" as const,
+              output: "Command work requires command",
+            };
+          const result = await this.commandRunner.run(
+            "/bin/sh",
+            ["-lc", unit.command],
+            {
+              cwd: runtime.worktree.path,
+            },
+          );
+          return {
+            status:
+              result.code === 0 ? ("completed" as const) : ("failed" as const),
+            output: `${result.stdout}${result.stderr}`,
+          };
+        }
+        if (unit.type === "openspec") {
+          const result = await this.commandRunner.run(
+            "openspec",
+            ["validate", loaded.state.run.changeName],
+            { cwd: runtime.worktree.path },
+          );
+          return {
+            status:
+              result.code === 0 ? ("completed" as const) : ("failed" as const),
+            output: `${result.stdout}${result.stderr}`,
+          };
+        }
+        return {
+          status: "failed" as const,
+          output: `No executor for ${unit.type}`,
+        };
+      },
+    };
+    const downstreamContext = await artifacts.selectContext({
+      phaseIds: predecessorIds,
+    });
+    const guidelineText = [...phase.guidelines, ...profile.guidelines]
+      .filter((id, index, values) => values.indexOf(id) === index)
+      .map((id) => settings.guidelines[id])
+      .filter(Boolean)
+      .join("\n\n");
+    const workflow = {
+      ...settings.workflow,
+      phases: settings.workflow.phases.map((candidate) =>
+        candidate.id !== phaseId
+          ? candidate
+          : {
+              ...candidate,
+              work: candidate.work.map((unit) =>
+                unit.type !== "agent"
+                  ? unit
+                  : {
+                      ...unit,
+                      options: {
+                        ...unit.options,
+                        prompt:
+                          `${String(unit.options.prompt ?? "")}\n\n` +
+                          `SWF run ${runId}, phase ${phaseId}, OpenSpec change ${loaded.state.run.changeName}. ` +
+                          `Work only in ${runtime.worktree.path}. ` +
+                          `Resolved guidelines:\n${guidelineText || "none"}\n` +
+                          `Prior evidence references: ${downstreamContext.evidence.map(({ outputRef }) => outputRef).join(", ") || "none"}. ` +
+                          (phaseId === settings.workflow.phases[0]?.id
+                            ? `Planning input: ${loaded.state.run.description}. Create proposal.md, design.md, capability specs, tasks.md, evidence/planning.json, and evidence/planning-handoff.json under openspec/changes/${loaded.state.run.changeName}/ and ensure openspec validate passes.`
+                            : "Use the selected valid prior evidence and complete the declared phase objective."),
+                      },
+                    },
+              ),
+            },
+      ),
+    };
+    const scheduler = new WorkflowScheduler(
+      workflow,
+      new HarnessWorkExecutor(
+        registry,
+        {
+          runId,
+          workspaceId: runtime.workspaceId,
+          cwd: runtime.worktree.path,
+          afterLaunch: async (launchedAdapter, invocation) => {
+            active = { adapter: launchedAdapter, invocation };
+          },
+          onObservation: async (observedAdapter, invocation, observation) => {
+            this.reportBlockedAgent(observedAdapter, invocation, observation);
+          },
+          afterCollect: async (invocation, result) => {
+            const outputRef = await artifacts.retainRaw(
+              `invocations/${invocation.invocationId}.log`,
+              result.transcript,
+            );
+            await this.append(project.projectId, runId, {
+              type: "invocation.recorded",
+              actor: { type: "harness", id: adapter.id },
+              context: {
+                phaseId,
+                workUnitId: invocation.workUnitId,
+                invocationId: invocation.invocationId,
+              },
+              data: {
+                invocation: {
+                  schemaVersion: 1,
+                  invocationId: invocation.invocationId,
+                  runId,
+                  phaseId,
+                  harness: adapter.id as "pi" | "codex" | "claude" | "copilot",
+                  status:
+                    result.status === "unknown" ? "failed" : result.status,
+                  startedAt: invocation.startedAt,
+                  endedAt: new Date().toISOString(),
+                  outputRef,
+                  cost: {
+                    amountUsd: result.usage.costUsd,
+                    quality: result.usage.quality,
+                  },
+                  usage: result.usage,
+                },
+              },
+            });
+          },
+        },
+        fallback,
+      ),
+    );
+
+    let resolveBoundary!: () => void;
+    const safeBoundary = new Promise<void>((resolve) => {
+      resolveBoundary = resolve;
+    });
+    this.activeWork.set(runId, {
+      runId,
+      projectId: project.projectId,
+      safeBoundary,
+      interrupt: async () => {
+        if (active) await active.adapter.cancel(active.invocation);
+      },
+    });
+    let result;
+    try {
+      result = await scheduler.executePhase(phaseId, eligibility, {
+        project: {
+          ...profile.options,
+          harness: profile.harness ?? "pi",
+          model: profile.model,
+          timeoutMs: settings.policy.timeoutMinutes
+            ? settings.policy.timeoutMinutes * 60_000
+            : undefined,
+          retryLimit: settings.policy.maxAttempts,
+          budgetUsd: settings.policy.budgetUsd,
+          artifactContext: downstreamContext.evidence.map(
+            ({ outputRef }) => outputRef,
+          ),
+        },
+      });
+    } finally {
+      resolveBoundary();
+      this.activeWork.delete(runId);
+    }
+
+    for (const work of result.work) {
+      await this.append(project.projectId, runId, {
+        type: "work-unit.transitioned",
+        actor,
+        context: { phaseId, attemptId, workUnitId: work.workUnitId },
+        data: {
+          workUnitId: work.workUnitId,
+          phaseId,
+          to: work.status,
+          attemptId,
+        },
+      });
+    }
+    if (result.status !== "completed") {
+      await this.append(project.projectId, runId, {
+        type: "attempt.completed",
+        actor,
+        context: { phaseId, attemptId },
+        data: {
+          attemptId,
+          status: result.status,
+          reason: result.work.at(-1)?.output,
+        },
+      });
+      await this.append(project.projectId, runId, {
+        type: "phase.transitioned",
+        actor,
+        context: { phaseId },
+        data: { phaseId, from: "running", to: result.status },
+      });
+      return result.status;
+    }
+
+    if (phaseId === settings.workflow.phases[0]?.id) {
+      const planningErrors = await validatePlanningArtifacts(
+        join(
+          runtime.worktree.path,
+          "openspec",
+          "changes",
+          loaded.state.run.changeName,
+        ),
+      );
+      if (planningErrors.length) {
+        await this.append(project.projectId, runId, {
+          type: "attempt.completed",
+          actor,
+          context: { phaseId, attemptId },
+          data: {
+            attemptId,
+            status: "failed",
+            reason: planningErrors.join("; "),
+          },
+        });
+        await this.append(project.projectId, runId, {
+          type: "phase.transitioned",
+          actor,
+          context: { phaseId },
+          data: {
+            phaseId,
+            from: "running",
+            to: "failed",
+            reason: planningErrors.join("; "),
+          },
+        });
+        return "failed";
+      }
+    }
+
+    const evidence: CheckEvidence[] = [];
+    const currentCommit = await git.head();
+    for (const check of phase.checks) {
+      let checkEvidence: CheckEvidence;
+      if (check.type === "command" && check.command) {
+        checkEvidence = await runCommandCheck({
+          runner: this.commandRunner,
+          artifacts,
+          request: {
+            checkId: check.id,
+            phaseId,
+            command: "/bin/sh",
+            args: ["-lc", check.command],
+            configuration: check.options,
+            commit: currentCommit,
+            cwd: runtime.worktree.path,
+          },
+        });
+      } else if (check.type === "openspec") {
+        checkEvidence = await runOpenSpecCheck({
+          runner: this.commandRunner,
+          artifacts,
+          checkId: check.id,
+          phaseId,
+          changeName: loaded.state.run.changeName,
+          commit: currentCommit,
+          cwd: runtime.worktree.path,
+        });
+      } else if (check.type === "agent" && active) {
+        try {
+          await active.adapter.submit(
+            active.invocation,
+            "Return one JSON object matching {summary:string,findings:[{id,severity,title,detail,artifactIds}]} for this phase review.",
+          );
+          const reviewResult = await active.adapter.collect(active.invocation);
+          const review = reviewResult.transcript
+            .split("\n")
+            .reverse()
+            .map((line) => {
+              try {
+                return JSON.parse(line) as unknown;
+              } catch {
+                return undefined;
+              }
+            })
+            .find(Boolean);
+          checkEvidence = await recordAgentReview({
+            artifacts,
+            checkId: check.id,
+            phaseId,
+            commit: currentCommit,
+            inputFingerprint: createHash("sha256")
+              .update(
+                JSON.stringify({ check: check.id, commit: currentCommit }),
+              )
+              .digest("hex"),
+            review,
+          });
+        } catch (error) {
+          checkEvidence = {
+            checkId: check.id,
+            type: "agent",
+            required: check.required,
+            status: "blocked",
+            deterministic: false,
+            createdAt: new Date().toISOString(),
+            summary:
+              error instanceof Error
+                ? `Invalid agent review: ${error.message}`
+                : "Invalid agent review",
+          };
+        }
+      } else {
+        checkEvidence = {
+          checkId: check.id,
+          type: check.type,
+          required: check.required,
+          status: "blocked",
+          deterministic: false,
+          createdAt: new Date().toISOString(),
+          summary: `${check.type} check requires an operator or review executor`,
+        };
+      }
+      evidence.push({ ...checkEvidence, required: check.required });
+      if (checkEvidence.artifact) {
+        await this.append(project.projectId, runId, {
+          type: "artifact.recorded",
+          actor,
+          context: { phaseId, attemptId, checkId: check.id },
+          data: { artifact: checkEvidence.artifact },
+        });
+      }
+      await this.append(project.projectId, runId, {
+        type: "check.recorded",
+        actor,
+        context: { phaseId, attemptId, checkId: check.id },
+        data: {
+          checkId: check.id,
+          phaseId,
+          status: checkEvidence.status,
+          artifactId: checkEvidence.artifact?.artifactId,
+          reason: checkEvidence.summary,
+        },
+      });
+    }
+    if (phaseId === settings.workflow.phases[0]?.id) {
+      const planningCheck = await runOpenSpecCheck({
+        runner: this.commandRunner,
+        artifacts,
+        checkId: "planning-openspec",
+        phaseId,
+        changeName: loaded.state.run.changeName,
+        commit: currentCommit,
+        cwd: runtime.worktree.path,
+      });
+      evidence.push(planningCheck);
+      await this.append(project.projectId, runId, {
+        type: "artifact.recorded",
+        actor,
+        context: { phaseId, attemptId, checkId: planningCheck.checkId },
+        data: { artifact: planningCheck.artifact! },
+      });
+      await this.append(project.projectId, runId, {
+        type: "check.recorded",
+        actor,
+        context: { phaseId, attemptId, checkId: planningCheck.checkId },
+        data: {
+          checkId: planningCheck.checkId,
+          phaseId,
+          status: planningCheck.status,
+          artifactId: planningCheck.artifact?.artifactId,
+          reason: planningCheck.summary,
+        },
+      });
+    }
+    const gitEvidence = await artifacts.captureGitEvidence({
+      phaseId,
+      attemptId,
+      beforeCommit,
+      git,
+    });
+    await this.append(project.projectId, runId, {
+      type: "artifact.recorded",
+      actor,
+      context: { phaseId, attemptId },
+      data: { artifact: gitEvidence.artifact },
+    });
+    const context = await artifacts.selectContext({ phaseIds: [phaseId] });
+    const handoff = await requestStructuredHandoff({
+      runId,
+      phaseId,
+      facts: context,
+      agent: active
+        ? {
+            requestHandoff: async ({ facts, prompt }) => {
+              await active!.adapter.submit(
+                active!.invocation,
+                `${prompt}\n${JSON.stringify({ runId, phaseId, facts })}`,
+              );
+              const result = await active!.adapter.collect(active!.invocation);
+              for (const line of result.transcript.split("\n").reverse()) {
+                try {
+                  const value = JSON.parse(line) as unknown;
+                  if (value && typeof value === "object") return value;
+                } catch {
+                  // Continue to deterministic degraded fallback.
+                }
+              }
+              throw new Error("Phase agent returned no structured handoff");
+            },
+          }
+        : undefined,
+    });
+    const handoffRef = await artifacts.retainHandoff(handoff);
+    const handoffArtifact = await artifacts.record({
+      schemaVersion: 1,
+      artifactId: handoff.handoffId,
+      runId,
+      type: "phase-handoff",
+      phaseId,
+      sourceCommit: currentCommit,
+      inputFingerprint: createHash("sha256")
+        .update(JSON.stringify(context.evidence))
+        .digest("hex"),
+      status: "valid",
+      createdAt: new Date().toISOString(),
+      outputRef: handoffRef,
+      producerAttemptId: attemptId,
+      summary: handoff.summary.join(" ").slice(0, 2_000),
+      consumers: [],
+    });
+    await this.append(project.projectId, runId, {
+      type: "artifact.recorded",
+      actor,
+      context: { phaseId, attemptId },
+      data: { artifact: handoffArtifact },
+    });
+
+    let gateActor: {
+      type: "service" | "policy";
+      id: string;
+    } = actor;
+    let gate =
+      phase.gate.mode === "manual"
+        ? { status: "blocked" as const, reasons: ["Manual approval required"] }
+        : evaluateGate(
+            {
+              mode:
+                phase.gate.mode === "advisory"
+                  ? "advisory"
+                  : (phase.gate.evaluation ?? "all"),
+              requiredCheckIds: phase.gate.requiredChecks,
+              threshold: phase.gate.threshold,
+            },
+            evidence,
+          );
+    const phaseDiff = await git.diff(beforeCommit);
+    const approvalResolution = resolveApprovalMode({
+      configured:
+        settings.policy.approvalMode === "automatic" ? "automatic" : "manual",
+      risk: {
+        changedFiles: gitEvidence.evidence.changedFiles,
+        sensitivePathPatterns: settings.policy.riskOverrides.includes(
+          "sensitive-path",
+        )
+          ? [".github/**", "**/security/**", "**/auth/**", "infra/**"]
+          : [],
+        destructiveOperation: gitEvidence.evidence.status.files.some(
+          ({ index, worktree }) => index === "D" || worktree === "D",
+        ),
+        secretsFound:
+          settings.policy.riskOverrides.includes("secret-finding") &&
+          /(?:api[_-]?key|password|secret|token)\s*[:=]/i.test(phaseDiff),
+        elevatedRisk: settings.policy.riskOverrides.includes("elevated-risk"),
+        spendUsd: this.summarizeCosts(loaded.state.invocations).exactUsd,
+        budgetThresholdUsd: settings.policy.budgetUsd,
+      },
+    });
+    if (
+      phase.gate.mode === "manual" &&
+      approvalResolution.mode === "automatic"
+    ) {
+      const authorization = await readJson<ApprovalAuthorization>(
+        join(project.stateDirectory, "runs", runId, "authorization.json"),
+      );
+      if (!authorization)
+        throw new Error(
+          "Delegated authorization is missing for automatic approval",
+        );
+      const approval = recordAutoApproval({
+        runId,
+        phaseId,
+        authorization,
+        reason: `Resolved ${settings.policy.id} policy authorized automatic phase approval`,
+      });
+      await writeAtomically(
+        join(
+          project.stateDirectory,
+          "runs",
+          runId,
+          "approvals",
+          `${approval.approvalId}.json`,
+        ),
+        `${JSON.stringify(approval, null, 2)}\n`,
+      );
+      const approvalEvidence = humanApprovalEvidence({
+        checkId: `${phaseId}-approval`,
+        approval,
+      });
+      evidence.push(approvalEvidence);
+      gate = evaluateGate(
+        { mode: "all", requiredCheckIds: [approvalEvidence.checkId] },
+        evidence,
+      );
+      gateActor = { type: "policy", id: "swf-policy" };
+    } else if (
+      phase.gate.mode === "manual" &&
+      approvalResolution.reasons.length
+    ) {
+      gate = {
+        status: "blocked",
+        reasons: approvalResolution.reasons.map(
+          (reason) => `Manual approval required: ${reason}`,
+        ),
+      };
+    }
+    await this.append(project.projectId, runId, {
+      type: "gate.decided",
+      actor: gateActor,
+      context: { phaseId, attemptId },
+      data: {
+        gateId: `${phaseId}-gate`,
+        phaseId,
+        status: gate.status,
+        reason: gate.reasons.join("; ") || undefined,
+      },
+    });
+    if (gate.status !== "satisfied" && gate.status !== "skipped") {
+      const terminal = gate.status === "rejected" ? "failed" : "blocked";
+      await this.append(project.projectId, runId, {
+        type: "attempt.completed",
+        actor,
+        context: { phaseId, attemptId },
+        data: { attemptId, status: terminal, reason: gate.reasons.join("; ") },
+      });
+      await this.append(project.projectId, runId, {
+        type: "phase.transitioned",
+        actor,
+        context: { phaseId },
+        data: {
+          phaseId,
+          from: "running",
+          to: terminal,
+          reason: gate.reasons.join("; "),
+        },
+      });
+      return terminal;
+    }
+
+    const checkpoint = await new CheckpointManager(
+      project.stateDirectory,
+      runId,
+      git,
+      artifacts,
+    ).create({
+      phaseId,
+      beforeCommit,
+      gateDecision: gate.status,
+      handoff,
+    });
+    await this.append(project.projectId, runId, {
+      type: "checkpoint.recorded",
+      actor,
+      context: { phaseId, attemptId },
+      data: { checkpoint },
+    });
+    await this.append(project.projectId, runId, {
+      type: "phase.transitioned",
+      actor,
+      context: { phaseId },
+      data: { phaseId, from: "running", to: "completed" },
+    });
+    await this.append(project.projectId, runId, {
+      type: "attempt.completed",
+      actor,
+      context: { phaseId, attemptId },
+      data: { attemptId, status: "completed" },
+    });
+    return "completed";
+  }
+
+  private async enterWorkflow(
+    command: Extract<
+      ServiceCommand,
+      { type: "new" | "run" | "next" | "phase-run" }
+    >,
+  ): Promise<unknown> {
+    if (!this.acceptingWork)
+      throw new Error("SWF service is draining and cannot start new work");
+    const project = await this.project(command.projectId);
+    const location = await findProjectRoot(project.root);
+    if (!location?.initialized)
+      throw new Error("Workflow entry requires an initialized project");
+    const config = await readProjectConfig(location);
+    const store = new RunEventStore(project.stateDirectory, {
+      redaction: this.redactor,
+    });
+    const changeIdentity = `openspec/changes/${command.changeName}`;
+    const existingRunId = await store.findRunByChangeIdentity(changeIdentity);
+    if (existingRunId) {
+      if (command.type === "new")
+        throw new Error(
+          `OpenSpec change ${command.changeName} is already bound to run ${existingRunId}; use swf run, swf next, or status`,
+        );
+      const existing = await store.load(existingRunId);
+      if (
+        command.description &&
+        command.description.trim() !== existing.state.run.description
+      )
+        throw new Error(
+          `Description conflicts with the recorded Planning input for run ${existingRunId}; use an explicit revision flow`,
+        );
+      if (existing.state.run.status === "completed")
+        return {
+          runId: existingRunId,
+          changeName: command.changeName,
+          status: "completed",
+          idempotent: true,
+        };
+      if (
+        existing.state.run.status === "running" ||
+        this.activeWork.has(existingRunId)
+      )
+        throw new Error(`Run ${existingRunId} already has active work`);
+      if (existing.state.run.status === "blocked")
+        throw new Error(
+          `Run ${existingRunId} is blocked; satisfy its gate or operator input before resuming`,
+        );
+      const settings = await loadProjectExecutionSettings(
+        location,
+        existing.state.run.workflowId,
+        existing.state.run.policyId ?? "manual",
+      );
+      await this.preflightDelivery(project.projectId, existingRunId);
+      const runtime = await new RunRuntime(
+        new GitClient(project.root, this.commandRunner),
+        this.herdr,
+        new RuntimeOwnershipStore(project.stateDirectory),
+      ).prepare({
+        runId: existingRunId,
+        stateDirectory: project.stateDirectory,
+      });
+      const incomplete = settings.workflow.phases.filter(
+        ({ id }) => existing.state.phases[id]?.status !== "completed",
+      );
+      const selected =
+        command.type === "phase-run"
+          ? settings.workflow.phases.filter(({ id }) => id === command.phaseId)
+          : command.type === "next"
+            ? incomplete.slice(0, 1)
+            : incomplete;
+      if (command.type === "phase-run" && selected.length === 0)
+        throw new Error(`Unknown phase: ${command.phaseId ?? "(missing)"}`);
+      if (
+        command.type === "phase-run" &&
+        command.phaseId &&
+        existing.state.phases[command.phaseId]?.status === "completed"
+      )
+        throw new Error(
+          `Phase ${command.phaseId} is already completed; use an explicit rerun`,
+        );
+      if (selected.length === 0)
+        throw new Error(
+          `Run ${existingRunId} has no eligible incomplete phase`,
+        );
+      await this.append(project.projectId, existingRunId, {
+        type: "run.transitioned",
+        actor: { type: "service", id: "swf-scheduler" },
+        context: {},
+        data: {
+          from: existing.state.run.status,
+          to: "running",
+          reason: command.type,
+        },
+      });
+      let lastStatus: "completed" | "blocked" | "failed" = "completed";
+      try {
+        for (const phase of selected) {
+          let attempts = 0;
+          do {
+            attempts += 1;
+            lastStatus = await this.executePhase({
+              project,
+              runId: existingRunId,
+              phaseId: phase.id,
+              settings,
+              runtime,
+            });
+          } while (
+            lastStatus === "failed" &&
+            attempts < settings.policy.maxAttempts
+          );
+          if (lastStatus !== "completed") break;
+        }
+      } catch (error) {
+        const interrupted = await store.load(existingRunId);
+        if (interrupted.state.run.status === "running")
+          await this.append(project.projectId, existingRunId, {
+            type: "run.transitioned",
+            actor: { type: "service", id: "swf-scheduler" },
+            context: {},
+            data: {
+              from: "running",
+              to: "paused",
+              reason: `phase did not start: ${error instanceof Error ? error.message : "eligibility failure"}`,
+            },
+          });
+        throw error;
+      }
+      const after = await store.load(existingRunId);
+      const target =
+        lastStatus === "blocked"
+          ? "blocked"
+          : lastStatus === "failed"
+            ? "failed"
+            : Object.values(after.state.phases).every(
+                  ({ status }) => status === "completed",
+                )
+              ? "completed"
+              : "paused";
+      if (target === "completed")
+        await this.persistRunDossier(project.projectId, existingRunId);
+      await this.append(project.projectId, existingRunId, {
+        type: "run.transitioned",
+        actor: { type: "service", id: "swf-scheduler" },
+        context: {},
+        data: {
+          from: "running",
+          to: target,
+          reason: `${command.type} progression stopped`,
+        },
+      });
+      return {
+        runId: existingRunId,
+        changeName: command.changeName,
+        phaseId: selected.at(-1)?.id,
+        status: target,
+      };
+    }
+    if (command.type === "next" || command.type === "phase-run")
+      throw new Error(
+        `No run is bound to ${command.changeName}; start it with swf new or swf run`,
+      );
+    if (command.fromExplorationId && command.description?.trim())
+      throw new Error(
+        "Choose either --description or --from-exploration, not both",
+      );
+    const exploration = command.fromExplorationId
+      ? await new ExplorationStore(project.stateDirectory).promote(
+          command.fromExplorationId,
+        )
+      : undefined;
+    const description = command.description?.trim() ?? exploration?.problem;
+    if (!description)
+      throw new Error(
+        "A non-empty --description or explicit --from-exploration is required for a new change",
+      );
+    const prepared = await this.prepareRun({
+      project,
+      changeName: command.changeName,
+      description,
+      workflowId: command.workflowId ?? config.defaultWorkflow,
+      policyId: command.policyId,
+      authorization: command.authorization,
+    });
+    await writeAtomically(
+      join(
+        project.stateDirectory,
+        "runs",
+        prepared.run.runId,
+        "planning-input.json",
+      ),
+      `${JSON.stringify(
+        exploration
+          ? {
+              kind: "exploration",
+              explorationId: exploration.explorationId,
+              brief: exploration,
+            }
+          : { kind: "description", description },
+        null,
+        2,
+      )}\n`,
+    );
+    await this.append(project.projectId, prepared.run.runId, {
+      type: "run.transitioned",
+      actor: { type: "service", id: "swf-scheduler" },
+      context: {},
+      data: { from: "pending", to: "running", reason: command.type },
+    });
+    const phaseIds = prepared.settings.workflow.phases.map(({ id }) => id);
+    const selected = command.type === "new" ? phaseIds.slice(0, 1) : phaseIds;
+    let lastStatus: "completed" | "blocked" | "failed" = "completed";
+    try {
+      for (const phaseId of selected) {
+        let attempts = 0;
+        do {
+          attempts += 1;
+          lastStatus = await this.executePhase({
+            project,
+            runId: prepared.run.runId,
+            phaseId,
+            settings: prepared.settings,
+            runtime: prepared.runtime,
+          });
+        } while (
+          lastStatus === "failed" &&
+          attempts < prepared.settings.policy.maxAttempts
+        );
+        if (lastStatus !== "completed") break;
+      }
+    } catch (error) {
+      const interrupted = await store.load(prepared.run.runId);
+      if (interrupted.state.run.status === "running")
+        await this.append(project.projectId, prepared.run.runId, {
+          type: "run.transitioned",
+          actor: { type: "service", id: "swf-scheduler" },
+          context: {},
+          data: {
+            from: "running",
+            to: "failed",
+            reason:
+              error instanceof Error ? error.message : "phase startup failed",
+          },
+        });
+      throw error;
+    }
+    const loaded = await store.load(prepared.run.runId);
+    const target =
+      lastStatus === "blocked"
+        ? "blocked"
+        : lastStatus === "failed"
+          ? "failed"
+          : command.type === "new"
+            ? "paused"
+            : Object.values(loaded.state.phases).every(
+                  ({ status }) => status === "completed",
+                )
+              ? "completed"
+              : "paused";
+    if (target === "completed")
+      await this.persistRunDossier(project.projectId, prepared.run.runId);
+    await this.append(project.projectId, prepared.run.runId, {
+      type: "run.transitioned",
+      actor: { type: "service", id: "swf-scheduler" },
+      context: {},
+      data: {
+        from: "running",
+        to: target,
+        reason: `${command.type} progression stopped`,
+      },
+    });
+    return {
+      runId: prepared.run.runId,
+      changeName: command.changeName,
+      phaseId:
+        selected.at(
+          Math.max(
+            0,
+            selected.findIndex(
+              (id) => loaded.state.phases[id]?.status !== "completed",
+            ),
+          ),
+        ) ?? selected.at(-1),
+      status: target,
+    };
+  }
+
+  private async persistRunDossier(
+    projectId: string,
+    runId: string,
+  ): Promise<void> {
+    const { project, store } = await this.runStore(projectId);
+    const loaded = await store.load(runId);
+    const runtime = await readJson<{ worktreePath?: string }>(
+      join(project.stateDirectory, "runs", runId, "runtime.json"),
+    );
+    if (!runtime?.worktreePath) return;
+    const artifacts = new ArtifactStore(
+      project.stateDirectory,
+      runId,
+      this.redactor,
+    );
+    const handoffs = (
+      await Promise.all(
+        (await artifacts.load()).artifacts
+          .filter(({ type }) => type === "phase-handoff")
+          .map(({ outputRef }) =>
+            readJson(join(project.stateDirectory, "runs", runId, outputRef)),
+          ),
+      )
+    ).filter(
+      (value): value is NonNullable<typeof value> => value !== undefined,
+    );
+    let approvals: unknown[] = [];
+    try {
+      approvals = await Promise.all(
+        (
+          await readdir(
+            join(project.stateDirectory, "runs", runId, "approvals"),
+          )
+        )
+          .filter((entry) => entry.endsWith(".json"))
+          .map((entry) =>
+            readJson(
+              join(project.stateDirectory, "runs", runId, "approvals", entry),
+            ),
+          ),
+      );
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+    const planningInput = await readJson<{
+      kind?: string;
+      brief?: {
+        explorationId: string;
+        problem: string;
+        goals: string[];
+        decisions: string[];
+        openQuestions: string[];
+        candidateScope: string;
+        candidateChangeName: string;
+      };
+    }>(join(project.stateDirectory, "runs", runId, "planning-input.json"));
+    await persistChangeDossier({
+      changeRoot: join(
+        runtime.worktreePath,
+        "openspec",
+        "changes",
+        loaded.state.run.changeName,
+      ),
+      runId,
+      artifacts,
+      handoffs: handoffs as never,
+      approvals: approvals.filter(Boolean) as never,
+      checkpoints: Object.values(loaded.state.checkpoints),
+      deliveries: Object.values(loaded.state.deliveries),
+      explorationFoundation:
+        planningInput?.kind === "exploration" ? planningInput.brief : undefined,
+      finalReport: `SWF run ${runId} completed ${loaded.state.run.phaseIds?.length ?? 0} phases for ${loaded.state.run.changeName}.`,
+    });
+    await new GitClient(runtime.worktreePath, this.commandRunner).commit(
+      "swf: persist portable evidence dossier",
+    );
+  }
+
   private async append<T extends EventType>(
     projectId: string,
     runId: string,
@@ -1557,6 +2884,19 @@ export class SwfService {
         result.event.type === "run.transitioned" &&
         result.event.data.to === "completed"
       ) {
+        void this.persistRunDossier(projectId, runId).catch((error) => {
+          this.broker.publish({
+            type: "dossier.write-error",
+            projectId,
+            runId,
+            data: {
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "portable dossier generation failed",
+            },
+          });
+        });
         void this.deliver(projectId, runId).catch((error) => {
           this.broker.publish({
             type: "delivery.start-error",
@@ -1580,6 +2920,10 @@ export class SwfService {
 
   private async commandUnredacted(command: ServiceCommand): Promise<unknown> {
     this.requireRunning();
+    if (command.childContext?.childMode && !command.childContext.allowNested)
+      throw new Error(
+        "Child phase invocations cannot mutate SWF orchestration without explicit nested-execution permission",
+      );
     await this.audit.append({
       operation: `command.${command.type}`,
       actor: {
@@ -1597,9 +2941,283 @@ export class SwfService {
       outcome: "accepted",
       details: { type: command.type },
     });
+    if (
+      command.type === "new" ||
+      command.type === "run" ||
+      command.type === "next" ||
+      command.type === "phase-run"
+    )
+      return this.enterWorkflow(command);
     if (command.type === "blocked-input") {
       await this.submitBlockedInput(command.invocationId, command.response);
       return;
+    }
+    if (command.type === "explore-start") {
+      const project = await this.project(command.projectId);
+      const store = new ExplorationStore(project.stateDirectory);
+      const exploration = await store.start(command.idea);
+      const git = new GitClient(project.root, this.commandRunner);
+      const before = await git.status();
+      const files = await this.commandRunner.run("git", ["ls-files"], {
+        cwd: project.root,
+      });
+      const after = await git.status();
+      if (JSON.stringify(before.files) !== JSON.stringify(after.files))
+        throw new Error("Read-only exploration changed repository state");
+      const candidateChangeName =
+        command.candidateChangeName ??
+        (command.idea
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 60) ||
+          "explored-change");
+      await store.appendTranscript(
+        exploration.explorationId,
+        `Read-only repository inspection:\n${files.stdout}`,
+      );
+      const question =
+        "What constraints or non-goals should Planning preserve?";
+      await store.event(exploration.explorationId, "question", { question });
+      const brief = await store.recordBrief({
+        explorationId: exploration.explorationId,
+        problem: command.idea.trim(),
+        goals: [command.idea.trim()],
+        nonGoals: [],
+        options: [],
+        decisions: [],
+        openQuestions: [question],
+        codebaseFindings: files.stdout
+          .split("\n")
+          .filter(Boolean)
+          .slice(0, 100),
+        candidateScope: "Refine during Planning",
+        candidateChangeName,
+      });
+      return { exploration: await store.get(exploration.explorationId), brief };
+    }
+    if (
+      command.type === "explore-resume" ||
+      command.type === "explore-cancel" ||
+      command.type === "explore-discard" ||
+      command.type === "explore-promote" ||
+      command.type === "explore-answer"
+    ) {
+      const project = await this.project(command.projectId);
+      const store = new ExplorationStore(project.stateDirectory);
+      if (command.type === "explore-resume")
+        return store.resume(command.explorationId);
+      if (command.type === "explore-cancel")
+        return store.cancel(command.explorationId);
+      if (command.type === "explore-discard")
+        return store.discard(command.explorationId);
+      if (command.type === "explore-answer") {
+        await store.answer(command.explorationId, command.answer ?? "");
+        return store.get(command.explorationId);
+      }
+      return store.promote(command.explorationId);
+    }
+    if (
+      command.type === "phase-rerun" ||
+      command.type === "phase-skip" ||
+      command.type === "check-run"
+    ) {
+      const project = await this.project(command.projectId);
+      const location = await findProjectRoot(project.root);
+      if (!location?.initialized) throw new Error("Project is not initialized");
+      const store = new RunEventStore(project.stateDirectory, {
+        redaction: this.redactor,
+      });
+      const runId = await store.findRunByChangeIdentity(
+        `openspec/changes/${command.changeName}`,
+      );
+      if (!runId) throw new Error(`No run is bound to ${command.changeName}`);
+      const loaded = await store.load(runId);
+      const settings = await loadProjectExecutionSettings(
+        location,
+        loaded.state.run.workflowId,
+        loaded.state.run.policyId ?? "manual",
+      );
+      if (command.type === "phase-rerun") {
+        if (!command.phaseId) throw new Error("phaseId is required for rerun");
+        const preview = previewPhaseRerun(
+          settings.workflow,
+          loaded.state,
+          command.phaseId,
+        );
+        if (!command.authorized)
+          return { preview, requiresAuthorization: true };
+        await new ArtifactStore(
+          project.stateDirectory,
+          runId,
+          this.redactor,
+        ).invalidateForRunMutation({
+          kind: "reset",
+          artifactIds: preview.invalidatedArtifactIds,
+        });
+        for (const phaseId of preview.invalidatedPhaseIds) {
+          const status = loaded.state.phases[phaseId]?.status;
+          if (status === "completed")
+            await this.append(project.projectId, runId, {
+              type: "phase.transitioned",
+              actor: { type: "user", id: "operator" },
+              context: { phaseId },
+              data: {
+                phaseId,
+                from: "completed",
+                to: "pending",
+                reason: "authorized rerun invalidation",
+              },
+            });
+        }
+        for (const delivery of Object.values(loaded.state.deliveries))
+          await this.append(project.projectId, runId, {
+            type: "delivery.recorded",
+            actor: { type: "user", id: "operator" },
+            context: {},
+            data: { delivery: { ...delivery, status: "pending" } },
+          });
+        if (loaded.state.run.status === "completed")
+          await this.append(project.projectId, runId, {
+            type: "run.transitioned",
+            actor: { type: "user", id: "operator" },
+            context: {},
+            data: {
+              from: "completed",
+              to: "pending",
+              reason: "authorized phase rerun",
+            },
+          });
+        const attemptId = randomUUID();
+        await this.append(project.projectId, runId, {
+          type: "attempt.started",
+          actor: { type: "user", id: "operator" },
+          context: { phaseId: command.phaseId, attemptId },
+          data: {
+            attemptId,
+            phaseId: command.phaseId,
+            number:
+              (loaded.state.phases[command.phaseId]?.attemptIds.length ?? 0) +
+              1,
+            kind: "rerun",
+          },
+        });
+        await this.append(project.projectId, runId, {
+          type: "phase.rerun",
+          actor: { type: "user", id: "operator" },
+          context: { phaseId: command.phaseId, attemptId },
+          data: {
+            phaseId: command.phaseId,
+            attemptId,
+            reason: "authorized rerun",
+          },
+        });
+        await this.append(project.projectId, runId, {
+          type: "attempt.completed",
+          actor: { type: "service", id: "swf-scheduler" },
+          context: { phaseId: command.phaseId, attemptId },
+          data: {
+            attemptId,
+            status: "completed",
+            reason: "rerun invalidation applied",
+          },
+        });
+        return this.enterWorkflow({
+          type: "phase-run",
+          projectId: command.projectId,
+          changeName: command.changeName,
+          phaseId: command.phaseId,
+        });
+      }
+      if (command.type === "phase-skip") {
+        if (!command.authorized)
+          throw new Error("Phase skip requires explicit authorization");
+        if (!command.phaseId) throw new Error("phaseId is required for skip");
+        const status = loaded.state.phases[command.phaseId]?.status;
+        if (!status) throw new Error(`Unknown phase: ${command.phaseId}`);
+        await this.append(project.projectId, runId, {
+          type: "phase.transitioned",
+          actor: { type: "user", id: "operator" },
+          context: { phaseId: command.phaseId },
+          data: {
+            phaseId: command.phaseId,
+            from: status,
+            to: "skipped",
+            reason: "authorized skip",
+          },
+        });
+        return { runId, phaseId: command.phaseId, status: "skipped" };
+      }
+      if (!command.checkId) throw new Error("checkId is required");
+      const phase = settings.workflow.phases.find(({ checks }) =>
+        checks.some(({ id }) => id === command.checkId),
+      );
+      const check = phase?.checks.find(({ id }) => id === command.checkId);
+      if (!phase || !check)
+        throw new Error(`Unknown declared check: ${command.checkId}`);
+      const runtime = await readJson<{ worktreePath?: string }>(
+        join(project.stateDirectory, "runs", runId, "runtime.json"),
+      );
+      if (!runtime?.worktreePath)
+        throw new Error(`Run ${runId} has no recorded worktree`);
+      const artifacts = new ArtifactStore(
+        project.stateDirectory,
+        runId,
+        this.redactor,
+      );
+      const commit = await new GitClient(
+        runtime.worktreePath,
+        this.commandRunner,
+      ).head();
+      const evidence =
+        check.type === "command" && check.command
+          ? await runCommandCheck({
+              runner: this.commandRunner,
+              artifacts,
+              request: {
+                checkId: check.id,
+                phaseId: phase.id,
+                command: "/bin/sh",
+                args: ["-lc", check.command],
+                configuration: check.options,
+                commit,
+                cwd: runtime.worktreePath,
+              },
+            })
+          : check.type === "openspec"
+            ? await runOpenSpecCheck({
+                runner: this.commandRunner,
+                artifacts,
+                checkId: check.id,
+                phaseId: phase.id,
+                changeName: loaded.state.run.changeName,
+                commit,
+                cwd: runtime.worktreePath,
+              })
+            : undefined;
+      if (!evidence?.artifact)
+        throw new Error(
+          `Check ${check.id} requires its ${check.type} executor`,
+        );
+      await this.append(project.projectId, runId, {
+        type: "artifact.recorded",
+        actor: { type: "service", id: "swf-check-runner" },
+        context: { phaseId: phase.id, checkId: check.id },
+        data: { artifact: evidence.artifact },
+      });
+      await this.append(project.projectId, runId, {
+        type: "check.recorded",
+        actor: { type: "service", id: "swf-check-runner" },
+        context: { phaseId: phase.id, checkId: check.id },
+        data: {
+          checkId: check.id,
+          phaseId: phase.id,
+          status: evidence.status,
+          artifactId: evidence.artifact.artifactId,
+          reason: evidence.summary,
+        },
+      });
+      return evidence;
     }
     if (command.type === "deliver" || command.type === "refresh-delivery") {
       await this.deliver(command.projectId, command.runId, {
@@ -1723,6 +3341,8 @@ export class SwfService {
     }
     if (!this.acceptingWork && command.type === "start")
       throw new Error("SWF service is draining and cannot start new work");
+    if (!("runId" in command))
+      throw new Error(`Unsupported workflow entry command: ${command.type}`);
     const { store } = await this.runStore(command.projectId);
     const loaded = await store.load(command.runId);
     if (command.type === "start") {
@@ -1742,6 +3362,8 @@ export class SwfService {
       command.type === "resume" ||
       command.type === "cancel"
     ) {
+      if (command.type === "cancel")
+        await this.activeWork.get(command.runId)?.interrupt();
       const target =
         command.type === "pause"
           ? "paused"
@@ -1760,7 +3382,35 @@ export class SwfService {
       });
       return;
     }
-    if (command.type === "approve" || command.type === "reject") {
+    if (
+      command.type === "approve" ||
+      command.type === "reject" ||
+      command.type === "request-changes"
+    ) {
+      const decision =
+        command.type === "approve"
+          ? "approved"
+          : command.type === "reject"
+            ? "rejected"
+            : "request-changes";
+      const approval = recordHumanApproval({
+        runId: command.runId,
+        phaseId: command.phaseId,
+        actor: { type: "user", id: command.actorId },
+        decision,
+        reason: command.reason,
+        evidenceArtifactIds: command.evidenceArtifactIds,
+      });
+      await writeAtomically(
+        join(
+          (await this.project(command.projectId)).stateDirectory,
+          "runs",
+          command.runId,
+          "approvals",
+          `${approval.approvalId}.json`,
+        ),
+        `${JSON.stringify(approval, null, 2)}\n`,
+      );
       await this.append(command.projectId, command.runId, {
         type: "gate.decided",
         actor: { type: "user", id: command.actorId },
@@ -1769,42 +3419,125 @@ export class SwfService {
           gateId: command.gateId,
           phaseId: command.phaseId,
           status: command.type === "approve" ? "satisfied" : "rejected",
-          reason: command.reason,
+          reason:
+            command.reason ??
+            (command.type === "request-changes"
+              ? "Operator requested changes"
+              : undefined),
         },
       });
-      return;
+      if (command.type === "request-changes") {
+        const attemptId = randomUUID();
+        const number =
+          (loaded.state.phases[command.phaseId]?.attemptIds.length ?? 0) + 1;
+        await this.append(command.projectId, command.runId, {
+          type: "attempt.started",
+          actor: { type: "user", id: command.actorId },
+          context: { phaseId: command.phaseId, attemptId },
+          data: {
+            attemptId,
+            phaseId: command.phaseId,
+            number,
+            kind: "remediation",
+          },
+        });
+        await this.append(command.projectId, command.runId, {
+          type: "run.remediated",
+          actor: { type: "user", id: command.actorId },
+          context: { phaseId: command.phaseId, attemptId },
+          data: {
+            phaseId: command.phaseId,
+            attemptId,
+            reason: command.reason ?? "Operator requested changes",
+          },
+        });
+      }
+      return { approval };
     }
-    if (command.type === "remediate" || command.type === "rollback") {
+    if (command.type === "rollback") {
+      if (command.authorized !== true)
+        throw new Error("Rollback requires explicit authorization");
+      const project = await this.project(command.projectId);
+      const runtime = await readJson<{ worktreePath?: string }>(
+        join(project.stateDirectory, "runs", command.runId, "runtime.json"),
+      );
+      if (!runtime?.worktreePath)
+        throw new Error(`Run ${command.runId} has no recorded worktree`);
+      const artifacts = new ArtifactStore(
+        project.stateDirectory,
+        command.runId,
+        this.redactor,
+      );
+      await new CheckpointManager(
+        project.stateDirectory,
+        command.runId,
+        new GitClient(runtime.worktreePath, this.commandRunner),
+        artifacts,
+      ).rollback({
+        checkpointId: command.checkpointId,
+        phaseId: command.phaseId,
+        invalidatedPhaseIds: command.invalidatedPhaseIds ?? [],
+        invalidatedArtifactIds: command.invalidatedArtifactIds ?? [],
+        authorized: true,
+      });
       const attemptId = randomUUID();
-      const kind = command.type === "remediate" ? "remediation" : "rollback";
       const number =
         (loaded.state.phases[command.phaseId]?.attemptIds.length ?? 0) + 1;
       await this.append(command.projectId, command.runId, {
         type: "attempt.started",
         actor,
         context: { phaseId: command.phaseId, attemptId },
-        data: { attemptId, phaseId: command.phaseId, number, kind },
+        data: {
+          attemptId,
+          phaseId: command.phaseId,
+          number,
+          kind: "rollback",
+        },
       });
-      if (command.type === "remediate") {
-        await this.append(command.projectId, command.runId, {
-          type: "run.remediated",
-          actor,
-          context: { phaseId: command.phaseId, attemptId },
-          data: { phaseId: command.phaseId, attemptId, reason: command.reason },
-        });
-      } else {
-        await this.append(command.projectId, command.runId, {
-          type: "run.rolled-back",
-          actor,
-          context: { phaseId: command.phaseId, attemptId },
-          data: {
-            checkpointId: command.checkpointId,
-            phaseId: command.phaseId,
-            attemptId,
-            invalidatedPhaseIds: command.invalidatedPhaseIds ?? [],
-          },
-        });
-      }
+      await this.append(command.projectId, command.runId, {
+        type: "run.rolled-back",
+        actor,
+        context: { phaseId: command.phaseId, attemptId },
+        data: {
+          checkpointId: command.checkpointId,
+          phaseId: command.phaseId,
+          attemptId,
+          invalidatedPhaseIds: command.invalidatedPhaseIds ?? [],
+        },
+      });
+      await this.append(command.projectId, command.runId, {
+        type: "attempt.completed",
+        actor,
+        context: { phaseId: command.phaseId, attemptId },
+        data: {
+          attemptId,
+          status: "completed",
+          reason: "Rollback completed",
+        },
+      });
+      return;
+    }
+    if (command.type === "remediate") {
+      const attemptId = randomUUID();
+      const number =
+        (loaded.state.phases[command.phaseId]?.attemptIds.length ?? 0) + 1;
+      await this.append(command.projectId, command.runId, {
+        type: "attempt.started",
+        actor,
+        context: { phaseId: command.phaseId, attemptId },
+        data: {
+          attemptId,
+          phaseId: command.phaseId,
+          number,
+          kind: "remediation",
+        },
+      });
+      await this.append(command.projectId, command.runId, {
+        type: "run.remediated",
+        actor,
+        context: { phaseId: command.phaseId, attemptId },
+        data: { phaseId: command.phaseId, attemptId, reason: command.reason },
+      });
     }
   }
 
@@ -1875,12 +3608,37 @@ export class SwfService {
     this.metadata = undefined;
   }
 
-  async recover(
-    reconcile: RecoveryReconciler = async () => ({
-      action: "pause",
-      reason: "service restart requires reconciliation",
-    }),
-  ): Promise<void> {
+  private async reconcileRecoveredRun(
+    project: RegisteredProject,
+    state: RunState,
+  ): Promise<RecoveryAction> {
+    if (state.run.status === "paused")
+      return { action: "pause", reason: "run was durably paused" };
+    const runtime = new RunRuntime(
+      new GitClient(project.root, this.commandRunner),
+      this.herdr,
+      new RuntimeOwnershipStore(project.stateDirectory),
+    );
+    const observed = await runtime.reconcile(state.run.runId);
+    if (observed.status === "active") return { action: "resume" };
+    if (observed.status === "blocked")
+      return {
+        action: "block",
+        reason: `owned Herdr pane ${observed.paneId ?? "unknown"} is blocked`,
+      };
+    if (observed.status === "completed")
+      return {
+        action: "pause",
+        reason:
+          "owned execution completed; phase finalization must resume from durable evidence",
+      };
+    return {
+      action: "block",
+      reason: `owned execution resource is ${observed.status}`,
+    };
+  }
+
+  async recover(reconcile?: RecoveryReconciler): Promise<void> {
     this.requireRunning();
     const projects = await this.registry.reconcile();
     for (const project of projects) {
@@ -1918,7 +3676,9 @@ export class SwfService {
         }
         if (!["running", "blocked", "paused"].includes(state.run.status))
           continue;
-        const action = await reconcile(project, state);
+        const action = reconcile
+          ? await reconcile(project, state)
+          : await this.reconcileRecoveredRun(project, state);
         if (action.action === "resume") continue;
         const target =
           action.action === "complete"

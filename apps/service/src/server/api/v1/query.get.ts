@@ -11,6 +11,7 @@ const resources = new Set<ServiceQuery["resource"]>([
   "phases",
   "invocations",
   "artifacts",
+  "approvals",
   "costs",
   "configuration",
   "delivery",
@@ -18,6 +19,8 @@ const resources = new Set<ServiceQuery["resource"]>([
   "budgets",
   "operations",
   "blocked-inputs",
+  "explorations",
+  "exploration",
 ]);
 
 export default defineEventHandler(async (event) => {

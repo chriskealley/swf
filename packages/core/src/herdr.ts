@@ -27,6 +27,7 @@ export interface HerdrLaunch {
   cwd: string;
   label: string;
   command: string;
+  environment?: Record<string, string>;
   timeoutMs?: number;
 }
 
@@ -238,10 +239,13 @@ export class HerdrClient {
 
   async launch(input: HerdrLaunch): Promise<HerdrPaneObservation> {
     const tab = await this.createTab(input);
-    await this.execute(
-      ["pane", "run", tab.paneId!, input.command],
-      input.timeoutMs,
-    );
+    const environment = Object.entries(input.environment ?? {})
+      .map(([key, value]) => `${key}='${value.replaceAll("'", `'"'"'`)}'`)
+      .join(" ");
+    const command = environment
+      ? `env ${environment} ${input.command}`
+      : input.command;
+    await this.execute(["pane", "run", tab.paneId!, command], input.timeoutMs);
     const observation = await this.waitForReady(tab.paneId!, input.timeoutMs);
     return {
       ...tab,

@@ -34,6 +34,7 @@ export interface AdapterValidation {
 }
 
 export interface AdapterLaunchRequest {
+  invocationId?: string;
   runId: string;
   phaseId: string;
   workUnitId: string;
@@ -272,10 +273,11 @@ export class PiHarnessAdapter implements HarnessAdapter {
       cwd: request.cwd,
       label: `pi-${request.phaseId}-${request.workUnitId}`,
       command: this.command(request),
+      environment: request.environment,
       timeoutMs: request.timeoutMs,
     });
     const invocation: AdapterInvocation = {
-      invocationId: randomUUID(),
+      invocationId: request.invocationId ?? randomUUID(),
       runId: request.runId,
       phaseId: request.phaseId,
       workUnitId: request.workUnitId,
@@ -459,10 +461,20 @@ export class HarnessWorkExecutor implements WorkExecutor {
       cwd: string;
       timeoutMs?: number;
       beforeLaunch?: (request: AdapterLaunchRequest) => Promise<void>;
+      afterLaunch?: (
+        adapter: HarnessAdapter,
+        invocation: AdapterInvocation,
+      ) => Promise<void>;
+      onObservation?: (
+        adapter: HarnessAdapter,
+        invocation: AdapterInvocation,
+        observation: AdapterObservation,
+      ) => Promise<void>;
       afterCollect?: (
         invocation: AdapterInvocation,
         result: AdapterResult,
       ) => Promise<void>;
+      pollIntervalMs?: number;
     },
     readonly fallback?: WorkExecutor,
   ) {}
@@ -504,7 +516,9 @@ export class HarnessWorkExecutor implements WorkExecutor {
       typeof unit.options.prompt === "string"
         ? unit.options.prompt
         : `${context.phase.title}: ${context.phase.id}`;
+    const invocationId = randomUUID();
     const request: AdapterLaunchRequest = {
+      invocationId,
       runId: this.context.runId,
       phaseId: context.phase.id,
       workUnitId: unit.id,
@@ -518,15 +532,34 @@ export class HarnessWorkExecutor implements WorkExecutor {
         typeof context.resolved.timeoutMs === "number"
           ? context.resolved.timeoutMs
           : this.context.timeoutMs,
+      environment: childInvocationEnvironment({
+        runId: this.context.runId,
+        phaseId: context.phase.id,
+        invocationId,
+        allowNested: context.resolved.allowNestedOrchestration === true,
+      }),
     };
     await this.context.beforeLaunch?.(request);
     const invocation = await adapter.launch(request);
-    const observation = await adapter.observe(invocation);
-    if (observation.status === "blocked")
-      return {
-        status: "blocked",
-        output: observation.blockedPrompt ?? observation.message,
-      };
+    await this.context.afterLaunch?.(adapter, invocation);
+    const deadline = Date.now() + (request.timeoutMs ?? 30 * 60_000);
+    while (true) {
+      const observation = await adapter.observe(invocation);
+      await this.context.onObservation?.(adapter, invocation, observation);
+      if (observation.status === "blocked")
+        return {
+          status: "blocked",
+          output: observation.blockedPrompt ?? observation.message,
+        };
+      if (observation.status !== "running") break;
+      if (Date.now() >= deadline) {
+        await adapter.cancel(invocation);
+        return { status: "failed", output: "Harness invocation timed out" };
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.context.pollIntervalMs ?? 250),
+      );
+    }
     const result = await adapter.collect(invocation);
     await this.context.afterCollect?.(invocation, result);
     return {

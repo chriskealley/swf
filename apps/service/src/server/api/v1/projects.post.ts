@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
   }
   return {
     schemaVersion: 1,
-    project: await service.registerProject({
+    result: await service.registerProject({
       projectId: body.projectId,
       displayName: body.displayName,
       root: body.root,
