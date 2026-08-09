@@ -1,4 +1,9 @@
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import {
   open,
   mkdir,
@@ -10,7 +15,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import {
   BlockedAgentRouter,
   RunEventStore,
@@ -338,6 +343,7 @@ export interface ServiceOptions {
 
 export interface ServiceQuery {
   resource:
+    | "overview"
     | "projects"
     | "runs"
     | "run"
@@ -347,9 +353,37 @@ export interface ServiceQuery {
     | "costs"
     | "configuration"
     | "delivery"
+    | "output"
     | "blocked-inputs";
   projectId?: string;
   runId?: string;
+  ref?: string;
+  raw?: boolean;
+}
+
+export interface PruningCriteria {
+  ageDays?: number;
+  runId?: string;
+  budgetBytes?: number;
+}
+
+export interface PruningPreview {
+  schemaVersion: 1;
+  confirmationId: string;
+  criteria: PruningCriteria;
+  candidates: Array<{
+    runId: string;
+    ref: string;
+    bytes: number;
+    modifiedAt: string;
+  }>;
+  totalBytes: number;
+  expiresAt: string;
+}
+
+interface PendingPruning extends PruningPreview {
+  projectId: string;
+  paths: string[];
 }
 
 export type ServiceCommand =
@@ -391,6 +425,7 @@ export class SwfService {
   private readonly broker = new EventBroker();
   private readonly blockedAgents = new BlockedAgentRouter();
   private readonly activeWork = new Map<string, WorkRegistration>();
+  private readonly pendingPruning = new Map<string, PendingPruning>();
   private lock?: Awaited<ReturnType<typeof open>>;
   private metadata?: ServiceMetadata;
   private acceptingWork = false;
@@ -587,8 +622,167 @@ export class SwfService {
     }
   }
 
+  private summarizeCosts(invocations: RunState["invocations"]): {
+    exactUsd: number;
+    estimatedUsd: number;
+    unknown: number;
+  } {
+    return Object.values(invocations).reduce(
+      (summary, invocation) => {
+        const amount = invocation.cost.amountUsd;
+        if (amount === undefined || invocation.cost.quality === "unknown")
+          summary.unknown += 1;
+        else if (invocation.cost.quality === "estimated")
+          summary.estimatedUsd += amount;
+        else summary.exactUsd += amount;
+        return summary;
+      },
+      { exactUsd: 0, estimatedUsd: 0, unknown: 0 },
+    );
+  }
+
+  private async overview(): Promise<unknown> {
+    const projects = await this.registry.reconcile();
+    const summaries = await Promise.all(
+      projects.map(async (project) => {
+        if (project.availability !== "available")
+          return {
+            ...project,
+            activeRuns: 0,
+            waitingGates: 0,
+            failures: 0,
+            recentInvocations: [],
+            costs: { exactUsd: 0, estimatedUsd: 0, unknown: 0 },
+          };
+        const runs = await this.listRuns(project);
+        const store = new RunEventStore(project.stateDirectory);
+        const states = await Promise.all(
+          runs.map((run) =>
+            store.load(run.runId).then((loaded) => loaded.state),
+          ),
+        );
+        const invocations = states.flatMap((state) =>
+          Object.values(state.invocations),
+        );
+        const costs = this.summarizeCosts(
+          Object.fromEntries(
+            invocations.map((invocation) => [
+              invocation.invocationId,
+              invocation,
+            ]),
+          ),
+        );
+        return {
+          ...project,
+          activeRuns: runs.filter((run) =>
+            ["pending", "running", "blocked", "paused"].includes(run.status),
+          ).length,
+          waitingGates: states.reduce(
+            (count, state) =>
+              count +
+              Object.values(state.phases).filter(
+                (phase) =>
+                  phase.gate?.status === "blocked" ||
+                  (phase.status === "blocked" &&
+                    phase.gate?.status !== "rejected"),
+              ).length,
+            0,
+          ),
+          failures: runs.filter((run) => run.status === "failed").length,
+          recentInvocations: invocations
+            .sort((left, right) =>
+              right.startedAt.localeCompare(left.startedAt),
+            )
+            .slice(0, 5),
+          costs,
+        };
+      }),
+    );
+    return {
+      projects: summaries,
+      totals: summaries.reduce(
+        (total, project) => ({
+          projects: total.projects + 1,
+          activeRuns: total.activeRuns + project.activeRuns,
+          waitingGates: total.waitingGates + project.waitingGates,
+          failures: total.failures + project.failures,
+          exactUsd: total.exactUsd + project.costs.exactUsd,
+          estimatedUsd: total.estimatedUsd + project.costs.estimatedUsd,
+          unknown: total.unknown + project.costs.unknown,
+        }),
+        {
+          projects: 0,
+          activeRuns: 0,
+          waitingGates: 0,
+          failures: 0,
+          exactUsd: 0,
+          estimatedUsd: 0,
+          unknown: 0,
+        },
+      ),
+    };
+  }
+
+  private runReferencePath(
+    project: RegisteredProject,
+    runId: string,
+    reference: string,
+  ): string {
+    const root = resolve(project.stateDirectory, "runs", runId);
+    const path = resolve(root, reference);
+    const pathRelative = relative(root, path);
+    if (
+      !reference ||
+      pathRelative.startsWith("..") ||
+      pathRelative === "" ||
+      resolve(path) === root
+    )
+      throw new Error("Output reference must remain inside the selected run");
+    return path;
+  }
+
+  private async readOutput(
+    project: RegisteredProject,
+    runId: string,
+    reference: string,
+    raw = false,
+  ): Promise<unknown> {
+    const path = this.runReferencePath(project, runId, reference);
+    try {
+      const root = await realpath(
+        resolve(project.stateDirectory, "runs", runId),
+      );
+      const canonicalPath = await realpath(path);
+      if (relative(root, canonicalPath).startsWith(".."))
+        throw new Error("Output reference resolves outside the selected run");
+      const info = await stat(canonicalPath);
+      if (!info.isFile()) throw new Error("Output reference is not a file");
+      const maximum = raw ? 5 * 1024 * 1024 : 32 * 1024;
+      const contents = await readFile(canonicalPath);
+      const returned = contents.subarray(0, maximum);
+      return {
+        ref: reference,
+        available: true,
+        content: returned.toString("utf8"),
+        bytes: contents.byteLength,
+        returnedBytes: returned.byteLength,
+        truncated: contents.byteLength > returned.byteLength,
+        raw,
+      };
+    } catch (error) {
+      if (isNotFound(error))
+        return {
+          ref: reference,
+          available: false,
+          reason: "Output was pruned or is unavailable",
+        };
+      throw error;
+    }
+  }
+
   async query(query: ServiceQuery): Promise<unknown> {
     this.requireRunning();
+    if (query.resource === "overview") return this.overview();
     if (query.resource === "projects") return this.registry.reconcile();
     if (query.resource === "blocked-inputs") return this.blockedInputs();
     if (!query.projectId)
@@ -607,10 +801,22 @@ export class SwfService {
     }
     if (!query.runId)
       throw new Error(`runId is required for ${query.resource}`);
+    if (query.resource === "output") {
+      if (!query.ref) throw new Error("ref is required for output");
+      return this.readOutput(project, query.runId, query.ref, query.raw);
+    }
     const loaded = await store.load(query.runId);
     switch (query.resource) {
-      case "run":
-        return loaded;
+      case "run": {
+        const runtime = await readJson<Record<string, unknown>>(
+          join(project.stateDirectory, "runs", query.runId, "runtime.json"),
+        );
+        return {
+          ...loaded,
+          runtime,
+          costs: this.summarizeCosts(loaded.state.invocations),
+        };
+      }
       case "phases":
         return loaded.state.phases;
       case "invocations":
@@ -619,26 +825,202 @@ export class SwfService {
         return loaded.state.artifacts;
       case "delivery":
         return loaded.state.deliveries;
-      case "costs": {
-        const invocations = Object.values(loaded.state.invocations);
-        return invocations.reduce(
-          (summary, invocation) => {
-            const amount = invocation.cost.amountUsd;
-            if (amount === undefined || invocation.cost.quality === "unknown")
-              summary.unknown += 1;
-            else if (invocation.cost.quality === "estimated")
-              summary.estimatedUsd += amount;
-            else summary.exactUsd += amount;
-            return summary;
-          },
-          { exactUsd: 0, estimatedUsd: 0, unknown: 0 },
-        );
-      }
+      case "costs":
+        return this.summarizeCosts(loaded.state.invocations);
       default:
         throw new Error(
           `Unsupported query resource: ${query.resource satisfies never}`,
         );
     }
+  }
+
+  private async rawOutputFiles(
+    project: RegisteredProject,
+    criteria: PruningCriteria,
+  ): Promise<
+    Array<{
+      runId: string;
+      ref: string;
+      path: string;
+      bytes: number;
+      modifiedAt: string;
+    }>
+  > {
+    const runs = criteria.runId
+      ? [criteria.runId]
+      : (await this.listRuns(project)).map((run) => run.runId);
+    const files: Array<{
+      runId: string;
+      ref: string;
+      path: string;
+      bytes: number;
+      modifiedAt: string;
+    }> = [];
+    const walk = async (
+      runId: string,
+      directory: string,
+      prefix: string,
+    ): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if (isNotFound(error)) return;
+        throw error;
+      }
+      for (const entry of entries) {
+        const path = join(directory, entry.name);
+        const ref = `${prefix}/${entry.name}`;
+        if (entry.isDirectory()) await walk(runId, path, ref);
+        else if (entry.isFile()) {
+          const info = await stat(path);
+          files.push({
+            runId,
+            ref,
+            path,
+            bytes: info.size,
+            modifiedAt: info.mtime.toISOString(),
+          });
+        }
+      }
+    };
+    for (const runId of runs)
+      await walk(
+        runId,
+        join(project.stateDirectory, "runs", runId, "raw"),
+        "raw",
+      );
+    return files;
+  }
+
+  async previewPruning(
+    projectId: string,
+    criteria: PruningCriteria,
+  ): Promise<PruningPreview> {
+    this.requireRunning();
+    if (
+      criteria.ageDays === undefined &&
+      criteria.runId === undefined &&
+      criteria.budgetBytes === undefined
+    )
+      throw new Error(
+        "Pruning requires an age, selected run, or storage budget",
+      );
+    if (
+      criteria.ageDays !== undefined &&
+      (!Number.isFinite(criteria.ageDays) || criteria.ageDays < 0)
+    )
+      throw new Error("ageDays must be a non-negative number");
+    if (
+      criteria.budgetBytes !== undefined &&
+      (!Number.isSafeInteger(criteria.budgetBytes) || criteria.budgetBytes < 0)
+    )
+      throw new Error("budgetBytes must be a non-negative integer");
+    const project = await this.project(projectId);
+    const files = (await this.rawOutputFiles(project, criteria)).sort(
+      (left, right) => left.modifiedAt.localeCompare(right.modifiedAt),
+    );
+    const cutoff =
+      criteria.ageDays === undefined
+        ? undefined
+        : Date.now() - criteria.ageDays * 86_400_000;
+    const eligible = files.filter(
+      (file) =>
+        cutoff === undefined || new Date(file.modifiedAt).getTime() <= cutoff,
+    );
+    let candidates = eligible;
+    if (criteria.budgetBytes !== undefined) {
+      const bytesToRemove = Math.max(
+        0,
+        files.reduce((sum, file) => sum + file.bytes, 0) - criteria.budgetBytes,
+      );
+      let selectedBytes = 0;
+      candidates = eligible.filter((file) => {
+        if (selectedBytes >= bytesToRemove) return false;
+        selectedBytes += file.bytes;
+        return true;
+      });
+    }
+    const digest = createHash("sha256")
+      .update(
+        JSON.stringify({
+          projectId,
+          criteria,
+          candidates: candidates.map(({ runId, ref, bytes, modifiedAt }) => ({
+            runId,
+            ref,
+            bytes,
+            modifiedAt,
+          })),
+        }),
+      )
+      .digest("base64url")
+      .slice(0, 16);
+    const confirmationId = `${randomUUID()}.${digest}`;
+    const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    const preview: PendingPruning = {
+      schemaVersion: 1,
+      confirmationId,
+      criteria,
+      candidates: candidates.map(({ runId, ref, bytes, modifiedAt }) => ({
+        runId,
+        ref,
+        bytes,
+        modifiedAt,
+      })),
+      totalBytes: candidates.reduce((sum, file) => sum + file.bytes, 0),
+      expiresAt,
+      projectId,
+      paths: candidates.map((file) => file.path),
+    };
+    this.pendingPruning.set(confirmationId, preview);
+    return {
+      schemaVersion: preview.schemaVersion,
+      confirmationId: preview.confirmationId,
+      criteria: preview.criteria,
+      candidates: preview.candidates,
+      totalBytes: preview.totalBytes,
+      expiresAt: preview.expiresAt,
+    };
+  }
+
+  async confirmPruning(
+    projectId: string,
+    confirmationId: string,
+  ): Promise<{ pruned: number; bytes: number }> {
+    this.requireRunning();
+    const preview = this.pendingPruning.get(confirmationId);
+    if (
+      !preview ||
+      preview.projectId !== projectId ||
+      new Date(preview.expiresAt).getTime() < Date.now()
+    )
+      throw new Error(
+        "Pruning confirmation is missing or expired; request a fresh preview",
+      );
+    let pruned = 0;
+    let bytes = 0;
+    for (const [index, path] of preview.paths.entries()) {
+      try {
+        const info = await stat(path);
+        if (!info.isFile()) continue;
+        await rm(path);
+        pruned += 1;
+        bytes += info.size;
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+      }
+      const candidate = preview.candidates[index];
+      if (candidate)
+        this.broker.publish({
+          type: "output.pruned",
+          projectId,
+          runId: candidate.runId,
+          data: { ref: candidate.ref, bytes: candidate.bytes },
+        });
+    }
+    this.pendingPruning.delete(confirmationId);
+    return { pruned, bytes };
   }
 
   private async append<T extends EventType>(

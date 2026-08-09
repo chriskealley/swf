@@ -1,8 +1,5 @@
 import { createApp } from "vue";
-
-const App = {
-  template:
-    "<main><h1>Software Factory</h1><p>Dashboard foundation is ready.</p></main>",
-};
+import App from "./App.vue";
+import "./styles.css";
 
 createApp(App).mount("#app");

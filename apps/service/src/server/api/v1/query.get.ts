@@ -3,6 +3,7 @@ import { getService } from "../../runtime.js";
 import type { ServiceQuery } from "../../swf-service.js";
 
 const resources = new Set<ServiceQuery["resource"]>([
+  "overview",
   "projects",
   "runs",
   "run",
@@ -12,6 +13,7 @@ const resources = new Set<ServiceQuery["resource"]>([
   "costs",
   "configuration",
   "delivery",
+  "output",
   "blocked-inputs",
 ]);
 
@@ -42,6 +44,8 @@ export default defineEventHandler(async (event) => {
       projectId:
         typeof query.projectId === "string" ? query.projectId : undefined,
       runId: typeof query.runId === "string" ? query.runId : undefined,
+      ref: typeof query.ref === "string" ? query.ref : undefined,
+      raw: query.raw === "true",
     });
     return { schemaVersion: 1, result };
   } catch (error) {

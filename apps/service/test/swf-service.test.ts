@@ -1,4 +1,4 @@
-import { mkdir, realpath, rm, rename, stat } from "node:fs/promises";
+import { mkdir, realpath, rm, rename, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -198,6 +198,100 @@ describe("user-scoped SWF service", () => {
     await expect(
       service.query({ resource: "costs", projectId, runId }),
     ).resolves.toEqual({ exactUsd: 0, estimatedUsd: 0, unknown: 0 });
+    await service.shutdown();
+  });
+
+  it("aggregates dashboard state and securely inspects and prunes retained output", async () => {
+    const { service, projectRoot } = await setup();
+    await createRun(projectRoot);
+    const store = new RunEventStore(join(projectRoot, ".swf-state"));
+    const invocationId = "b49d10b4-8aa7-4e10-9018-e5e9d1a9c133";
+    await store.append(runId, {
+      type: "invocation.recorded",
+      actor: { type: "service", id: "test" },
+      context: { phaseId: "planning", invocationId },
+      data: {
+        invocation: {
+          schemaVersion: 1,
+          invocationId,
+          runId,
+          phaseId: "planning",
+          harness: "pi",
+          status: "completed",
+          startedAt: "2026-04-02T12:00:00.000Z",
+          endedAt: "2026-04-02T12:01:00.000Z",
+          outputRef: "raw/invocations/test.log",
+          cost: { amountUsd: 0.25, quality: "estimated" },
+        },
+      },
+    });
+    const rawDirectory = join(
+      projectRoot,
+      ".swf-state",
+      "runs",
+      runId,
+      "raw",
+      "invocations",
+    );
+    await mkdir(rawDirectory, { recursive: true });
+    await writeFile(join(rawDirectory, "test.log"), "retained output");
+
+    await expect(
+      service.query({ resource: "overview" }),
+    ).resolves.toMatchObject({
+      projects: [
+        {
+          projectId,
+          activeRuns: 1,
+          recentInvocations: [{ invocationId }],
+          costs: { exactUsd: 0, estimatedUsd: 0.25, unknown: 0 },
+        },
+      ],
+      totals: { projects: 1, activeRuns: 1, estimatedUsd: 0.25 },
+    });
+    await expect(
+      service.query({
+        resource: "output",
+        projectId,
+        runId,
+        ref: "raw/invocations/test.log",
+      }),
+    ).resolves.toMatchObject({
+      available: true,
+      content: "retained output",
+      truncated: false,
+    });
+    await expect(
+      service.query({
+        resource: "output",
+        projectId,
+        runId,
+        ref: "../../projects.json",
+      }),
+    ).rejects.toThrow("inside the selected run");
+
+    const preview = await service.previewPruning(projectId, { runId });
+    expect(preview).toMatchObject({
+      totalBytes: 15,
+      candidates: [{ runId, ref: "raw/invocations/test.log" }],
+    });
+    await expect(
+      service.confirmPruning(projectId, "wrong-token"),
+    ).rejects.toThrow("fresh preview");
+    await expect(
+      service.confirmPruning(projectId, preview.confirmationId),
+    ).resolves.toEqual({ pruned: 1, bytes: 15 });
+    await expect(
+      service.query({
+        resource: "output",
+        projectId,
+        runId,
+        ref: "raw/invocations/test.log",
+      }),
+    ).resolves.toMatchObject({
+      available: false,
+      reason: "Output was pruned or is unavailable",
+    });
     await service.shutdown();
   });
 

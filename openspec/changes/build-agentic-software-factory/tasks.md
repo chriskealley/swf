@@ -149,16 +149,16 @@
 
 ## 11. Global Web Dashboard
 
-- [ ] 11.1 Create the authenticated dashboard shell and service API client
-- [ ] 11.2 Implement the global project index with availability, active runs, waiting gates, failures, recent invocations, and aggregate spend
-- [ ] 11.3 Implement project-specific active and historical run listings
-- [ ] 11.4 Implement run detail with OpenSpec identity, phase timeline, attempts, worktree, branch, outputs, artifacts, decisions, and costs
-- [ ] 11.5 Implement retained invocation output and artifact inspection with explicit truncation and raw-output retrieval
-- [ ] 11.6 Implement preview and confirmation controls for pruning raw output by age, selected run, or storage budget
-- [ ] 11.7 Implement live event updates with reconnect and ordered replay
-- [ ] 11.8 Add dashboard controls for safe run operations and approval decisions through the service API
-- [ ] 11.9 Display cost provenance as exact, estimated, or unknown at invocation, phase, run, project, and global levels
-- [ ] 11.10 Add dashboard security, accessibility, unavailable-project, stale-client, pruning, and live-update tests
+- [x] 11.1 Create the authenticated dashboard shell and service API client
+- [x] 11.2 Implement the global project index with availability, active runs, waiting gates, failures, recent invocations, and aggregate spend
+- [x] 11.3 Implement project-specific active and historical run listings
+- [x] 11.4 Implement run detail with OpenSpec identity, phase timeline, attempts, worktree, branch, outputs, artifacts, decisions, and costs
+- [x] 11.5 Implement retained invocation output and artifact inspection with explicit truncation and raw-output retrieval
+- [x] 11.6 Implement preview and confirmation controls for pruning raw output by age, selected run, or storage budget
+- [x] 11.7 Implement live event updates with reconnect and ordered replay
+- [x] 11.8 Add dashboard controls for safe run operations and approval decisions through the service API
+- [x] 11.9 Display cost provenance as exact, estimated, or unknown at invocation, phase, run, project, and global levels
+- [x] 11.10 Add dashboard security, accessibility, unavailable-project, stale-client, pruning, and live-update tests
 
 ## 12. Pull-Request Delivery
 
