@@ -142,7 +142,7 @@ class FakeHerdrRunner implements CommandRunner {
       return {
         code: 0,
         stdout:
-          '{"usage":{"input_tokens":3,"output_tokens":5,"cost_usd":0.01}}\n',
+          '{"usage":{"input_tokens":3,"output_tokens":5,"cost_usd":0.01}}\n{"type":"agent_settled"}\n',
         stderr: "",
       };
     return { code: 0, stdout: "{}", stderr: "" };

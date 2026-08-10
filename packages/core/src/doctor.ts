@@ -263,9 +263,10 @@ export async function runDoctor(
     ),
   ];
   for (const integration of new Set(harnessIntegrations)) {
-    const installed = new RegExp(`^${integration}: installed`, "m").test(
-      herdrStatus.stdout,
-    );
+    const installed = new RegExp(
+      `^${integration}: (?:installed|current)\\b`,
+      "m",
+    ).test(herdrStatus.stdout);
     checks.push(
       installed
         ? {
@@ -277,7 +278,7 @@ export async function runDoctor(
             id: `herdr.integration.${integration}`,
             status: "warn",
             summary: `${integration} integration is not installed`,
-            remediation: `Run swf setup --install herdr-integration:${integration}.`,
+            remediation: `Run swf setup herdr-integration:${integration}, then apply the reviewed plan with --apply --yes.`,
           },
     );
   }

@@ -287,6 +287,25 @@ export class PiHarnessAdapter implements HarnessAdapter {
       nativeSessionId: observation.processId,
     };
     await this.submit(invocation, request.prompt);
+    const startDeadline =
+      Date.now() + Math.min(request.timeoutMs ?? 30_000, 30_000);
+    while (true) {
+      const observation = await this.herdr.observe(invocation.paneId);
+      if (observation.status === "working" || observation.status === "blocked")
+        break;
+      const transcript = await this.herdr.transcript(invocation.paneId, 200);
+      if (
+        structuredEvents(transcript).some(({ type }) =>
+          ["agent_settled", "turn_end"].includes(String(type)),
+        )
+      )
+        break;
+      if (Date.now() >= startDeadline)
+        throw new Error(
+          `Pi invocation ${invocation.invocationId} did not start within 30 seconds`,
+        );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     return invocation;
   }
 

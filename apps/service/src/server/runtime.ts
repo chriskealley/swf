@@ -23,7 +23,7 @@ export async function getService(): Promise<SwfService> {
     await existing.shutdown();
     state.service = undefined;
   }
-  state.service ??= new SwfService();
+  state.service ??= new SwfService({ adoptSameProcessLock: true });
   await state.service.start();
   return state.service;
 }

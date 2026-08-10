@@ -328,7 +328,7 @@ describe("user-scoped SWF service", () => {
     );
     await writeFile(
       join(projectRoot, ".swf", "workflows", "default.yaml"),
-      `schemaVersion: 1\nid: default\ndescription: Service entry test\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: [structured-events]\n    work:\n      - id: planning-agent\n        type: agent\n        profile: planner\n        options: {}\n      - id: planning-command\n        type: command\n        command: test -f openspec/changes/service-entry/proposal.md\n        options: {}\n    checks:\n      - id: planning-files\n        type: command\n        required: true\n        command: test -f openspec/changes/service-entry/tasks.md\n        options: {}\n    gate:\n      mode: automatic\ndelivery:\n  mode: local-branch\n  mergeMethod: merge\n`,
+      `schemaVersion: 1\nid: default\ndescription: Service entry test\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: [structured-events]\n    work:\n      - id: planning-agent\n        type: agent\n        profile: planner\n        options: {}\n      - id: planning-command\n        type: command\n        command: test -f openspec/changes/service-entry/proposal.md\n        options: {}\n    checks:\n      - id: planning-files\n        type: command\n        required: true\n        command: test -f openspec/changes/service-entry/tasks.md\n        options: {}\n    gate:\n      mode: manual\ndelivery:\n  mode: local-branch\n  mergeMethod: merge\n`,
     );
     await writeFile(
       join(projectRoot, ".swf", "policies", "manual.yaml"),
@@ -368,9 +368,9 @@ describe("user-scoped SWF service", () => {
       changeName: "service-entry",
       description: "Create a service-backed Planning change",
     })) as { runId: string; status: string };
-    expect(created.status).toBe("paused");
+    expect(created.status).toBe("blocked");
 
-    const loaded = (await service.query({
+    let loaded = (await service.query({
       resource: "run",
       projectId,
       runId: created.runId,
@@ -385,6 +385,23 @@ describe("user-scoped SWF service", () => {
       };
       runtime: { branch: string; worktreePath: string };
     };
+    expect(loaded.state.run.status).toBe("blocked");
+    expect(loaded.state.phases.planning.status).toBe("blocked");
+    expect(Object.keys(loaded.state.checkpoints)).toHaveLength(0);
+    await service.command({
+      type: "approve",
+      projectId,
+      runId: created.runId,
+      phaseId: "planning",
+      gateId: "planning-gate",
+      actorId: "service-test-operator",
+      reason: "Planning evidence is acceptable",
+    });
+    loaded = (await service.query({
+      resource: "run",
+      projectId,
+      runId: created.runId,
+    })) as typeof loaded;
     expect(loaded.state.run.status).toBe("paused");
     expect(loaded.state.phases.planning.status).toBe("completed");
     expect(Object.keys(loaded.state.checkpoints)).toHaveLength(1);
@@ -472,7 +489,16 @@ describe("user-scoped SWF service", () => {
         phaseId: "planning",
         authorized: true,
       }),
-    ).resolves.toMatchObject({ status: "completed" });
+    ).resolves.toMatchObject({ status: "blocked" });
+    await service.command({
+      type: "approve",
+      projectId,
+      runId: created.runId,
+      phaseId: "planning",
+      gateId: "planning-gate",
+      actorId: "service-test-operator",
+      reason: "Rerun evidence is acceptable",
+    });
     await expect(
       service.command({
         type: "check-run",
@@ -506,6 +532,16 @@ describe("user-scoped SWF service", () => {
       ServiceAuthenticationError,
     );
     expect(() => service.authenticate(metadata.credential)).not.toThrow();
+    const reloaded = new SwfService({
+      serviceHome: home,
+      endpoint: metadata.endpoint,
+      adoptSameProcessLock: true,
+    });
+    await expect(reloaded.start()).resolves.toMatchObject({
+      serviceId: metadata.serviceId,
+      credential: metadata.credential,
+    });
+    await reloaded.shutdown();
     await service.shutdown();
   });
 

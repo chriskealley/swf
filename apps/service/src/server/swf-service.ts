@@ -408,6 +408,7 @@ export interface ServiceOptions {
   stuckAfterMs?: number;
   herdrClient?: HerdrClient;
   commandRunner?: CommandRunner;
+  adoptSameProcessLock?: boolean;
 }
 
 export interface ServiceQuery {
@@ -591,6 +592,7 @@ export class SwfService {
   private readonly serviceBudget?: BudgetConfiguration["service"];
   private readonly projectTrust: (root: string) => Promise<boolean>;
   private readonly stuckAfterMs: number;
+  private readonly adoptSameProcessLock: boolean;
   private lock?: Awaited<ReturnType<typeof open>>;
   private metadata?: ServiceMetadata;
   private acceptingWork = false;
@@ -626,6 +628,7 @@ export class SwfService {
       options.projectTrust ??
       ((root) => isProjectTrusted(root, { configHome: this.serviceHome }));
     this.stuckAfterMs = options.stuckAfterMs ?? 30 * 60_000;
+    this.adoptSameProcessLock = options.adoptSameProcessLock ?? false;
   }
 
   private get lockPath(): string {
@@ -643,9 +646,32 @@ export class SwfService {
       this.lock = await open(this.lockPath, "wx", 0o600);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      throw new ServiceAlreadyRunningError(
-        await readJson<ServiceMetadata>(this.metadataPath),
-      );
+      const existing = await readJson<ServiceMetadata>(this.metadataPath);
+      if (
+        this.adoptSameProcessLock &&
+        existing?.pid === process.pid &&
+        existing.endpoint === this.endpoint
+      ) {
+        this.lock = await open(this.lockPath, "r+");
+        this.metadata = existing;
+        this.acceptingWork = true;
+        this.broker.publish({
+          type: "service.reloaded",
+          data: {
+            serviceId: existing.serviceId,
+            endpoint: existing.endpoint,
+          },
+        });
+        await this.audit.append({
+          operation: "service.reload-adopt",
+          actor: { type: "service", id: existing.serviceId },
+          outcome: "completed",
+          details: { endpoint: existing.endpoint, pid: existing.pid },
+        });
+        await this.recover();
+        return existing;
+      }
+      throw new ServiceAlreadyRunningError(existing);
     }
     const metadata: ServiceMetadata = {
       schemaVersion: SERVICE_SCHEMA_VERSION,
@@ -2053,23 +2079,71 @@ export class SwfService {
         if (active) await active.adapter.cancel(active.invocation);
       },
     });
+    const reusableLatePlanningOutput =
+      phaseId === settings.workflow.phases[0]?.id &&
+      loaded.state.phases[phaseId]?.status === "failed" &&
+      (
+        await validatePlanningArtifacts(
+          join(
+            runtime.worktree.path,
+            "openspec",
+            "changes",
+            loaded.state.run.changeName,
+          ),
+        )
+      ).length === 0;
     let result;
     try {
-      result = await scheduler.executePhase(phaseId, eligibility, {
-        project: {
-          ...profile.options,
-          harness: profile.harness ?? "pi",
-          model: profile.model,
-          timeoutMs: settings.policy.timeoutMinutes
-            ? settings.policy.timeoutMinutes * 60_000
-            : undefined,
-          retryLimit: settings.policy.maxAttempts,
-          budgetUsd: settings.policy.budgetUsd,
-          artifactContext: downstreamContext.evidence.map(
-            ({ outputRef }) => outputRef,
-          ),
-        },
+      result = reusableLatePlanningOutput
+        ? {
+            phaseId,
+            status: "completed" as const,
+            work: phase.work.map(({ id }) => ({
+              workUnitId: id,
+              status: "completed" as const,
+              output:
+                "Recovered validated Planning artifacts produced by a late-settling owned invocation",
+            })),
+            resolved: {},
+          }
+        : await scheduler.executePhase(phaseId, eligibility, {
+            project: {
+              ...profile.options,
+              harness: profile.harness ?? "pi",
+              model: profile.model,
+              timeoutMs: settings.policy.timeoutMinutes
+                ? settings.policy.timeoutMinutes * 60_000
+                : undefined,
+              retryLimit: settings.policy.maxAttempts,
+              budgetUsd: settings.policy.budgetUsd,
+              artifactContext: downstreamContext.evidence.map(
+                ({ outputRef }) => outputRef,
+              ),
+            },
+          });
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "phase execution failed";
+      await this.append(project.projectId, runId, {
+        type: "attempt.completed",
+        actor,
+        context: { phaseId, attemptId },
+        data: { attemptId, status: "failed", reason },
       });
+      const interrupted = await store.load(runId);
+      if (interrupted.state.phases[phaseId]?.status === "running")
+        await this.append(project.projectId, runId, {
+          type: "phase.transitioned",
+          actor,
+          context: { phaseId },
+          data: {
+            phaseId,
+            from: "running",
+            to: "failed",
+            reason,
+          },
+        });
+      throw error;
     } finally {
       resolveBoundary();
       this.activeWork.delete(runId);
@@ -2517,7 +2591,7 @@ export class SwfService {
         throw new Error(
           `OpenSpec change ${command.changeName} is already bound to run ${existingRunId}; use swf run, swf next, or status`,
         );
-      const existing = await store.load(existingRunId);
+      let existing = await store.load(existingRunId);
       if (
         command.description &&
         command.description.trim() !== existing.state.run.description
@@ -2541,6 +2615,37 @@ export class SwfService {
         throw new Error(
           `Run ${existingRunId} is blocked; satisfy its gate or operator input before resuming`,
         );
+      for (const phase of Object.values(existing.state.phases).filter(
+        ({ status }) => status === "running",
+      )) {
+        const attemptId = phase.attemptIds.at(-1);
+        if (
+          attemptId &&
+          existing.state.attempts[attemptId]?.status === "running"
+        )
+          await this.append(project.projectId, existingRunId, {
+            type: "attempt.completed",
+            actor: { type: "service", id: "swf-scheduler" },
+            context: { phaseId: phase.id, attemptId },
+            data: {
+              attemptId,
+              status: "failed",
+              reason: "Recovered interrupted phase before resume",
+            },
+          });
+        await this.append(project.projectId, existingRunId, {
+          type: "phase.transitioned",
+          actor: { type: "service", id: "swf-scheduler" },
+          context: { phaseId: phase.id },
+          data: {
+            phaseId: phase.id,
+            from: "running",
+            to: "failed",
+            reason: "Recovered interrupted phase before resume",
+          },
+        });
+      }
+      existing = await store.load(existingRunId);
       const settings = await loadProjectExecutionSettings(
         location,
         existing.state.run.workflowId,
@@ -2648,7 +2753,10 @@ export class SwfService {
       return {
         runId: existingRunId,
         changeName: command.changeName,
-        phaseId: selected.at(-1)?.id,
+        phaseId:
+          selected.find(
+            ({ id }) => after.state.phases[id]?.status !== "completed",
+          )?.id ?? selected.at(-1)?.id,
         status: target,
       };
     }
@@ -3426,6 +3534,116 @@ export class SwfService {
               : undefined),
         },
       });
+      if (
+        command.type === "approve" &&
+        loaded.state.run.status === "blocked" &&
+        loaded.state.phases[command.phaseId]?.status === "blocked"
+      ) {
+        const project = await this.project(command.projectId);
+        const runtime = await readJson<{ worktreePath?: string }>(
+          join(project.stateDirectory, "runs", command.runId, "runtime.json"),
+        );
+        if (!runtime?.worktreePath)
+          throw new Error(`Run ${command.runId} has no recorded worktree`);
+        const artifacts = new ArtifactStore(
+          project.stateDirectory,
+          command.runId,
+          this.redactor,
+        );
+        const manifest = await artifacts.load();
+        const handoffArtifact = [...manifest.artifacts]
+          .reverse()
+          .find(
+            ({ phaseId, type }) =>
+              phaseId === command.phaseId && type === "phase-handoff",
+          );
+        const handoff = handoffArtifact
+          ? await readJson(
+              join(
+                project.stateDirectory,
+                "runs",
+                command.runId,
+                handoffArtifact.outputRef,
+              ),
+            )
+          : undefined;
+        const git = new GitClient(runtime.worktreePath, this.commandRunner);
+        const beforeCommit = await git.head();
+        await this.append(command.projectId, command.runId, {
+          type: "run.transitioned",
+          actor: { type: "user", id: command.actorId },
+          context: { phaseId: command.phaseId },
+          data: {
+            from: "blocked",
+            to: "running",
+            reason: "manual gate approved",
+          },
+        });
+        await this.append(command.projectId, command.runId, {
+          type: "phase.transitioned",
+          actor: { type: "user", id: command.actorId },
+          context: { phaseId: command.phaseId },
+          data: {
+            phaseId: command.phaseId,
+            from: "blocked",
+            to: "running",
+            reason: "manual gate approved",
+          },
+        });
+        const checkpoint = await new CheckpointManager(
+          project.stateDirectory,
+          command.runId,
+          git,
+          artifacts,
+        ).create({
+          phaseId: command.phaseId,
+          beforeCommit,
+          gateDecision: "satisfied",
+          handoff: handoff as never,
+        });
+        await this.append(command.projectId, command.runId, {
+          type: "checkpoint.recorded",
+          actor: { type: "service", id: "swf-scheduler" },
+          context: { phaseId: command.phaseId },
+          data: { checkpoint },
+        });
+        await this.append(command.projectId, command.runId, {
+          type: "phase.transitioned",
+          actor: { type: "service", id: "swf-scheduler" },
+          context: { phaseId: command.phaseId },
+          data: {
+            phaseId: command.phaseId,
+            from: "running",
+            to: "completed",
+          },
+        });
+        const priorAttemptId =
+          loaded.state.phases[command.phaseId]?.attemptIds.at(-1);
+        if (priorAttemptId)
+          await this.append(command.projectId, command.runId, {
+            type: "attempt.completed",
+            actor: { type: "service", id: "swf-scheduler" },
+            context: {
+              phaseId: command.phaseId,
+              attemptId: priorAttemptId,
+            },
+            data: {
+              attemptId: priorAttemptId,
+              status: "completed",
+              reason: "Manual gate approved",
+            },
+          });
+        await this.append(command.projectId, command.runId, {
+          type: "run.transitioned",
+          actor: { type: "service", id: "swf-scheduler" },
+          context: {},
+          data: {
+            from: "running",
+            to: "paused",
+            reason: "manual approval finalized phase",
+          },
+        });
+      }
       if (command.type === "request-changes") {
         const attemptId = randomUUID();
         const number =

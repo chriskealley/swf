@@ -39,7 +39,8 @@ describe("runDoctor", () => {
         if (command === "git" && args[0] === "remote")
           return success("https://github.com/example/swf.git\n");
         if (command === "gh") return success("Logged in\n");
-        if (command === "herdr") return success("pi: installed\n");
+        if (command === "herdr")
+          return success("pi: current (v5) (/tmp/herdr-agent-state.ts)\n");
         return success("");
       },
     });

@@ -130,9 +130,14 @@ export class HerdrClient {
     readonly executable = "herdr",
   ) {}
 
-  private async execute(args: string[], timeoutMs?: number): Promise<unknown> {
+  private async execute(
+    args: string[],
+    timeoutMs?: number,
+    allowEmpty = false,
+  ): Promise<unknown> {
     const result = await this.runner.run(this.executable, args, { timeoutMs });
     if (result.code !== 0) throw new HerdrCommandError(args, result);
+    if (allowEmpty && !result.stdout.trim()) return undefined;
     return parseResponse(result);
   }
 
@@ -245,7 +250,11 @@ export class HerdrClient {
     const command = environment
       ? `env ${environment} ${input.command}`
       : input.command;
-    await this.execute(["pane", "run", tab.paneId!, command], input.timeoutMs);
+    await this.execute(
+      ["pane", "run", tab.paneId!, command],
+      input.timeoutMs,
+      true,
+    );
     const observation = await this.waitForReady(tab.paneId!, input.timeoutMs);
     return {
       ...tab,
@@ -257,7 +266,7 @@ export class HerdrClient {
   }
 
   async submitPrompt(paneId: string, prompt: string): Promise<void> {
-    await this.execute(["pane", "run", paneId, prompt]);
+    await this.execute(["pane", "run", paneId, prompt], undefined, true);
   }
 
   async transcript(paneId: string, lines = 200): Promise<string> {
@@ -276,29 +285,31 @@ export class HerdrClient {
   }
 
   async cancel(paneId: string): Promise<void> {
-    await this.execute(["pane", "send-keys", paneId, "ctrl-c"]);
+    await this.execute(
+      ["pane", "send-keys", paneId, "ctrl-c"],
+      undefined,
+      true,
+    );
   }
 
   async closePane(paneId: string): Promise<void> {
-    await this.execute(["pane", "close", paneId]);
+    await this.execute(["pane", "close", paneId], undefined, true);
   }
 
   async closeTab(tabId: string): Promise<void> {
-    await this.execute(["tab", "close", tabId]);
+    await this.execute(["tab", "close", tabId], undefined, true);
   }
 
   async closeWorkspace(workspaceId: string): Promise<void> {
-    await this.execute(["workspace", "close", workspaceId]);
+    await this.execute(["workspace", "close", workspaceId], undefined, true);
   }
 
   async removeWorktree(workspaceId: string): Promise<void> {
-    await this.execute([
-      "worktree",
-      "remove",
-      "--workspace",
-      workspaceId,
-      "--force",
-    ]);
+    await this.execute(
+      ["worktree", "remove", "--workspace", workspaceId, "--force"],
+      undefined,
+      true,
+    );
   }
 
   async reconcilePane(paneId: string): Promise<"missing" | HerdrAgentStatus> {
@@ -323,9 +334,10 @@ export class HerdrClient {
       throw new HerdrCommandError(["integration", "status"], status);
     const integrations = requiredIntegrations.map((name) => ({
       name,
-      installed: new RegExp(`^\\s*${name}:\\s*installed\\b`, "mi").test(
-        status.stdout,
-      ),
+      installed: new RegExp(
+        `^\\s*${name}:\\s*(?:installed|current)\\b`,
+        "mi",
+      ).test(status.stdout),
     }));
     const harnesses = await Promise.all(
       requiredHarnesses.map(async (executable) => ({

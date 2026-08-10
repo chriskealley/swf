@@ -67,7 +67,8 @@ class FakeHerdrRunner implements CommandRunner {
     if (args[0] === "integration")
       return {
         code: 0,
-        stdout: "pi: installed\ncodex: not installed\n",
+        stdout:
+          "pi: current (v5) (/tmp/herdr-agent-state.ts)\ncodex: not installed\n",
         stderr: "",
       };
     if (args[0] === "workspace" && args[1] === "create")
@@ -105,6 +106,14 @@ class FakeHerdrRunner implements CommandRunner {
       return { code: 124, stdout: "", stderr: "timed out" };
     if (args[0] === "pane" && args[1] === "read")
       return { code: 0, stdout: "retained transcript\n", stderr: "" };
+    if (
+      (args[0] === "pane" &&
+        ["run", "send-keys", "close"].includes(args[1]!)) ||
+      (args[0] === "tab" && args[1] === "close") ||
+      (args[0] === "workspace" && args[1] === "close") ||
+      (args[0] === "worktree" && args[1] === "remove")
+    )
+      return { code: 0, stdout: "", stderr: "" };
     return { code: 0, stdout: "{}", stderr: "" };
   }
 }
