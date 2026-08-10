@@ -14,6 +14,99 @@ const BudgetLimitSchema = z.object({
 });
 
 export const HarnessSchema = z.enum(["pi", "codex", "claude", "copilot"]);
+export const ModelTierSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
+export const ModelMappingSchema = z.object({
+  model: z.string().min(1).optional(),
+  fallback: z.array(z.string().min(1)).default([]),
+  allowHarnessDefault: z.boolean().default(false),
+  capabilities: z.array(z.string().min(1)).default([]),
+});
+export const ModelRouteSchema = z.object({
+  harness: z.string().min(1),
+  modelTier: ModelTierSchema.optional(),
+  model: z.string().min(1).optional(),
+  source: z.string().min(1),
+  overriddenSources: z.array(z.string().min(1)).default([]),
+  fallback: z.string().min(1).optional(),
+  allowHarnessDefault: z.boolean().default(false),
+  mappingPath: z.string().min(1).optional(),
+  fingerprint: z.string().min(1),
+});
+export const ModelRoutingSchema = z.object({
+  schemaVersion: SchemaVersion,
+  modelTiers: z.record(
+    ModelTierSchema,
+    z.record(z.string(), ModelMappingSchema),
+  ),
+});
+export const PhaseContractSchema = z.object({
+  schemaVersion: SchemaVersion,
+  objective: z.string().min(1),
+  responsibilities: z.array(z.string().min(1)).min(1),
+  allowedScope: z.array(z.string().min(1)).default([]),
+  prohibitedActions: z.array(z.string().min(1)).default([]),
+  requiredInputs: z.array(z.string().min(1)).default([]),
+  requiredOutputs: z.array(z.string().min(1)).default([]),
+  completionCriteria: z.array(z.string().min(1)).min(1),
+  handoffExpectations: z.array(z.string().min(1)).default([]),
+});
+export const TaskAuditEntrySchema = z.object({
+  taskId: z.string().min(1),
+  text: z.string().min(1),
+  checked: z.boolean(),
+  implementationRefs: z.array(z.string().min(1)).default([]),
+  checkIds: z.array(z.string().min(1)).default([]),
+  evidenceFresh: z.boolean(),
+  reviewBlockers: z.array(z.string().min(1)).default([]),
+  conclusion: z.enum(["verified", "unverified", "blocked"]),
+  reason: z.string().min(1).optional(),
+});
+export const TaskAuditSchema = z.object({
+  schemaVersion: SchemaVersion,
+  sourceCommit: z.string().min(1),
+  tasksPath: z.string().min(1),
+  entries: z.array(TaskAuditEntrySchema),
+  status: z.enum(["verified", "blocked", "failed"]),
+  summary: z.string().min(1),
+});
+export const ReviewFindingResolutionSchema = z.object({
+  findingId: z.string().min(1),
+  status: z.enum(["open", "resolved", "waived"]),
+  evidenceArtifactIds: z.array(z.string().uuid()).default([]),
+  sourceCommit: z.string().min(1).optional(),
+  reason: z.string().min(1).optional(),
+});
+export const ReleasePreflightSchema = z.object({
+  schemaVersion: SchemaVersion,
+  runId: z.string().uuid(),
+  sourceBranch: z.string().min(1),
+  targetBranch: z.string().min(1),
+  sourceCommit: z.string().min(1),
+  targetCommit: z.string().min(1),
+  remote: z.string().min(1),
+  mergeMethod: z.enum(["merge", "squash", "rebase", "repository-default"]),
+  checks: z.array(
+    z.object({
+      id: z.string().min(1),
+      status: z.enum(["passed", "failed", "blocked"]),
+      detail: z.string().min(1),
+    }),
+  ),
+  valid: z.boolean(),
+  createdAt: IsoDateTime,
+});
+export const CleanupStateSchema = z.object({
+  status: z.enum(["pending", "completed", "preserved"]),
+  ownedResources: z.array(z.string().min(1)).default([]),
+  removedResources: z.array(z.string().min(1)).default([]),
+  retainedResources: z.array(z.string().min(1)).default([]),
+  updatedAt: IsoDateTime,
+});
+export const TemplateMetadataSchema = z.object({
+  schemaVersion: SchemaVersion,
+  templateVersion: z.string().min(1),
+  files: z.record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/)),
+});
 export const GateModeSchema = z.enum(["manual", "automatic", "advisory"]);
 export const WorkUnitTypeSchema = z.enum([
   "agent",
@@ -35,8 +128,10 @@ export const ProfileSchema = z.object({
   description: z.string().min(1),
   harness: HarnessSchema.optional(),
   model: z.string().min(1).optional(),
+  modelTier: ModelTierSchema.optional(),
   guidelines: z.array(z.string().min(1)).default([]),
   capabilities: z.array(z.string().min(1)).default([]),
+  contract: PhaseContractSchema.optional(),
   options: JsonObject.default({}),
 });
 
@@ -81,6 +176,8 @@ export const PhaseSchema = z.object({
   id: Identifier,
   title: z.string().min(1),
   profile: Identifier,
+  model: z.string().min(1).optional(),
+  modelTier: ModelTierSchema.optional(),
   guidelines: z.array(Identifier).default([]),
   requiredCapabilities: z.array(z.string().min(1)).default([]),
   work: z.array(WorkUnitSchema).default([]),
@@ -245,6 +342,11 @@ export const InvocationSchema = z.object({
   runId: z.string().uuid(),
   phaseId: Identifier,
   harness: HarnessSchema,
+  modelTier: ModelTierSchema.optional(),
+  model: z.string().min(1).optional(),
+  modelRoute: JsonObject.optional(),
+  contractFingerprint: z.string().min(1).optional(),
+  promptInputFingerprint: z.string().min(1).optional(),
   status: RunStatusSchema,
   startedAt: IsoDateTime,
   endedAt: IsoDateTime.optional(),
@@ -281,6 +383,9 @@ export const ArtifactSchema = z.object({
   summary: z.string().min(1).max(2_000).optional(),
   consumers: z.array(Identifier).default([]),
   invalidReason: z.string().min(1).optional(),
+  modelRoute: ModelRouteSchema.optional(),
+  contractFingerprint: z.string().min(1).optional(),
+  promptInputFingerprint: z.string().min(1).optional(),
 });
 
 export const HandoffSchema = z.object({
@@ -421,11 +526,20 @@ export const DeliverySchema = z.object({
     .optional(),
   failureReason: z.string().min(1).optional(),
   failureAction: z.enum(["remediate", "escalate", "fail"]).optional(),
+  preflight: ReleasePreflightSchema.optional(),
+  cleanupState: CleanupStateSchema.optional(),
+  authorizationId: z.string().uuid().optional(),
+  dossierRef: z.string().min(1).optional(),
+  resultingCommit: z.string().min(1).optional(),
   updatedAt: IsoDateTime,
 });
 
 export const documents = {
   projectConfig: ProjectConfigSchema,
+  modelRouting: ModelRoutingSchema,
+  phaseContract: PhaseContractSchema,
+  taskAudit: TaskAuditSchema,
+  templateMetadata: TemplateMetadataSchema,
   workflow: WorkflowSchema,
   policy: PolicySchema,
   profile: ProfileSchema,
@@ -441,6 +555,10 @@ export const documents = {
   approval: ApprovalSchema,
   checkpoint: CheckpointSchema,
   delivery: DeliverySchema,
+  modelRoute: ModelRouteSchema,
+  releasePreflight: ReleasePreflightSchema,
+  cleanupState: CleanupStateSchema,
+  reviewFindingResolution: ReviewFindingResolutionSchema,
 } as const;
 
 export type DocumentName = keyof typeof documents;

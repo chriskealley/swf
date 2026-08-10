@@ -21,6 +21,10 @@ const resources = new Set<ServiceQuery["resource"]>([
   "blocked-inputs",
   "explorations",
   "exploration",
+  "model-routes",
+  "phase-explanation",
+  "check-discovery",
+  "defaults",
 ]);
 
 export default defineEventHandler(async (event) => {

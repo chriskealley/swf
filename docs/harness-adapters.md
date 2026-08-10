@@ -43,3 +43,7 @@ Sources:
 ## Capability validation
 
 A workflow that requests a capability an adapter does not advertise fails before a Herdr pane is created. Availability also checks the harness executable and corresponding Herdr agent-status integration. Authentication is checked directly when the CLI exposes a non-interactive status command (Codex and Claude); Copilot authentication failures are surfaced by launch because its documented command interface does not expose an equivalent status operation.
+
+# Harness adapters
+
+Adapters receive the concrete model selected by the service. They must advertise capabilities and validate the selected route before launch. SWF records the semantic tier, concrete model, harness, mapping provenance, fallback, contract fingerprint, and prompt-input fingerprint with each invocation. Retries retain the same route unless an operator changes configuration.

@@ -90,6 +90,10 @@ swf migrate --project <project-id> --rollback <backup-id>
 
 Committed `.swf/` project configuration is project-owned and is never silently migrated or overwritten with factory defaults.
 
+Check discovery is read-only. `swf check discover` proposes exact commands, working directories, phases, timeouts, and required status; `swf check adopt --ids ...` previews a selection and `--apply` writes it only after explicit operator confirmation. Default updates follow the same rule: `swf defaults` inspects the three-way diff, while `swf defaults --apply --paths ...` adopts selected non-conflicting files with a private recoverable backup.
+
+Releasing is deterministic and agent-free in newly generated workflows. It performs a source/target/remote/dirty-state/policy preflight, records a release-specific gate summary, and preserves owned resources on delivery failure. OpenSpec archive is never inferred from Releasing; use the explicit archive command after successful delivery.
+
 ## Complete run export and import
 
 A run export includes every file below `.swf-state/runs/<run-id>/`, including metadata, events, snapshots, runtime ownership, artifacts, raw output, retention records, and delivery history. Each file and the manifest are SHA-256 verified. Import rejects path traversal, corruption, duplicate run IDs, and conflicting OpenSpec bindings.

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { ArtifactStore } from "./artifacts.js";
 import type { Artifact, Delivery, RunStatus } from "./domain.js";
 import { DeliverySchema } from "./schemas.js";
+import type { ReleasePreflight } from "./release.js";
 
 export type DeliveryMode = "pull-request" | "local-branch" | "direct-merge";
 export type MergeMethod = "merge" | "squash" | "rebase" | "repository-default";
@@ -206,6 +207,10 @@ export interface DeliveryRequest {
   phaseId?: string;
   plan: DeliveryPlan;
   failureAction: DeliveryFailureAction;
+  preflight?: ReleasePreflight;
+  authorizationId?: string;
+  dossierRef?: string;
+  resultingCommit?: string;
 }
 
 export interface DeliveryUpdate {
@@ -240,6 +245,10 @@ function deliveryFrom(
     hostedChecks: [],
     reviews: [],
     autoMergeRequested: false,
+    preflight: input.preflight,
+    authorizationId: input.authorizationId,
+    dossierRef: input.dossierRef,
+    resultingCommit: input.resultingCommit,
     updatedAt: new Date().toISOString(),
     ...values,
   });

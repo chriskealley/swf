@@ -588,6 +588,56 @@ const phase = defineCommand({
 const check = defineCommand({
   meta: { name: "check", description: "List or refresh declared checks" },
   subCommands: {
+    discover: defineCommand({
+      meta: {
+        name: "discover",
+        description: "Preview read-only project check discovery",
+      },
+      args: { cwd: { type: "string" }, json: { type: "boolean" } },
+      async run({ args }) {
+        try {
+          const { active, projectId } = await connectedProject(args.cwd);
+          output(
+            await active.query("check-discovery", { projectId }),
+            args.json,
+          );
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
+    adopt: defineCommand({
+      meta: {
+        name: "adopt",
+        description: "Adopt selected discovered checks after review",
+      },
+      args: {
+        ids: { type: "string", required: true },
+        apply: { type: "boolean" },
+        cwd: { type: "string" },
+        json: { type: "boolean" },
+      },
+      async run({ args }) {
+        try {
+          const { active, projectId } = await connectedProject(args.cwd);
+          const selectedIds = args.ids
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean);
+          output(
+            await active.command({
+              type: args.apply ? "checks-apply" : "checks-preview",
+              projectId,
+              selectedIds,
+              confirmed: Boolean(args.apply),
+            }),
+            args.json,
+          );
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
     list: phaseQueryCommand("list"),
     run: defineCommand({
       meta: { name: "run", description: "Refresh one declared check" },
@@ -769,6 +819,125 @@ const delivery = defineCommand({
     refresh: lifecycleCommand("refresh", "refresh-delivery"),
   },
 });
+const model = defineCommand({
+  meta: {
+    name: "model",
+    description: "Inspect and explicitly configure model-tier routes",
+  },
+  subCommands: {
+    routes: defineCommand({
+      meta: {
+        name: "routes",
+        description: "Show effective model-tier diagnostics",
+      },
+      args: { cwd: { type: "string" }, json: { type: "boolean" } },
+      async run({ args }) {
+        try {
+          const { active, projectId } = await connectedProject(args.cwd);
+          output(await active.query("model-routes", { projectId }), args.json);
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
+    map: defineCommand({
+      meta: {
+        name: "map",
+        description: "Preview or apply one explicit tier mapping",
+      },
+      args: {
+        tier: { type: "positional", required: true },
+        harness: { type: "positional", required: true },
+        model: { type: "positional", required: true },
+        apply: { type: "boolean" },
+        cwd: { type: "string" },
+        json: { type: "boolean" },
+      },
+      async run({ args }) {
+        try {
+          const { active, projectId } = await connectedProject(args.cwd);
+          output(
+            await active.command({
+              type: args.apply ? "model-map-apply" : "model-map-preview",
+              projectId,
+              tier: args.tier,
+              harness: args.harness,
+              model: args.model,
+              confirmed: Boolean(args.apply),
+            }),
+            args.json,
+          );
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
+  },
+});
+const defaults = defineCommand({
+  meta: {
+    name: "defaults",
+    description:
+      "Inspect default-template state without changing project files",
+  },
+  args: {
+    paths: { type: "string" },
+    apply: { type: "boolean" },
+    cwd: { type: "string" },
+    json: { type: "boolean" },
+  },
+  async run({ args }) {
+    try {
+      const { active, projectId } = await connectedProject(args.cwd);
+      if (!args.apply)
+        output(await active.query("defaults", { projectId }), args.json);
+      else
+        output(
+          await active.command({
+            type: "defaults-adopt",
+            projectId,
+            selectedPaths: (args.paths ?? "")
+              .split(",")
+              .map((path) => path.trim())
+              .filter(Boolean),
+            confirmed: true,
+          }),
+          args.json,
+        );
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+const archive = defineCommand({
+  meta: {
+    name: "archive",
+    description: "Explicitly archive a successfully delivered OpenSpec change",
+  },
+  args: {
+    project: { type: "string", required: true },
+    run: { type: "string", required: true },
+    authorized: { type: "boolean" },
+    json: { type: "boolean" },
+  },
+  async run({ args }) {
+    try {
+      output(
+        await (
+          await client()
+        ).command({
+          type: "archive-change",
+          projectId: args.project,
+          runId: args.run,
+          authorized: Boolean(args.authorized),
+        }),
+        args.json,
+      );
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
 function explorationIdentityCommand(
   name: "show" | "resume" | "discard" | "promote",
 ) {
@@ -888,6 +1057,9 @@ const main = defineCommand({
     phase,
     check,
     delivery,
+    model,
+    defaults,
+    archive,
   },
 });
 await runMain(main);

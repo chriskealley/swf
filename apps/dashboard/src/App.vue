@@ -852,6 +852,18 @@ onUnmounted(() => {
                   <span v-if="delivery.cleanup?.branchDeleted"
                     >Source branch cleaned up</span
                   >
+                  <span v-if="delivery.preflight"
+                    >Release preflight:
+                    {{ delivery.preflight.valid ? "passed" : "blocked" }} ·
+                    {{ delivery.preflight.sourceCommit }} →
+                    {{ delivery.preflight.targetCommit }}</span
+                  >
+                  <span v-if="delivery.cleanupState"
+                    >Owned cleanup: {{ delivery.cleanupState.status }} ({{
+                      delivery.cleanupState.removedResources.length
+                    }}
+                    removed)</span
+                  >
                 </div>
                 <a
                   v-if="delivery.pullRequestUrl"
@@ -878,7 +890,11 @@ onUnmounted(() => {
               <li v-for="call in invocations" :key="call.invocationId">
                 <div>
                   <strong>{{ call.phaseId }} · {{ call.harness }}</strong
-                  ><span>{{ formatInvocationCost(call) }}</span>
+                  ><span
+                    >{{ call.modelTier || "no tier" }} ·
+                    {{ call.model || "harness default" }} ·
+                    {{ formatInvocationCost(call) }}</span
+                  >
                 </div>
                 <span class="status" :data-status="call.status">{{
                   call.status

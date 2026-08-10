@@ -2,6 +2,8 @@
 
 SWF turns OpenSpec changes into durable, auditable agent workflows. A persistent local service coordinates phase execution through Herdr-managed harnesses, stores operational history outside Git, enforces checks and approval gates, and delivers completed changes through pull requests.
 
+New workflows use explicit model-tier policy labels, distinct phase contracts, deterministic verification, and an agent-free Releasing phase. Concrete model selection and default adoption are always previewable and operator-controlled.
+
 SWF includes:
 
 - a persistent authenticated Nitro service;
@@ -173,6 +175,10 @@ SWF's operator workflow is centered on:
 - `swf run` — create or resume automatic progression;
 - `swf next` — execute exactly one eligible phase;
 - `swf phase` — inspect or control a named phase;
+- `swf model routes` / `swf model map` — inspect and explicitly bind model tiers;
+- `swf check discover` / `swf check adopt` — preview and adopt project checks;
+- `swf defaults` — inspect or selectively adopt versioned defaults;
+- `swf archive` — explicitly archive a delivered OpenSpec change;
 - `swf check` — inspect or refresh declared checks.
 
 The current source CLI submits lifecycle operations using registered project and run IDs:
@@ -312,6 +318,8 @@ pnpm test:e2e
 
 - [Installation and prerequisites](docs/installation.md)
 - [Project configuration](docs/project-configuration.md)
+- [Delivery](docs/delivery.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md)
 - [Harness adapter capabilities](docs/harness-adapters.md)
 - [Security, retention, recovery, migration, and transfer](docs/operations.md)

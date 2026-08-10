@@ -47,5 +47,8 @@ openspec/changes/    planning and portable evidence dossier
 - **nypm**: setup package-manager integration
 - **Consola**: structured service and CLI logging
 - **destr**: safe configuration parsing
+
+Execution defaults are resolved by the service before runtime creation. Phase contracts, model-route provenance, bounded evidence references, task audits, release preflight, and cleanup ownership are durable projections; clients query these projections rather than reimplementing routing or release policy.
+
 - **Vitest**: unit, integration, and e2e test runner
 - **ESLint + Prettier + TypeScript**: static analysis and formatting

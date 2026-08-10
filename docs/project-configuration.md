@@ -34,6 +34,12 @@ Arrays replace lower-precedence arrays. Nested objects merge recursively. The re
 
 Before execution, SWF parses the selected workflow and project configuration, validates its versioned schemas, verifies profile and guideline references, and verifies profile capabilities requested by a phase. Invalid references stop before Herdr resources are created.
 
+## Model tiers
+
+New profiles use the policy labels `reasoning`, `coding`, and `fast`. These are project semantics, not universal rankings across providers. Bind each label to an installed harness model in `.swf/models.yaml`; SWF never guesses a provider model or silently falls back to a harness default. Use `swf model routes` to see unresolved paths and `swf model map <tier> <harness> <model>` to preview a binding before applying it.
+
+Direct `model` values on an existing profile remain supported and win over that profile's tier. Missing mappings are reported with their exact configuration path before a workflow starts.
+
 ## Budgets and sensitive data
 
 Optional `budgets` in `.swf/config.yaml` sets invocation, phase, named-phase, run, and project `maxCostUsd` or `maxTokens` ceilings. Budget evaluation fails closed on unknown telemetry unless `strictUnknown: false` is explicitly selected. Policy `budgetUsd` and `budgetTokens` act as phase-level fallbacks. See [operations.md](./operations.md) for precedence and diagnostics.

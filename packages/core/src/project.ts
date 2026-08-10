@@ -15,12 +15,15 @@ import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   GuidelineSchema,
+  ModelRoutingSchema,
   PolicySchema,
   ProfileSchema,
   ProjectConfigSchema,
   WorkflowSchema,
   type DocumentValue,
 } from "./schemas.js";
+import { phaseContractFor } from "./contracts.js";
+import { createTemplateMetadata } from "./templates.js";
 
 export const SWF_DIRECTORY = ".swf";
 export const SWF_STATE_DIRECTORY = ".swf-state";
@@ -183,12 +186,26 @@ function defaultWorkflow(): DocumentValue<"workflow"> {
       title: guideline[0]!.toUpperCase() + guideline.slice(1),
       profile: id,
       guidelines: [guideline],
-      requiredCapabilities: ["structured-events"],
-      work: [
-        { id: `${guideline}-agent`, type: "agent", profile: id, options: {} },
-      ],
+      requiredCapabilities:
+        guideline === "releasing" ? [] : ["structured-events"],
+      work:
+        guideline === "releasing"
+          ? []
+          : [
+              {
+                id: `${guideline}-agent`,
+                type: "agent",
+                profile: id,
+                options: {},
+              },
+            ],
       checks: [],
-      gate: { mode: guideline === "planning" ? "manual" : "automatic" },
+      gate: {
+        mode:
+          guideline === "planning" || guideline === "releasing"
+            ? "manual"
+            : "automatic",
+      },
     })),
     delivery: { mode: "pull-request", mergeMethod: "merge" },
   };
@@ -245,23 +262,63 @@ function defaultProfile(
   description: string,
   guideline: string,
 ): DocumentValue<"profile"> {
+  const modelTier =
+    guideline === "planning" || guideline === "reviewing"
+      ? "reasoning"
+      : guideline === "building"
+        ? "coding"
+        : guideline === "verifying"
+          ? "fast"
+          : undefined;
   return {
     schemaVersion: 1,
     id,
     description,
     harness: "pi",
+    ...(modelTier ? { modelTier } : {}),
     guidelines: [guideline],
     capabilities: ["structured-events", "model-selection"],
+    ...(guideline === "releasing"
+      ? {}
+      : { contract: phaseContractFor(guideline) }),
     options: {},
   };
 }
 
+function defaultModelRouting(): DocumentValue<"modelRouting"> {
+  return {
+    schemaVersion: 1,
+    modelTiers: {
+      reasoning: {
+        pi: { fallback: [], allowHarnessDefault: false, capabilities: [] },
+      },
+      coding: {
+        pi: { fallback: [], allowHarnessDefault: false, capabilities: [] },
+      },
+      fast: {
+        pi: { fallback: [], allowHarnessDefault: false, capabilities: [] },
+      },
+    },
+  };
+}
+
 function defaultGuideline(id: string): DocumentValue<"guideline"> {
+  const contract = phaseContractFor(id);
+  const section = (title: string, values: string[]) =>
+    `${title}:\n${values.map((value) => `- ${value}`).join("\n")}`;
   return {
     schemaVersion: 1,
     id,
     title: id[0]!.toUpperCase() + id.slice(1),
-    content: `Follow the project ${id} guidelines. Preserve deterministic evidence and report unresolved risks.`,
+    content: [
+      `# ${contract.objective}`,
+      section("Responsibilities", contract.responsibilities),
+      section("Allowed scope", contract.allowedScope),
+      section("Prohibited actions", contract.prohibitedActions),
+      section("Required outputs", contract.requiredOutputs),
+      section("Completion criteria", contract.completionCriteria),
+      section("Handoff expectations", contract.handoffExpectations),
+    ].join("\n\n"),
   };
 }
 
@@ -288,6 +345,46 @@ function defaultActivity(id: string): DocumentValue<"workflow"> {
 
 function operatorSkill(id: string): string {
   return `---\nname: swf-${id}\ndescription: Use the SWF ${id} operation through the service or swf CLI.\n---\n\nUse \`swf ${id}\` and report the returned durable run state. Do not recreate workflow logic in this skill.\n`;
+}
+
+export function defaultTemplateFiles(
+  projectId?: string,
+): Record<string, string> {
+  const files: Array<[string, string]> = [];
+  const config = defaultProjectConfig();
+  if (projectId) config.projectId = projectId;
+  files.push(["config.yaml", stringifyYaml(config)]);
+  files.push(["workflows/default.yaml", stringifyYaml(defaultWorkflow())]);
+  files.push(["models.yaml", stringifyYaml(defaultModelRouting())]);
+  for (const policy of defaultPolicies())
+    files.push([`policies/${policy.id}.yaml`, stringifyYaml(policy)]);
+  for (const [id, description, guideline] of defaultProfiles) {
+    files.push([
+      `profiles/${id}.yaml`,
+      stringifyYaml(defaultProfile(id, description, guideline)),
+    ]);
+    files.push([
+      `guidelines/${guideline}.md`,
+      defaultGuideline(guideline).content,
+    ]);
+  }
+  for (const activity of defaultActivities)
+    files.push([
+      `activities/${activity}.yaml`,
+      stringifyYaml(defaultActivity(activity)),
+    ]);
+  for (const skill of [
+    "explore",
+    "new",
+    "run",
+    "next",
+    "phase",
+    "status",
+    "approve",
+    "artifacts",
+  ])
+    files.push([`skills/${skill}.md`, operatorSkill(skill)]);
+  return Object.fromEntries(files);
 }
 
 export interface InitializeProjectOptions extends TrustOptions {
@@ -343,50 +440,14 @@ export async function initializeProject(
     };
   }
 
-  const files: Array<[string, string]> = [];
+  const templateFiles = defaultTemplateFiles();
+  const files: Array<[string, string]> = Object.entries(templateFiles).map(
+    ([path, contents]) => [join(project.configDirectory, path), contents],
+  );
   files.push([
-    join(project.configDirectory, "config.yaml"),
-    stringifyYaml(defaultProjectConfig()),
+    join(project.configDirectory, "template.json"),
+    `${JSON.stringify(createTemplateMetadata({ version: "1", files: templateFiles }), null, 2)}\n`,
   ]);
-  files.push([
-    join(project.configDirectory, "workflows", "default.yaml"),
-    stringifyYaml(defaultWorkflow()),
-  ]);
-  for (const policy of defaultPolicies())
-    files.push([
-      join(project.configDirectory, "policies", `${policy.id}.yaml`),
-      stringifyYaml(policy),
-    ]);
-  for (const [id, description, guideline] of defaultProfiles) {
-    files.push([
-      join(project.configDirectory, "profiles", `${id}.yaml`),
-      stringifyYaml(defaultProfile(id, description, guideline)),
-    ]);
-    files.push([
-      join(project.configDirectory, "guidelines", `${guideline}.md`),
-      defaultGuideline(guideline).content,
-    ]);
-  }
-  for (const activity of defaultActivities)
-    files.push([
-      join(project.configDirectory, "activities", `${activity}.yaml`),
-      stringifyYaml(defaultActivity(activity)),
-    ]);
-  for (const skill of [
-    "explore",
-    "new",
-    "run",
-    "next",
-    "phase",
-    "status",
-    "approve",
-    "artifacts",
-  ]) {
-    files.push([
-      join(project.configDirectory, "skills", `${skill}.md`),
-      operatorSkill(skill),
-    ]);
-  }
 
   for (const [path, contents] of files) {
     await mkdir(dirname(path), { recursive: true });
@@ -550,6 +611,7 @@ export async function loadProjectExecutionSettings(
   policy: DocumentValue<"policy">;
   profiles: Record<string, DocumentValue<"profile">>;
   guidelines: Record<string, string>;
+  modelRouting: DocumentValue<"modelRouting">;
 }> {
   const settings = await loadProjectDeliverySettings(
     project,
@@ -566,6 +628,18 @@ export async function loadProjectExecutionSettings(
     );
     profiles[profile.id] = profile;
   }
+  const modelRoutingPath = join(project.configDirectory, "models.yaml");
+  let modelRouting: DocumentValue<"modelRouting"> = {
+    schemaVersion: 1,
+    modelTiers: {},
+  };
+  try {
+    modelRouting = ModelRoutingSchema.parse(
+      await parseYamlFile(modelRoutingPath),
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   const guidelines: Record<string, string> = {};
   for (const entry of await readdir(
     join(project.configDirectory, "guidelines"),
@@ -576,7 +650,7 @@ export async function loadProjectExecutionSettings(
       "utf8",
     );
   }
-  return { ...settings, profiles, guidelines };
+  return { ...settings, profiles, guidelines, modelRouting };
 }
 
 export async function validateProjectConfiguration(

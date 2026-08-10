@@ -6,6 +6,7 @@ import { type Checkpoint } from "./domain.js";
 import { type RunEventStore } from "./event-store.js";
 import { type CommandRunner, type GitClient } from "./git.js";
 import { CheckpointSchema, type DocumentValue } from "./schemas.js";
+import type { ReleasePreflight } from "./release.js";
 
 function redactPortableText(value: string): string {
   return value.replace(
@@ -197,6 +198,18 @@ export interface ChangeDossier {
   approvals: DocumentValue<"approval">[];
   checkpoints: Checkpoint[];
   deliveryReferences: DocumentValue<"delivery">[];
+  releasePreflight?: ReleasePreflight;
+  cleanupState?: DocumentValue<"cleanupState">;
+  invocationRoutes: Array<{
+    invocationId: string;
+    phaseId: string;
+    harness: string;
+    modelTier?: string;
+    model?: string;
+    modelRoute?: Record<string, unknown>;
+    contractFingerprint?: string;
+    promptInputFingerprint?: string;
+  }>;
   explorationFoundation?: {
     explorationId: string;
     problem: string;
@@ -217,7 +230,19 @@ export async function persistChangeDossier(input: {
   approvals?: DocumentValue<"approval">[];
   checkpoints?: Checkpoint[];
   deliveries?: DocumentValue<"delivery">[];
+  invocations?: Array<{
+    invocationId: string;
+    phaseId: string;
+    harness: string;
+    modelTier?: string;
+    model?: string;
+    modelRoute?: Record<string, unknown>;
+    contractFingerprint?: string;
+    promptInputFingerprint?: string;
+  }>;
   explorationFoundation?: ChangeDossier["explorationFoundation"];
+  releasePreflight?: ReleasePreflight;
+  cleanupState?: DocumentValue<"cleanupState">;
   finalReport: string;
 }): Promise<{ path: string; dossier: ChangeDossier }> {
   const manifest = await input.artifacts.load();
@@ -243,6 +268,29 @@ export async function persistChangeDossier(input: {
     })),
     checkpoints: input.checkpoints ?? [],
     deliveryReferences: input.deliveries ?? [],
+    releasePreflight: input.releasePreflight,
+    cleanupState: input.cleanupState,
+    invocationRoutes: (input.invocations ?? []).map(
+      ({
+        invocationId,
+        phaseId,
+        harness,
+        modelTier,
+        model,
+        modelRoute,
+        contractFingerprint,
+        promptInputFingerprint,
+      }) => ({
+        invocationId,
+        phaseId,
+        harness,
+        modelTier,
+        model,
+        modelRoute,
+        contractFingerprint,
+        promptInputFingerprint,
+      }),
+    ),
     explorationFoundation: input.explorationFoundation,
     finalReport: redactPortableText(input.finalReport).slice(0, 10_000),
   };

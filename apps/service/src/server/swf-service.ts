@@ -23,6 +23,7 @@ import {
   BlockedAgentRouter,
   CheckpointManager,
   GitClient,
+  GitCommandError,
   HarnessWorkExecutor,
   HerdrClient,
   NodeCommandRunner,
@@ -37,7 +38,11 @@ import {
   ExplorationStore,
   RunEventStore,
   assertBudgetsAvailable,
+  assertChecksAdopted,
   assertLoopbackHttpEndpoint,
+  auditOpenSpecTasks,
+  buildPhasePrompt,
+  phaseContractFor,
   createRunEvent,
   enforcePrivatePermissions,
   evaluateBudgets,
@@ -51,16 +56,35 @@ import {
   isProjectTrusted,
   loadProjectDeliverySettings,
   loadProjectExecutionSettings,
+  defaultTemplateFiles,
   readProjectConfig,
   reduceRunState,
   persistChangeDossier,
   previewPhaseRerun,
   requestStructuredHandoff,
   recordAgentReview,
+  recordTaskAudit,
   recordAutoApproval,
   recordHumanApproval,
   resolveApprovalMode,
   resolveDeliveryPlan,
+  modelRouteExplanation,
+  resolveModelRoute,
+  validateModelRouteCapabilities,
+  diagnoseModelRoutes,
+  previewModelMapping,
+  applyModelMapping,
+  explainPhaseContract,
+  phaseMutationBoundaryViolations,
+  releasePreflight,
+  releasePreflightFingerprint,
+  summarizeReleaseApproval,
+  discoverProjectChecks,
+  previewCheckAdoption,
+  applyCheckAdoption,
+  readTemplateMetadata,
+  inspectTemplateDiff,
+  adoptTemplateFiles,
   retainDeliveryUpdate,
   runCommandCheck,
   runOpenSpecCheck,
@@ -430,7 +454,11 @@ export interface ServiceQuery {
     | "operations"
     | "blocked-inputs"
     | "explorations"
-    | "exploration";
+    | "exploration"
+    | "model-routes"
+    | "phase-explanation"
+    | "check-discovery"
+    | "defaults";
   projectId?: string;
   runId?: string;
   ref?: string;
@@ -538,6 +566,27 @@ export type ServiceCommand = (
       type: "deliver" | "refresh-delivery";
       projectId: string;
       runId: string;
+    }
+  | {
+      type: "archive-change";
+      projectId: string;
+      runId: string;
+      authorized?: boolean;
+    }
+  | {
+      type:
+        | "model-map-preview"
+        | "model-map-apply"
+        | "checks-preview"
+        | "checks-apply"
+        | "defaults-adopt";
+      projectId: string;
+      tier?: string;
+      harness?: string;
+      model?: string;
+      selectedIds?: string[];
+      confirmed?: boolean;
+      selectedPaths?: string[];
     }
   | {
       type: "reconcile";
@@ -1154,6 +1203,55 @@ export class SwfService {
           : [{ path: project.root, message: "project root unavailable" }],
       };
     }
+    if (query.resource === "check-discovery")
+      return discoverProjectChecks(project.root);
+    if (query.resource === "defaults") {
+      const location = await findProjectRoot(project.root);
+      if (!location?.initialized)
+        return { initialized: false, metadata: undefined, diff: [] };
+      const metadata = await readTemplateMetadata(location.configDirectory);
+      const projectConfig = await readProjectConfig(location);
+      const installed = defaultTemplateFiles(projectConfig.projectId);
+      return {
+        initialized: true,
+        metadata,
+        diff: await inspectTemplateDiff({
+          configDirectory: location.configDirectory,
+          adopted: metadata,
+          installed,
+        }),
+        note: "Installed defaults are inspected through an explicit preview; no project files are changed by this query.",
+      };
+    }
+    if (query.resource === "model-routes") {
+      const location = await findProjectRoot(project.root);
+      if (!location?.initialized) throw new Error("Project is not initialized");
+      const projectConfig = await readProjectConfig(location);
+      const settings = await loadProjectExecutionSettings(
+        location,
+        projectConfig.defaultWorkflow,
+        "manual",
+      );
+      const tiers = [
+        ...new Set(
+          settings.workflow.phases
+            .map((phase) => settings.profiles[phase.profile]?.modelTier)
+            .filter((tier): tier is string => Boolean(tier)),
+        ),
+      ];
+      const harnesses = [
+        ...new Set(
+          settings.workflow.phases.map(
+            (phase) => settings.profiles[phase.profile]?.harness ?? "pi",
+          ),
+        ),
+      ];
+      return diagnoseModelRoutes({
+        tiers,
+        harnesses,
+        sources: { project: { modelTiers: settings.modelRouting.modelTiers } },
+      });
+    }
     if (!query.runId)
       throw new Error(`runId is required for ${query.resource}`);
     if (query.resource === "output") {
@@ -1161,6 +1259,8 @@ export class SwfService {
       return this.readOutput(project, query.runId, query.ref, query.raw);
     }
     const loaded = await store.load(query.runId);
+    if (query.resource === "phase-explanation")
+      return this.queryUnredacted({ ...query, resource: "phases" });
     switch (query.resource) {
       case "run": {
         const runtime = await readJson<Record<string, unknown>>(
@@ -1198,8 +1298,41 @@ export class SwfService {
           query.runId,
           query.phaseId,
         );
+        const route =
+          profile && phase.work.some(({ type }) => type === "agent")
+            ? resolveModelRoute({
+                harness: profile.harness ?? "pi",
+                sources: {
+                  project: { modelTiers: settings.modelRouting.modelTiers },
+                  phase: {
+                    model: phase.model ?? profile.model,
+                    modelTier: phase.modelTier ?? profile.modelTier,
+                  },
+                },
+                model: phase.model ?? profile.model,
+                modelTier: phase.modelTier ?? profile.modelTier,
+              }).route
+            : undefined;
         return {
           phase: loaded.state.phases[query.phaseId],
+          explanation: explainPhaseContract({
+            phaseId: query.phaseId,
+            contract: profile?.contract ?? phaseContractFor(query.phaseId),
+            modelRoute: route,
+            tools: phase.work.map(({ type }) => type),
+            evidenceRefs: manifest.artifacts
+              .filter(
+                ({ phaseId: artifactPhase, status }) =>
+                  artifactPhase === query.phaseId && status === "valid",
+              )
+              .map(({ outputRef }) => outputRef),
+            provenance: {
+              contract: profile?.contract
+                ? `profile:${profile.id}`
+                : "built-in",
+              model: route?.source ?? "deterministic",
+            },
+          }),
           eligibility: evaluatePhaseEligibility(
             settings.workflow,
             query.phaseId,
@@ -1504,6 +1637,7 @@ export class SwfService {
       loaded.events.some(
         (event) =>
           event.type === "gate.decided" &&
+          event.context.phaseId === "releasing" &&
           event.actor.type === "policy" &&
           event.data.status === "satisfied",
       ) ||
@@ -1572,6 +1706,45 @@ export class SwfService {
     update: DeliveryUpdate,
   ): Promise<void> {
     const { project } = await this.runStore(projectId);
+    if (update.kind === "cleanup" && update.delivery.status === "merged") {
+      const ownership = await new RuntimeOwnershipStore(
+        project.stateDirectory,
+      ).load(request.runId);
+      const ownedResources =
+        (ownership?.resources ?? []).map(
+          ({ kind, resourceId }) => `${kind}:${resourceId}`,
+        ) ?? [];
+      try {
+        const runtime = new RunRuntime(
+          new GitClient(project.root, this.commandRunner),
+          this.herdr,
+          new RuntimeOwnershipStore(project.stateDirectory),
+        );
+        const removed = await runtime.cleanup(request.runId);
+        update.delivery = {
+          ...update.delivery,
+          cleanupState: {
+            status: "completed",
+            ownedResources,
+            removedResources: removed,
+            retainedResources: [],
+            updatedAt: new Date().toISOString(),
+          },
+        };
+      } catch (error) {
+        update.delivery = {
+          ...update.delivery,
+          cleanupState: {
+            status: "preserved",
+            ownedResources,
+            removedResources: [],
+            retainedResources: ownedResources,
+            updatedAt: new Date().toISOString(),
+          },
+          failureReason: `Delivery succeeded but owned cleanup was preserved: ${error instanceof Error ? error.message : "cleanup failed"}`,
+        };
+      }
+    }
     const artifact = await retainDeliveryUpdate({
       artifacts: new ArtifactStore(
         project.stateDirectory,
@@ -1595,6 +1768,8 @@ export class SwfService {
       context: { phaseId: request.phaseId },
       data: { delivery: update.delivery },
     });
+    if (update.kind === "merge")
+      await this.persistRunDossier(projectId, request.runId);
     if (update.action === "remediate") {
       const { store } = await this.runStore(projectId);
       const state = (await store.load(request.runId)).state;
@@ -1702,9 +1877,69 @@ export class SwfService {
     runId: string,
     options: { refreshOnly?: boolean } = {},
   ): Promise<RunState["deliveries"][string]> {
+    const project = await this.project(projectId);
     const { request, existing } = await this.deliveryRequest(projectId, runId);
     if (!options.refreshOnly && request.executionStatus !== "completed")
       throw new Error("Pull-request delivery requires completed execution");
+    // Runs created by older integrations can lack a durable source checkpoint
+    // and may use a hosting-only fixture instead of a real Git worktree. In
+    // that case there is no trustworthy local commit to preflight; preserve
+    // the existing hosting delivery path and let the adapter perform its own
+    // admission checks. Real runs always have a checkpoint and take the
+    // deterministic local preflight path below.
+    if (!options.refreshOnly && request.sourceCommit !== "unknown") {
+      const git = new GitClient(request.cwd, this.commandRunner);
+      const preflight = await releasePreflight({
+        runId,
+        git,
+        runner: this.commandRunner,
+        sourceBranch: request.sourceBranch,
+        targetBranch: request.targetBranch,
+        remote: request.remote,
+        mergeMethod: request.plan.mergeMethod,
+        expectedSourceCommit: request.sourceCommit,
+        requireCleanSource: true,
+        refreshTarget: true,
+      });
+      if (!preflight.valid)
+        throw new Error(
+          `Release preflight failed: ${preflight.checks
+            .filter(({ status }) => status !== "passed")
+            .map(({ detail }) => detail)
+            .join("; ")}`,
+        );
+      request.preflight = preflight;
+      const artifacts = new ArtifactStore(
+        project.stateDirectory,
+        runId,
+        this.redactor,
+      );
+      const preflightOutput = await artifacts.retainRaw(
+        `release/final-preflight-${runId}.json`,
+        `${JSON.stringify(preflight, null, 2)}\n`,
+      );
+      const preflightArtifact = await artifacts.record({
+        schemaVersion: 1,
+        artifactId: randomUUID(),
+        runId,
+        type: "release-preflight",
+        phaseId: request.phaseId ?? "releasing",
+        sourceCommit: preflight.sourceCommit,
+        inputFingerprint: releasePreflightFingerprint(preflight),
+        status: "valid",
+        createdAt: new Date().toISOString(),
+        outputRef: preflightOutput,
+        summary: "Final release preflight passed before delivery mutation",
+        consumers: [],
+      });
+      await this.append(projectId, runId, {
+        type: "artifact.recorded",
+        actor: { type: "service", id: "swf-release" },
+        context: { phaseId: request.phaseId },
+        data: { artifact: preflightArtifact },
+      });
+      await this.persistRunDossier(projectId, runId);
+    }
     const orchestrator = new DeliveryOrchestrator(
       this.hostingAdapter,
       (update) => this.recordDeliveryUpdate(projectId, request, update),
@@ -1718,7 +1953,25 @@ export class SwfService {
         maxPolls: 1,
       });
     }
-    const delivery = await orchestrator.start(request);
+    let delivery = await orchestrator.start(request);
+    if (delivery.mode === "direct-merge" && delivery.status === "merged") {
+      const merged = await this.commandRunner.run(
+        "git",
+        ["rev-parse", request.targetBranch],
+        { cwd: project.root },
+      );
+      if (merged.code === 0) {
+        delivery = {
+          ...delivery,
+          resultingCommit: merged.stdout.trim(),
+          updatedAt: new Date().toISOString(),
+        };
+        await this.recordDeliveryUpdate(projectId, request, {
+          delivery,
+          kind: "merge",
+        });
+      }
+    }
     this.startDeliveryMonitor(projectId, request, delivery);
     return delivery;
   }
@@ -1769,18 +2022,32 @@ export class SwfService {
       const profile = settings.profiles[phase.profile];
       if (!profile) throw new Error(`Missing phase profile: ${phase.profile}`);
       const adapter = this.adapter(profile.harness ?? "pi");
+      const route = resolveModelRoute({
+        harness: adapter.id,
+        sources: {
+          project: { modelTiers: settings.modelRouting.modelTiers },
+          phase: { model: profile.model, modelTier: profile.modelTier },
+        },
+        model: profile.model,
+        modelTier: profile.modelTier,
+      }).route;
       const availability = await adapter.availability();
       if (!availability.valid)
         throw new Error(
           `Harness ${adapter.id} is unavailable for phase ${phase.id}: ${availability.errors.join("; ")}`,
         );
-      const validation = await adapter.validate(
-        { model: profile.model },
+      const routeValidation = validateModelRouteCapabilities(
+        route,
+        adapter,
         phase.requiredCapabilities,
       );
-      if (!validation.valid)
+      const validation = await adapter.validate(
+        { model: route.concreteModel },
+        phase.requiredCapabilities,
+      );
+      if (!routeValidation.valid || !validation.valid)
         throw new Error(
-          `Harness ${adapter.id} is invalid for phase ${phase.id}: ${validation.errors.join("; ")}`,
+          `Harness ${adapter.id} is invalid for phase ${phase.id}: ${[...routeValidation.errors, ...validation.errors].join("; ")}`,
         );
     }
 
@@ -1858,7 +2125,30 @@ export class SwfService {
     if (!phase) throw new Error(`Unknown phase: ${phaseId}`);
     const profile = settings.profiles[phase.profile];
     if (!profile) throw new Error(`Missing phase profile: ${phase.profile}`);
+    if (
+      phaseId === "releasing" &&
+      !phase.work.some(({ type }) => type === "agent")
+    )
+      return this.executeDeterministicReleasePhase(
+        input,
+        phase,
+        loaded.state.run.policyId === "autonomous",
+      );
+    if (phaseId === "verifying")
+      assertChecksAdopted({
+        expectedCodeVerification: true,
+        checks: phase.checks,
+      });
     const adapter = this.adapter(profile.harness ?? "pi");
+    const route = resolveModelRoute({
+      harness: adapter.id,
+      sources: {
+        project: { modelTiers: settings.modelRouting.modelTiers },
+        phase: { model: profile.model, modelTier: profile.modelTier },
+      },
+      model: profile.model,
+      modelTier: profile.modelTier,
+    }).route;
     const artifacts = new ArtifactStore(
       project.stateDirectory,
       runId,
@@ -1985,6 +2275,26 @@ export class SwfService {
       .map((id) => settings.guidelines[id])
       .filter(Boolean)
       .join("\n\n");
+    const contract = profile.contract ?? phaseContractFor(phaseId);
+    const builtPrompt = buildPhasePrompt({
+      contract,
+      phaseId,
+      runId,
+      changeName: loaded.state.run.changeName,
+      cwd: runtime.worktree.path,
+      guidelines: guidelineText,
+      openspecContext: `OpenSpec change: ${loaded.state.run.changeName}`,
+      evidence: downstreamContext.evidence.map(({ outputRef, artifactId }) => ({
+        ref: outputRef,
+        fingerprint: artifactId,
+        valid: true,
+      })),
+      tools: [],
+      runtimeBoundaries: [
+        "Do not mutate SWF orchestration from child invocation",
+        "Do not archive, merge, or deliver unless the service explicitly authorizes it",
+      ],
+    });
     const workflow = {
       ...settings.workflow,
       phases: settings.workflow.phases.map((candidate) =>
@@ -1999,15 +2309,9 @@ export class SwfService {
                       ...unit,
                       options: {
                         ...unit.options,
-                        prompt:
-                          `${String(unit.options.prompt ?? "")}\n\n` +
-                          `SWF run ${runId}, phase ${phaseId}, OpenSpec change ${loaded.state.run.changeName}. ` +
-                          `Work only in ${runtime.worktree.path}. ` +
-                          `Resolved guidelines:\n${guidelineText || "none"}\n` +
-                          `Prior evidence references: ${downstreamContext.evidence.map(({ outputRef }) => outputRef).join(", ") || "none"}. ` +
-                          (phaseId === settings.workflow.phases[0]?.id
-                            ? `Planning input: ${loaded.state.run.description}. Create proposal.md, design.md, capability specs, tasks.md, evidence/planning.json, and evidence/planning-handoff.json under openspec/changes/${loaded.state.run.changeName}/ and ensure openspec validate passes.`
-                            : "Use the selected valid prior evidence and complete the declared phase objective."),
+                        prompt: `${String(unit.options.prompt ?? "")}\n\n${builtPrompt.prompt}`,
+                        contractFingerprint: builtPrompt.contractFingerprint,
+                        promptInputFingerprint: builtPrompt.inputFingerprint,
                       },
                     },
               ),
@@ -2048,6 +2352,11 @@ export class SwfService {
                   runId,
                   phaseId,
                   harness: adapter.id as "pi" | "codex" | "claude" | "copilot",
+                  modelTier: route.requestedTier,
+                  model: route.concreteModel,
+                  modelRoute: modelRouteExplanation(route),
+                  contractFingerprint: builtPrompt.contractFingerprint,
+                  promptInputFingerprint: builtPrompt.inputFingerprint,
                   status:
                     result.status === "unknown" ? "failed" : result.status,
                   startedAt: invocation.startedAt,
@@ -2110,7 +2419,9 @@ export class SwfService {
             project: {
               ...profile.options,
               harness: profile.harness ?? "pi",
-              model: profile.model,
+              model: route.concreteModel,
+              modelTier: route.requestedTier,
+              modelRoute: modelRouteExplanation(route),
               timeoutMs: settings.policy.timeoutMinutes
                 ? settings.policy.timeoutMinutes * 60_000
                 : undefined,
@@ -2362,8 +2673,136 @@ export class SwfService {
       type: "artifact.recorded",
       actor,
       context: { phaseId, attemptId },
-      data: { artifact: gitEvidence.artifact },
+      data: {
+        artifact: {
+          ...gitEvidence.artifact,
+          modelRoute: modelRouteExplanation(route),
+          contractFingerprint: builtPrompt.contractFingerprint,
+          promptInputFingerprint: builtPrompt.inputFingerprint,
+        },
+      },
     });
+    const boundaryViolations = phaseMutationBoundaryViolations(
+      phaseId,
+      gitEvidence.evidence.changedFiles,
+    );
+    if (boundaryViolations.length) {
+      const reason = `${phaseId} mutation boundary violated: ${boundaryViolations.join(", ")}`;
+      await this.append(project.projectId, runId, {
+        type: "attempt.completed",
+        actor,
+        context: { phaseId, attemptId },
+        data: { attemptId, status: "failed", reason },
+      });
+      await this.append(project.projectId, runId, {
+        type: "phase.transitioned",
+        actor,
+        context: { phaseId },
+        data: { phaseId, from: "running", to: "failed", reason },
+      });
+      return "failed";
+    }
+    if (phaseId === "verifying") {
+      const verificationChecks = [...evidence];
+      const strictSpec = await runOpenSpecCheck({
+        runner: this.commandRunner,
+        artifacts,
+        checkId: "verifying-openspec",
+        phaseId,
+        changeName: loaded.state.run.changeName,
+        commit: currentCommit,
+        cwd: runtime.worktree.path,
+      });
+      verificationChecks.push(strictSpec);
+      await this.append(project.projectId, runId, {
+        type: "artifact.recorded",
+        actor,
+        context: { phaseId, attemptId, checkId: strictSpec.checkId },
+        data: { artifact: strictSpec.artifact! },
+      });
+      await this.append(project.projectId, runId, {
+        type: "check.recorded",
+        actor,
+        context: { phaseId, attemptId, checkId: strictSpec.checkId },
+        data: {
+          checkId: strictSpec.checkId,
+          phaseId,
+          status: strictSpec.status,
+          artifactId: strictSpec.artifact?.artifactId,
+          reason: strictSpec.summary,
+        },
+      });
+      try {
+        const reviewArtifact = verificationChecks.find(
+          ({ artifact }) => artifact?.type === "agent-review",
+        )?.artifact;
+        const review = reviewArtifact
+          ? await readJson<{
+              summary: string;
+              findings: Array<{
+                id: string;
+                severity: "info" | "warning" | "blocking";
+                title: string;
+                detail: string;
+                artifactIds: string[];
+              }>;
+            }>(
+              join(
+                project.stateDirectory,
+                "runs",
+                runId,
+                reviewArtifact.outputRef,
+              ),
+            )
+          : undefined;
+        const audit = await auditOpenSpecTasks({
+          changeRoot: join(
+            runtime.worktree.path,
+            "openspec",
+            "changes",
+            loaded.state.run.changeName,
+          ),
+          sourceCommit: currentCommit,
+          implementationRefs: gitEvidence?.evidence.changedFiles,
+          checks: verificationChecks,
+          review,
+        });
+        const auditArtifact = await recordTaskAudit({
+          artifacts,
+          phaseId,
+          audit,
+        });
+        evidence.push({
+          checkId: "task-audit",
+          type: "openspec",
+          required: true,
+          status: audit.status === "verified" ? "passed" : "failed",
+          artifact: auditArtifact,
+          deterministic: true,
+          createdAt: auditArtifact.createdAt,
+          summary: audit.summary,
+        });
+        await this.append(project.projectId, runId, {
+          type: "artifact.recorded",
+          actor,
+          context: { phaseId, attemptId, checkId: "task-audit" },
+          data: { artifact: auditArtifact },
+        });
+      } catch (error) {
+        evidence.push({
+          checkId: "task-audit",
+          type: "openspec",
+          required: true,
+          status: "failed",
+          deterministic: true,
+          createdAt: new Date().toISOString(),
+          summary:
+            error instanceof Error
+              ? `Task audit failed: ${error.message}`
+              : "Task audit failed",
+        });
+      }
+    }
     const context = await artifacts.selectContext({ phaseIds: [phaseId] });
     const handoff = await requestStructuredHandoff({
       runId,
@@ -2563,6 +3002,226 @@ export class SwfService {
       type: "attempt.completed",
       actor,
       context: { phaseId, attemptId },
+      data: { attemptId, status: "completed" },
+    });
+    return "completed";
+  }
+
+  private async executeDeterministicReleasePhase(
+    input: {
+      project: RegisteredProject;
+      runId: string;
+      phaseId: string;
+      settings: Awaited<ReturnType<typeof loadProjectExecutionSettings>>;
+      runtime: Awaited<ReturnType<RunRuntime["prepare"]>>;
+    },
+    phase: Awaited<
+      ReturnType<typeof loadProjectExecutionSettings>
+    >["workflow"]["phases"][number],
+    autonomous: boolean,
+  ): Promise<"completed" | "blocked" | "failed"> {
+    const { project, runId, settings, runtime } = input;
+    const store = new RunEventStore(project.stateDirectory, {
+      redaction: this.redactor,
+    });
+    const loaded = await store.load(runId);
+    const actor = { type: "service" as const, id: "swf-release" };
+    const attemptId = randomUUID();
+    await this.append(project.projectId, runId, {
+      type: "phase.transitioned",
+      actor,
+      context: { phaseId: phase.id },
+      data: {
+        phaseId: phase.id,
+        from: loaded.state.phases[phase.id]!.status,
+        to: "running",
+        reason: "deterministic release preflight",
+      },
+    });
+    await this.append(project.projectId, runId, {
+      type: "attempt.started",
+      actor,
+      context: { phaseId: phase.id, attemptId },
+      data: {
+        attemptId,
+        phaseId: phase.id,
+        number: (loaded.state.phases[phase.id]?.attemptIds.length ?? 0) + 1,
+        kind: "initial",
+      },
+    });
+    const git = new GitClient(runtime.worktree.path, this.commandRunner);
+    const checkpoints = Object.values(loaded.state.checkpoints).sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
+    );
+    const expectedSourceCommit =
+      checkpoints[0]?.afterCommit ?? (await git.head());
+    const release = await releasePreflight({
+      runId,
+      git,
+      runner: this.commandRunner,
+      sourceBranch: runtime.worktree.branch,
+      targetBranch: settings.config.git.targetBranch,
+      remote: settings.config.git.remote,
+      mergeMethod: settings.workflow.delivery.mergeMethod,
+      expectedSourceCommit,
+      requireCleanSource: true,
+      refreshTarget: false,
+      policyChecks: [
+        {
+          id: "delivery-policy",
+          passed: Boolean(settings.workflow.delivery.mode),
+          detail: `delivery mode ${settings.workflow.delivery.mode}`,
+        },
+      ],
+    });
+    const artifacts = new ArtifactStore(
+      project.stateDirectory,
+      runId,
+      this.redactor,
+    );
+    const serialized = `${JSON.stringify(release, null, 2)}\n`;
+    const outputRef = await artifacts.retainRaw(
+      `release/preflight-${attemptId}.json`,
+      serialized,
+    );
+    const artifact = await artifacts.record({
+      schemaVersion: 1,
+      artifactId: randomUUID(),
+      runId,
+      type: "release-preflight",
+      phaseId: phase.id,
+      sourceCommit: release.sourceCommit,
+      inputFingerprint: releasePreflightFingerprint(release),
+      status: release.valid ? "valid" : "invalid",
+      createdAt: new Date().toISOString(),
+      outputRef,
+      summary: summarizeReleaseApproval({
+        preflight: release,
+        evidence: ["strict verification", "task audit"],
+        risks: release.valid
+          ? []
+          : release.checks
+              .filter(({ status }) => status !== "passed")
+              .map(({ detail }) => detail),
+        cleanupPlan: ["owned runtime resources after durable delivery"],
+      }),
+      consumers: [],
+      invalidReason: release.valid ? undefined : "release preflight failed",
+    });
+    await this.append(project.projectId, runId, {
+      type: "artifact.recorded",
+      actor,
+      context: { phaseId: phase.id, attemptId },
+      data: { artifact },
+    });
+    const context = await artifacts.selectContext({ phaseIds: [phase.id] });
+    const handoff = await requestStructuredHandoff({
+      runId,
+      phaseId: phase.id,
+      facts: context,
+    });
+    const handoffRef = await artifacts.retainHandoff(handoff);
+    const handoffArtifact = await artifacts.record({
+      schemaVersion: 1,
+      artifactId: handoff.handoffId,
+      runId,
+      type: "phase-handoff",
+      phaseId: phase.id,
+      sourceCommit: release.sourceCommit,
+      inputFingerprint: releasePreflightFingerprint(release),
+      status: "valid",
+      createdAt: new Date().toISOString(),
+      outputRef: handoffRef,
+      producerAttemptId: attemptId,
+      summary: handoff.summary.join(" ").slice(0, 2_000),
+      consumers: [],
+    });
+    await this.append(project.projectId, runId, {
+      type: "artifact.recorded",
+      actor,
+      context: { phaseId: phase.id, attemptId },
+      data: { artifact: handoffArtifact },
+    });
+    const gateStatus =
+      release.valid &&
+      (autonomous || settings.policy.approvalMode === "automatic")
+        ? "satisfied"
+        : release.valid
+          ? "blocked"
+          : "rejected";
+    const gateReason = release.valid
+      ? summarizeReleaseApproval({
+          preflight: release,
+          evidence: [artifact.outputRef],
+          risks: [],
+          cleanupPlan: ["retain until delivery succeeds"],
+        })
+      : `Release preflight failed: ${release.checks
+          .filter(({ status }) => status !== "passed")
+          .map(({ detail }) => detail)
+          .join("; ")}`;
+    await this.append(project.projectId, runId, {
+      type: "gate.decided",
+      actor,
+      context: { phaseId: phase.id, attemptId },
+      data: {
+        gateId: "releasing-gate",
+        phaseId: phase.id,
+        status: gateStatus,
+        reason: gateReason,
+      },
+    });
+    if (gateStatus !== "satisfied") {
+      await this.append(project.projectId, runId, {
+        type: "attempt.completed",
+        actor,
+        context: { phaseId: phase.id, attemptId },
+        data: {
+          attemptId,
+          status: gateStatus === "rejected" ? "failed" : "blocked",
+          reason: gateReason,
+        },
+      });
+      await this.append(project.projectId, runId, {
+        type: "phase.transitioned",
+        actor,
+        context: { phaseId: phase.id },
+        data: {
+          phaseId: phase.id,
+          from: "running",
+          to: gateStatus === "rejected" ? "failed" : "blocked",
+          reason: gateReason,
+        },
+      });
+      return gateStatus === "rejected" ? "failed" : "blocked";
+    }
+    const checkpoint = await new CheckpointManager(
+      project.stateDirectory,
+      runId,
+      git,
+      artifacts,
+    ).create({
+      phaseId: phase.id,
+      beforeCommit: release.sourceCommit,
+      gateDecision: "satisfied",
+      handoff,
+    });
+    await this.append(project.projectId, runId, {
+      type: "checkpoint.recorded",
+      actor,
+      context: { phaseId: phase.id, attemptId },
+      data: { checkpoint },
+    });
+    await this.append(project.projectId, runId, {
+      type: "phase.transitioned",
+      actor,
+      context: { phaseId: phase.id },
+      data: { phaseId: phase.id, from: "running", to: "completed" },
+    });
+    await this.append(project.projectId, runId, {
+      type: "attempt.completed",
+      actor,
+      context: { phaseId: phase.id, attemptId },
       data: { attemptId, status: "completed" },
     });
     return "completed";
@@ -2958,13 +3617,26 @@ export class SwfService {
       approvals: approvals.filter(Boolean) as never,
       checkpoints: Object.values(loaded.state.checkpoints),
       deliveries: Object.values(loaded.state.deliveries),
+      invocations: Object.values(loaded.state.invocations),
       explorationFoundation:
         planningInput?.kind === "exploration" ? planningInput.brief : undefined,
       finalReport: `SWF run ${runId} completed ${loaded.state.run.phaseIds?.length ?? 0} phases for ${loaded.state.run.changeName}.`,
     });
-    await new GitClient(runtime.worktreePath, this.commandRunner).commit(
-      "swf: persist portable evidence dossier",
-    );
+    try {
+      await new GitClient(runtime.worktreePath, this.commandRunner).commit(
+        "swf: persist portable evidence dossier",
+      );
+    } catch (error) {
+      // Hosting-only integrations may persist their dossier into a synthetic
+      // worktree without a usable Git repository. The dossier is already
+      // durable on disk; do not prevent delivery cleanup or monitoring from
+      // completing because that optional commit cannot be created.
+      if (
+        !(error instanceof GitCommandError) ||
+        !error.message.includes("not a git repository")
+      )
+        throw error;
+    }
   }
 
   private async append<T extends EventType>(
@@ -3056,6 +3728,116 @@ export class SwfService {
       command.type === "phase-run"
     )
       return this.enterWorkflow(command);
+    if (
+      command.type === "model-map-preview" ||
+      command.type === "model-map-apply" ||
+      command.type === "checks-preview" ||
+      command.type === "checks-apply"
+    ) {
+      const project = await this.project(command.projectId);
+      if (
+        command.type === "model-map-preview" ||
+        command.type === "model-map-apply"
+      ) {
+        if (!command.tier || !command.harness || !command.model)
+          throw new Error(
+            "tier, harness, and model are required for model mapping",
+          );
+        if (command.type === "model-map-preview")
+          return previewModelMapping({
+            tier: command.tier,
+            harness: command.harness,
+            model: command.model,
+          });
+        return applyModelMapping({
+          root: project.root,
+          tier: command.tier,
+          harness: command.harness,
+          model: command.model,
+          confirmed: Boolean(command.confirmed),
+        });
+      }
+      const discovery = await discoverProjectChecks(project.root);
+      if (command.type === "checks-preview")
+        return previewCheckAdoption(
+          discovery.candidates,
+          command.selectedIds ?? [],
+        );
+      return applyCheckAdoption({
+        root: project.root,
+        candidates: discovery.candidates,
+        selectedIds: command.selectedIds ?? [],
+        confirmed: Boolean(command.confirmed),
+      });
+    }
+    if (command.type === "archive-change") {
+      if (!command.authorized)
+        throw new Error("OpenSpec archive requires explicit authorization");
+      const project = await this.project(command.projectId);
+      const store = new RunEventStore(project.stateDirectory, {
+        redaction: this.redactor,
+      });
+      const loaded = await store.load(command.runId);
+      const deliveries = Object.values(loaded.state.deliveries);
+      if (
+        !deliveries.some(
+          ({ status }) => status === "merged" || status === "local-branch",
+        )
+      )
+        throw new Error(
+          "OpenSpec archive requires a successful recorded delivery",
+        );
+      const runtime = await readJson<{ worktreePath?: string }>(
+        join(project.stateDirectory, "runs", command.runId, "runtime.json"),
+      );
+      const cwd = runtime?.worktreePath ?? project.root;
+      const result = await this.commandRunner.run(
+        "openspec",
+        ["archive", "change", loaded.state.run.changeName],
+        { cwd },
+      );
+      if (result.code !== 0)
+        throw new Error(
+          `OpenSpec archive failed: ${result.stderr.trim() || result.stdout.trim()}`,
+        );
+      return {
+        archived: loaded.state.run.changeName,
+        output: `${result.stdout}${result.stderr}`.trim(),
+      };
+    }
+    if (command.type === "defaults-adopt") {
+      if (!command.confirmed)
+        throw new Error("Defaults adoption requires explicit confirmation");
+      const project = await this.project(command.projectId);
+      const location = await findProjectRoot(project.root);
+      if (!location?.initialized) throw new Error("Project is not initialized");
+      const metadata = await readTemplateMetadata(location.configDirectory);
+      if (!metadata)
+        throw new Error(
+          "This project has no template metadata; inspect and reconcile legacy defaults before adoption",
+        );
+      const projectConfig = await readProjectConfig(location);
+      const installed = defaultTemplateFiles(projectConfig.projectId);
+      const diff = await inspectTemplateDiff({
+        configDirectory: location.configDirectory,
+        adopted: metadata,
+        installed,
+      });
+      const selectedPaths = command.selectedPaths ?? [];
+      const backupDirectory = join(
+        project.stateDirectory,
+        "template-backups",
+        randomUUID(),
+      );
+      return adoptTemplateFiles({
+        configDirectory: location.configDirectory,
+        metadata,
+        installed,
+        selectedPaths,
+        diff,
+        backupDirectory,
+      });
+    }
     if (command.type === "blocked-input") {
       await this.submitBlockedInput(command.invocationId, command.response);
       return;

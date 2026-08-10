@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   findProjectRoot,
   initializeProject,
+  loadProjectExecutionSettings,
   resolveConfiguration,
   resolveConfigurationSources,
   validateProjectConfiguration,
@@ -89,6 +90,21 @@ describe("project initialization", () => {
     await expect(readFile(configPath, "utf8")).resolves.toBe(
       "custom: preserved\n",
     );
+  });
+
+  it("generates static phase tiers and an agent-free Releasing phase", async () => {
+    const { root, configHome } = await temporaryProject();
+    await initializeProject({ cwd: root, configHome, trust: true });
+    const settings = await loadProjectExecutionSettings(
+      (await findProjectRoot(root))!,
+      "default",
+    );
+    expect(settings.profiles.planner?.modelTier).toBe("reasoning");
+    expect(settings.profiles.builder?.modelTier).toBe("coding");
+    expect(settings.profiles.verifier?.modelTier).toBe("fast");
+    expect(
+      settings.workflow.phases.find(({ id }) => id === "releasing")?.work,
+    ).toEqual([]);
   });
 
   it("reports unavailable required profile capabilities before execution resources are created", async () => {

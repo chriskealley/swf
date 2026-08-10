@@ -74,3 +74,11 @@ swf service diagnostic
 Use `swf new`, `swf run`, or `swf explore` to begin work. The service continues after CLI, Pi, or dashboard clients disconnect. Use `swf service stop` for safe draining or `swf service stop --force` only when owned execution must be interrupted.
 
 The dashboard connects only to the loopback endpoint and credential published in the private service metadata. Adapter versions and capability limitations are in [harness-adapters.md](./harness-adapters.md). Security, autonomous-policy implications, pruning, budgets, reconciliation, migration, export/import, and crash recovery are covered in [operations.md](./operations.md).
+
+# Installation and first-run configuration
+
+After `swf init --trust`, inspect the generated `.swf/models.yaml` and bind the three policy tiers to models installed in the selected harness. SWF intentionally leaves those values unset because model identifiers and credentials are provider- and operator-specific.
+
+Run `swf model routes` before the first workflow. Resolve every tier used by the workflow with `swf model map ...`; the command previews the exact configuration path and only `--apply` writes it.
+
+Use `swf check discover` to review project checks before adopting them. Initialization and discovery do not install dependencies, execute scripts, or overwrite an existing project configuration.

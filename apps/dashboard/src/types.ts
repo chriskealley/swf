@@ -12,6 +12,10 @@ export interface Invocation {
   runId: string;
   phaseId: string;
   harness: string;
+  modelTier?: string;
+  model?: string;
+  modelRoute?: Record<string, unknown>;
+  contractFingerprint?: string;
   status: string;
   startedAt: string;
   endedAt?: string;
@@ -154,6 +158,17 @@ export interface RunDetail {
         cleanup?: { branchDeleted: boolean; recordedAt: string };
         failureReason?: string;
         failureAction?: "remediate" | "escalate" | "fail";
+        cleanupState?: {
+          status: string;
+          removedResources: string[];
+          retainedResources: string[];
+        };
+        preflight?: {
+          valid: boolean;
+          sourceCommit: string;
+          targetCommit: string;
+          checks: Array<{ id: string; status: string; detail: string }>;
+        };
       }
     >;
   };
