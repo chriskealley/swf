@@ -173,10 +173,12 @@ export class SwfServiceClient {
     });
   }
 
-  async *events(input: {
-    after?: number;
-    signal?: AbortSignal;
-  } = {}): AsyncIterable<ServiceStreamEvent> {
+  async *events(
+    input: {
+      after?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): AsyncIterable<ServiceStreamEvent> {
     const headers = new Headers({
       authorization: `Bearer ${this.metadata.credential}`,
     });
@@ -207,7 +209,9 @@ export class SwfServiceClient {
       }
     }
     if (!input.signal?.aborted)
-      throw new ServiceUnavailableError("SWF progress stream ended unexpectedly");
+      throw new ServiceUnavailableError(
+        "SWF progress stream ended unexpectedly",
+      );
   }
 
   async previewPruning(

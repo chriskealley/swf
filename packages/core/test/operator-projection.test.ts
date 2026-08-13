@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   OperatorProjectionSchema,
+  actionCommandType,
   buildOperatorProjection,
   classifyOperatorError,
   createRunEvent,
@@ -216,6 +217,51 @@ describe("operator projections", () => {
     ]);
   });
 
+  it("maps semantic action types to service command types", () => {
+    const value = state("failed");
+    value.deliveries[deliveryId] = {
+      schemaVersion: 1,
+      deliveryId,
+      runId,
+      provider: "local",
+      mode: "local-branch",
+      executionStatus: "failed",
+      status: "failed",
+      remote: "origin",
+      branch: "swf/operator-test",
+      targetBranch: "main",
+      mergeMethod: "merge",
+      autoMergeRequested: false,
+      hostedChecks: [],
+      reviews: [],
+      failureReason: "push rejected",
+      updatedAt: now,
+    };
+    const deliveryRetry = projection(value).allowedActions.find(
+      ({ type, parameters }) => type === "retry" && parameters.deliveryId,
+    );
+    const workflowRetry = projection(state("failed")).allowedActions.find(
+      ({ type, parameters }) => type === "retry" && !parameters.deliveryId,
+    );
+    expect(actionCommandType(deliveryRetry!)).toBe("refresh-delivery");
+    expect(actionCommandType(workflowRetry!)).toBe("run");
+    expect(
+      actionCommandType({ ...deliveryRetry!, type: "review-delivery" }),
+    ).toBeUndefined();
+    expect(
+      actionCommandType({ ...deliveryRetry!, type: "reply-to-invocation" }),
+    ).toBe("blocked-input");
+    expect(actionCommandType({ ...deliveryRetry!, type: "run-phase" })).toBe(
+      "next",
+    );
+    expect(actionCommandType({ ...deliveryRetry!, type: "continue-run" })).toBe(
+      "run",
+    );
+    expect(actionCommandType({ ...deliveryRetry!, type: "approve" })).toBe(
+      "approve",
+    );
+  });
+
   it("rebuilds an identical projection from authoritative events", () => {
     const base = run("pending");
     const events = [
@@ -242,7 +288,9 @@ describe("operator projections", () => {
 
   it("classifies errors with safe recovery metadata", () => {
     expect(
-      classifyOperatorError({ error: new Error("Harness adapter unavailable") }),
+      classifyOperatorError({
+        error: new Error("Harness adapter unavailable"),
+      }),
     ).toMatchObject({
       schemaVersion: 1,
       category: "harness",

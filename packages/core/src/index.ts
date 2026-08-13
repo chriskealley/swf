@@ -24,4 +24,5 @@ export * from "./check-discovery.js";
 export * from "./templates.js";
 export * from "./operations.js";
 export * from "./release.js";
+export * from "./operator-actions.js";
 export * from "./operator-projection.js";

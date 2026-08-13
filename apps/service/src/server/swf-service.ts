@@ -576,7 +576,13 @@ export type ServiceCommand = (
       invalidatedArtifactIds?: string[];
       authorized?: boolean;
     }
-  | { type: "blocked-input"; invocationId: string; response: string }
+  | {
+      type: "blocked-input";
+      invocationId: string;
+      response: string;
+      projectId?: string;
+      runId?: string;
+    }
   | {
       type: "deliver" | "refresh-delivery";
       projectId: string;
@@ -3787,40 +3793,30 @@ export class SwfService {
     }
   }
 
+  private async commandRunId(
+    command: ServiceCommand,
+    result?: unknown,
+  ): Promise<string | undefined> {
+    const projectId = "projectId" in command ? command.projectId : undefined;
+    const runId =
+      ("runId" in command ? command.runId : undefined) ??
+      (result && typeof result === "object" && "runId" in result
+        ? String(result.runId)
+        : undefined);
+    if (runId || !projectId || !("changeName" in command)) return runId;
+    const { store } = await this.runStore(projectId);
+    return store.findRunByChangeIdentity(
+      `openspec/changes/${command.changeName}`,
+    );
+  }
+
   async command(command: ServiceCommand): Promise<unknown> {
+    let result: unknown;
     try {
-      const result = await this.commandUnredacted(command);
-      const projectId = "projectId" in command ? command.projectId : undefined;
-      let runId =
-        "runId" in command
-          ? command.runId
-          : result && typeof result === "object" && "runId" in result
-            ? String(result.runId)
-            : undefined;
-      if (!runId && projectId && "changeName" in command) {
-        const { store } = await this.runStore(projectId);
-        runId = await store.findRunByChangeIdentity(
-          `openspec/changes/${command.changeName}`,
-        );
-      }
-      if (!projectId || !runId) return this.redactor.value(result);
-      const projection = await this.operatorProjection(projectId, runId);
-      const compatible =
-        result && typeof result === "object" && !Array.isArray(result)
-          ? result
-          : result === undefined
-            ? {}
-            : { value: result };
-      return this.redactor.value({ ...compatible, projection });
+      result = await this.commandUnredacted(command);
     } catch (error) {
       const projectId = "projectId" in command ? command.projectId : undefined;
-      let runId = "runId" in command ? command.runId : undefined;
-      if (!runId && projectId && "changeName" in command) {
-        const { store } = await this.runStore(projectId);
-        runId = await store
-          .findRunByChangeIdentity(`openspec/changes/${command.changeName}`)
-          .catch(() => undefined);
-      }
+      const runId = await this.commandRunId(command).catch(() => undefined);
       const projection =
         projectId && runId
           ? await this.operatorProjection(projectId, runId).catch(
@@ -3835,6 +3831,23 @@ export class SwfService {
         projection,
       );
     }
+    // The mutation already succeeded: never let projection failures report it as failed.
+    const projectId = "projectId" in command ? command.projectId : undefined;
+    const runId = await this.commandRunId(command, result).catch(
+      () => undefined,
+    );
+    const projection =
+      projectId && runId
+        ? await this.operatorProjection(projectId, runId).catch(() => undefined)
+        : undefined;
+    if (!projection) return this.redactor.value(result);
+    const compatible =
+      result && typeof result === "object" && !Array.isArray(result)
+        ? result
+        : result === undefined
+          ? {}
+          : { value: result };
+    return this.redactor.value({ ...compatible, projection });
   }
 
   private async commandUnredacted(command: ServiceCommand): Promise<unknown> {

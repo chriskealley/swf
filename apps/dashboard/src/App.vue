@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue";
+import { actionCommandType } from "@swf/core/operator-actions";
 import { DashboardApi, StaleClientError } from "./api.js";
 import {
   activeStatuses,
@@ -240,29 +241,32 @@ async function runSemanticAction(
   if (!api.value) return;
   if (
     action.requiresConfirmation &&
-    !window.confirm(`${action.label}? The service will revalidate current state.`)
+    !window.confirm(
+      `${action.label}? The service will revalidate current state.`,
+    )
   )
     return;
   const reason = ["request-changes", "reject"].includes(action.type)
     ? window.prompt("Reason", "") || undefined
     : undefined;
   if (["request-changes", "reject"].includes(action.type) && !reason) return;
-  const type =
-    action.type === "continue-run"
-      ? "run"
-      : action.type === "run-phase"
-        ? "next"
-        : action.type;
-  if (["inspect-evidence", "review-delivery", "merge-delivery"].includes(type)) {
-    message.value = `${action.label}. Use the referenced artifacts or branch details below.`;
+  const type = actionCommandType(action);
+  if (!type) {
+    message.value = `${action.label}. Use the referenced artifacts, branch, or project configuration below.`;
     return;
   }
+  const response =
+    action.type === "reply-to-invocation"
+      ? window.prompt("Reply to the blocked agent", "") || undefined
+      : undefined;
+  if (action.type === "reply-to-invocation" && !response) return;
   const result = await busy(() =>
     api.value!.command<{ projection?: OperatorProjection }>({
       type,
       ...action.parameters,
       actorId: "dashboard-operator",
       reason,
+      response,
     }),
   );
   if (result?.projection) guidance.value = result.projection;
@@ -721,7 +725,8 @@ onUnmounted(() => {
           <p>{{ guidance.summary }}</p>
           <ul v-if="guidance.attention.length" class="compact-list">
             <li v-for="item in guidance.attention" :key="item.attentionId">
-              <strong>{{ item.title }}</strong><span>{{ item.reason }}</span>
+              <strong>{{ item.title }}</strong
+              ><span>{{ item.reason }}</span>
             </li>
           </ul>
           <div class="controls" aria-label="Recommended actions">

@@ -20,7 +20,8 @@ const milestonePatterns = [
 ];
 
 export function progressMilestone(event: ProgressEvent): string | undefined {
-  if (!milestonePatterns.some((pattern) => pattern.test(event.type))) return undefined;
+  if (!milestonePatterns.some((pattern) => pattern.test(event.type)))
+    return undefined;
   const durable =
     event.data.event && typeof event.data.event === "object"
       ? (event.data.event as {
@@ -52,7 +53,8 @@ export class OrderedProgressSubscriber {
   accept(event: ProgressEvent): void {
     if (event.id <= this.lastEventId) return;
     this.lastEventId = event.id;
-    if (this.filter.projectId && event.projectId !== this.filter.projectId) return;
+    if (this.filter.projectId && event.projectId !== this.filter.projectId)
+      return;
     if (this.filter.runId && event.runId !== this.filter.runId) return;
     const milestone = progressMilestone(event);
     if (!milestone || this.milestones.at(-1) === milestone) return;

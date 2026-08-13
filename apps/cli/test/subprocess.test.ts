@@ -6,10 +6,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const execute = promisify(execFile);
-const loader = join(
-  process.cwd(),
-  "apps/cli/node_modules/tsx/dist/loader.mjs",
-);
+const loader = join(process.cwd(), "apps/cli/node_modules/tsx/dist/loader.mjs");
 const main = join(process.cwd(), "apps/cli/src/main.ts");
 
 async function cli(args: string[], environment: Record<string, string> = {}) {

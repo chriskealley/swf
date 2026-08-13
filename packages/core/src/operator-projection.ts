@@ -77,8 +77,13 @@ function action(
   });
 }
 
-function latestBy<T>(values: T[], timestamp: (value: T) => string): T | undefined {
-  return values.sort((left, right) => timestamp(right).localeCompare(timestamp(left)))[0];
+function latestBy<T>(
+  values: T[],
+  timestamp: (value: T) => string,
+): T | undefined {
+  return values.sort((left, right) =>
+    timestamp(right).localeCompare(timestamp(left)),
+  )[0];
 }
 
 function failureAttentionType(
@@ -102,7 +107,8 @@ export function classifyOperatorError(input: {
   recoveryActions?: OperatorAction[];
   diagnosticRefs?: string[];
 }): ClassifiedOperatorError {
-  const message = input.error instanceof Error ? input.error.message : String(input.error);
+  const message =
+    input.error instanceof Error ? input.error.message : String(input.error);
   const lower = message.toLowerCase();
   const category =
     input.category ??
@@ -116,7 +122,7 @@ export function classifyOperatorError(input: {
             ? "configuration"
             : lower.includes("dependency") || lower.includes("unavailable")
               ? "dependency"
-                : lower.includes("check") || lower.includes("validation")
+              : lower.includes("check") || lower.includes("validation")
                 ? "check"
                 : lower.includes("policy") ||
                     lower.includes("authorization") ||
@@ -125,7 +131,9 @@ export function classifyOperatorError(input: {
                     lower.includes("blocked")
                   ? "policy"
                   : "infrastructure");
-  const retryable = ["infrastructure", "harness", "dependency"].includes(category);
+  const retryable = ["infrastructure", "harness", "dependency"].includes(
+    category,
+  );
   return ClassifiedOperatorErrorSchema.parse({
     schemaVersion: 1,
     code: `SWF_${category.toUpperCase().replaceAll("-", "_")}`,
@@ -147,7 +155,9 @@ export function buildOperatorProjection(
   const active = phases.find((phase) =>
     ["running", "blocked", "failed"].includes(phase!.status),
   );
-  const completed = [...phases].reverse().find((phase) => phase!.status === "completed");
+  const completed = [...phases]
+    .reverse()
+    .find((phase) => phase!.status === "completed");
   const next = phases.find((phase) => phase!.status === "pending");
   const stoppingPhaseId = active?.id ?? completed?.id;
   const actions: OperatorAction[] = [];
@@ -156,15 +166,25 @@ export function buildOperatorProjection(
     ({ status }) => status !== "missing" && status !== "invalid",
   );
   const checks = phases.flatMap((phase) =>
-    Object.values(phase!.checks).map(({ id, status, reason }) => ({ id, status, reason })),
+    Object.values(phase!.checks).map(({ id, status, reason }) => ({
+      id,
+      status,
+      reason,
+    })),
   );
   const checkpoints = Object.values(state.checkpoints);
-  const changedPaths = [...new Set(checkpoints.flatMap(({ changedFiles }) => changedFiles))].sort();
+  const changedPaths = [
+    ...new Set(checkpoints.flatMap(({ changedFiles }) => changedFiles)),
+  ].sort();
   const risks = artifacts
     .filter(({ type }) => type.includes("handoff") || type.includes("review"))
     .flatMap(({ summary }) => (summary ? [summary] : []));
   const evidence = {
-    checks: checks as Array<{ id: string; status: CheckStatus; reason?: string }>,
+    checks: checks as Array<{
+      id: string;
+      status: CheckStatus;
+      reason?: string;
+    }>,
     changedPaths,
     risks,
     artifactIds: artifacts.map(({ artifactId }) => artifactId).sort(),
@@ -175,146 +195,298 @@ export function buildOperatorProjection(
     const gate = phase.gate;
     if (phase.status === "blocked" && gate?.status === "blocked") {
       const phaseActions = [
-        action(state, "inspect-evidence", `Review ${phase.id} evidence`, { phaseId: phase.id }),
-        action(state, "approve", `Approve ${phase.id}`, { phaseId: phase.id, gateId: gate.id }, { recommended: true, requiresConfirmation: true }),
-        action(state, "request-changes", `Request changes for ${phase.id}`, { phaseId: phase.id, gateId: gate.id }, { requiresConfirmation: true }),
-        action(state, "reject", `Reject ${phase.id}`, { phaseId: phase.id, gateId: gate.id }, { requiresConfirmation: true }),
+        action(state, "inspect-evidence", `Review ${phase.id} evidence`, {
+          phaseId: phase.id,
+        }),
+        action(
+          state,
+          "approve",
+          `Approve ${phase.id}`,
+          { phaseId: phase.id, gateId: gate.id },
+          { recommended: true, requiresConfirmation: true },
+        ),
+        action(
+          state,
+          "request-changes",
+          `Request changes for ${phase.id}`,
+          { phaseId: phase.id, gateId: gate.id },
+          { requiresConfirmation: true },
+        ),
+        action(
+          state,
+          "reject",
+          `Reject ${phase.id}`,
+          { phaseId: phase.id, gateId: gate.id },
+          { requiresConfirmation: true },
+        ),
       ];
       actions.push(...phaseActions);
-      attention.push(OperatorAttentionSchema.parse({
-        attentionId: stableId("manual-approval", [state.run.runId, phase.id, gate.id]),
-        type: "manual-approval",
-        projectId: state.run.projectId,
-        runId: state.run.runId,
-        changeName: state.run.changeName,
-        phaseId: phase.id,
-        gateId: gate.id,
-        title: `${phase.id} requires approval`,
-        reason: gate.reason ?? "The manual phase gate is waiting for an operator decision.",
-        retryable: false,
-        evidence: {
-          ...evidence,
-          checks: Object.values(phase.checks).map(({ id, status, reason }) => ({ id, status, reason })),
-          artifactIds: artifacts.filter((artifact) => artifact.phaseId === phase.id).map(({ artifactId }) => artifactId).sort(),
-        },
-        actionIds: phaseActions.map(({ actionId }) => actionId),
-      }));
+      attention.push(
+        OperatorAttentionSchema.parse({
+          attentionId: stableId("manual-approval", [
+            state.run.runId,
+            phase.id,
+            gate.id,
+          ]),
+          type: "manual-approval",
+          projectId: state.run.projectId,
+          runId: state.run.runId,
+          changeName: state.run.changeName,
+          phaseId: phase.id,
+          gateId: gate.id,
+          title: `${phase.id} requires approval`,
+          reason:
+            gate.reason ??
+            "The manual phase gate is waiting for an operator decision.",
+          retryable: false,
+          evidence: {
+            ...evidence,
+            checks: Object.values(phase.checks).map(
+              ({ id, status, reason }) => ({ id, status, reason }),
+            ),
+            artifactIds: artifacts
+              .filter((artifact) => artifact.phaseId === phase.id)
+              .map(({ artifactId }) => artifactId)
+              .sort(),
+          },
+          actionIds: phaseActions.map(({ actionId }) => actionId),
+        }),
+      );
     }
-    for (const check of Object.values(phase.checks).filter(({ status }) => status === "failed")) {
-      const retry = action(state, "retry", `Retry ${phase.id}`, { phaseId: phase.id }, { recommended: true });
+    for (const check of Object.values(phase.checks).filter(
+      ({ status }) => status === "failed",
+    )) {
+      const retry = action(
+        state,
+        "retry",
+        `Retry ${phase.id}`,
+        { phaseId: phase.id },
+        { recommended: true },
+      );
       actions.push(retry);
-      attention.push(OperatorAttentionSchema.parse({
-        attentionId: stableId("failed-check", [state.run.runId, phase.id, check.id]),
-        type: "failed-check",
-        projectId: state.run.projectId,
-        runId: state.run.runId,
-        changeName: state.run.changeName,
-        phaseId: phase.id,
-        title: `Check ${check.id} failed`,
-        reason: check.reason ?? `Required check ${check.id} did not pass.`,
-        retryable: true,
-        evidence,
-        actionIds: [retry.actionId],
-      }));
+      attention.push(
+        OperatorAttentionSchema.parse({
+          attentionId: stableId("failed-check", [
+            state.run.runId,
+            phase.id,
+            check.id,
+          ]),
+          type: "failed-check",
+          projectId: state.run.projectId,
+          runId: state.run.runId,
+          changeName: state.run.changeName,
+          phaseId: phase.id,
+          title: `Check ${check.id} failed`,
+          reason: check.reason ?? `Required check ${check.id} did not pass.`,
+          retryable: true,
+          evidence,
+          actionIds: [retry.actionId],
+        }),
+      );
     }
   }
 
-  for (const invocation of Object.values(state.invocations).filter(({ status }) => status === "blocked")) {
-    const reply = action(state, "reply-to-invocation", `Reply to ${invocation.phaseId} agent`, { phaseId: invocation.phaseId, invocationId: invocation.invocationId }, { recommended: true });
+  for (const invocation of Object.values(state.invocations).filter(
+    ({ status }) => status === "blocked",
+  )) {
+    const reply = action(
+      state,
+      "reply-to-invocation",
+      `Reply to ${invocation.phaseId} agent`,
+      { phaseId: invocation.phaseId, invocationId: invocation.invocationId },
+      { recommended: true },
+    );
     actions.push(reply);
-    attention.push(OperatorAttentionSchema.parse({
-      attentionId: stableId("blocked-input", [state.run.runId, invocation.invocationId]),
-      type: "blocked-input",
-      projectId: state.run.projectId,
-      runId: state.run.runId,
-      changeName: state.run.changeName,
-      phaseId: invocation.phaseId,
-      invocationId: invocation.invocationId,
-      title: `${invocation.phaseId} agent needs input`,
-      reason: "The active invocation is blocked waiting for operator input.",
-      retryable: true,
-      actionIds: [reply.actionId],
-    }));
+    attention.push(
+      OperatorAttentionSchema.parse({
+        attentionId: stableId("blocked-input", [
+          state.run.runId,
+          invocation.invocationId,
+        ]),
+        type: "blocked-input",
+        projectId: state.run.projectId,
+        runId: state.run.runId,
+        changeName: state.run.changeName,
+        phaseId: invocation.phaseId,
+        invocationId: invocation.invocationId,
+        title: `${invocation.phaseId} agent needs input`,
+        reason: "The active invocation is blocked waiting for operator input.",
+        retryable: true,
+        actionIds: [reply.actionId],
+      }),
+    );
   }
 
   for (const budget of input.budgets ?? []) {
     if (budget.status === "available") continue;
-    const configure = action(state, "configure", "Review budget configuration", active ? { phaseId: active.id } : {}, { recommended: true });
+    const configure = action(
+      state,
+      "configure",
+      "Review budget configuration",
+      active ? { phaseId: active.id } : {},
+      { recommended: true },
+    );
     actions.push(configure);
-    attention.push(OperatorAttentionSchema.parse({
-      attentionId: stableId("budget-block", [state.run.runId, budget.scope, budget.scopeId]),
-      type: "budget-block",
-      projectId: state.run.projectId,
-      runId: state.run.runId,
-      changeName: state.run.changeName,
-      phaseId: active?.id,
-      title: `${budget.scope} budget ${budget.status}`,
-      reason: budget.reasons.join("; ") || "Budget policy prevents further work.",
-      retryable: false,
-      actionIds: [configure.actionId],
-    }));
+    attention.push(
+      OperatorAttentionSchema.parse({
+        attentionId: stableId("budget-block", [
+          state.run.runId,
+          budget.scope,
+          budget.scopeId,
+        ]),
+        type: "budget-block",
+        projectId: state.run.projectId,
+        runId: state.run.runId,
+        changeName: state.run.changeName,
+        phaseId: active?.id,
+        title: `${budget.scope} budget ${budget.status}`,
+        reason:
+          budget.reasons.join("; ") || "Budget policy prevents further work.",
+        retryable: false,
+        actionIds: [configure.actionId],
+      }),
+    );
   }
 
   for (const failure of input.failures ?? []) {
     const recovery = action(
       state,
-      failure.retryable === false ? "configure" : failure.category === "infrastructure" ? "reconcile" : "retry",
+      failure.retryable === false
+        ? "configure"
+        : failure.category === "infrastructure"
+          ? "reconcile"
+          : "retry",
       failure.retryable === false ? "Review configuration" : "Retry safely",
       failure.phaseId ? { phaseId: failure.phaseId } : {},
       { recommended: true },
     );
     actions.push(recovery);
-    attention.push(OperatorAttentionSchema.parse({
-      attentionId: stableId(failure.category, [state.run.runId, failure.phaseId, failure.code]),
-      type: failureAttentionType(failure.category),
-      projectId: state.run.projectId,
-      runId: state.run.runId,
-      changeName: state.run.changeName,
-      phaseId: failure.phaseId,
-      title: failure.code,
-      reason: failure.message,
-      retryable: failure.retryable ?? ["dependency", "infrastructure", "harness"].includes(failure.category),
-      actionIds: [recovery.actionId],
-    }));
+    attention.push(
+      OperatorAttentionSchema.parse({
+        attentionId: stableId(failure.category, [
+          state.run.runId,
+          failure.phaseId,
+          failure.code,
+        ]),
+        type: failureAttentionType(failure.category),
+        projectId: state.run.projectId,
+        runId: state.run.runId,
+        changeName: state.run.changeName,
+        phaseId: failure.phaseId,
+        title: failure.code,
+        reason: failure.message,
+        retryable:
+          failure.retryable ??
+          ["dependency", "infrastructure", "harness"].includes(
+            failure.category,
+          ),
+        actionIds: [recovery.actionId],
+      }),
+    );
   }
 
-  const delivery = latestBy(Object.values(state.deliveries), ({ updatedAt }) => updatedAt);
+  const delivery = latestBy(
+    Object.values(state.deliveries),
+    ({ updatedAt }) => updatedAt,
+  );
   if (delivery?.status === "failed" || delivery?.status === "checks-failed") {
-    const retry = action(state, "retry", "Retry delivery", { deliveryId: delivery.deliveryId }, { recommended: true });
+    const retry = action(
+      state,
+      "retry",
+      "Retry delivery",
+      { deliveryId: delivery.deliveryId },
+      { recommended: true },
+    );
     actions.push(retry);
-    attention.push(OperatorAttentionSchema.parse({
-      attentionId: stableId("delivery-failure", [state.run.runId, delivery.deliveryId]),
-      type: "delivery-failure",
-      projectId: state.run.projectId,
-      runId: state.run.runId,
-      changeName: state.run.changeName,
-      title: "Delivery needs attention",
-      reason: delivery.failureReason ?? `Delivery is ${delivery.status}.`,
-      retryable: true,
-      actionIds: [retry.actionId],
-    }));
+    attention.push(
+      OperatorAttentionSchema.parse({
+        attentionId: stableId("delivery-failure", [
+          state.run.runId,
+          delivery.deliveryId,
+        ]),
+        type: "delivery-failure",
+        projectId: state.run.projectId,
+        runId: state.run.runId,
+        changeName: state.run.changeName,
+        title: "Delivery needs attention",
+        reason: delivery.failureReason ?? `Delivery is ${delivery.status}.`,
+        retryable: true,
+        actionIds: [retry.actionId],
+      }),
+    );
   }
 
   if (!attention.length && state.run.status === "paused" && next) {
     actions.push(
-      action(state, "run-phase", `Run ${next.id}`, { phaseId: next.id }, { recommended: true }),
-      action(state, "continue-run", "Continue automatically", { phaseId: next.id }),
+      action(
+        state,
+        "run-phase",
+        `Run ${next.id}`,
+        { phaseId: next.id },
+        { recommended: true },
+      ),
+      action(state, "continue-run", "Continue automatically", {
+        phaseId: next.id,
+      }),
     );
   } else if (!attention.length && state.run.status === "pending") {
-    actions.push(action(state, "continue-run", "Start workflow", next ? { phaseId: next.id } : {}, { recommended: true }));
+    actions.push(
+      action(
+        state,
+        "continue-run",
+        "Start workflow",
+        next ? { phaseId: next.id } : {},
+        { recommended: true },
+      ),
+    );
   } else if (!attention.length && state.run.status === "failed") {
-    actions.push(action(state, "retry", "Retry workflow", active ? { phaseId: active.id } : {}, { recommended: true }));
+    actions.push(
+      action(
+        state,
+        "retry",
+        "Retry workflow",
+        active ? { phaseId: active.id } : {},
+        { recommended: true },
+      ),
+    );
   }
 
   if (delivery?.status === "local-branch" || delivery?.status === "merged") {
     actions.push(
-      action(state, "review-delivery", `Review ${delivery.branch}`, { deliveryId: delivery.deliveryId, branch: delivery.branch, targetBranch: delivery.targetBranch }, { recommended: delivery.status === "local-branch" }),
-      ...(delivery.status === "local-branch" ? [action(state, "merge-delivery", `Merge ${delivery.branch}`, { deliveryId: delivery.deliveryId, branch: delivery.branch, targetBranch: delivery.targetBranch }, { requiresConfirmation: true })] : []),
+      action(
+        state,
+        "review-delivery",
+        `Review ${delivery.branch}`,
+        {
+          deliveryId: delivery.deliveryId,
+          branch: delivery.branch,
+          targetBranch: delivery.targetBranch,
+        },
+        { recommended: delivery.status === "local-branch" },
+      ),
+      ...(delivery.status === "local-branch"
+        ? [
+            action(
+              state,
+              "merge-delivery",
+              `Merge ${delivery.branch}`,
+              {
+                deliveryId: delivery.deliveryId,
+                branch: delivery.branch,
+                targetBranch: delivery.targetBranch,
+              },
+              { requiresConfirmation: true },
+            ),
+          ]
+        : []),
     );
   }
 
-  const uniqueActions = [...new Map(actions.map((item) => [item.actionId, item])).values()];
-  const recommended = uniqueActions.find(({ recommended }) => recommended) ?? uniqueActions[0];
+  const uniqueActions = [
+    ...new Map(actions.map((item) => [item.actionId, item])).values(),
+  ];
+  const recommended =
+    uniqueActions.find(({ recommended }) => recommended) ?? uniqueActions[0];
   const summary = attention.length
     ? `${state.run.changeName} is ${state.run.status}; ${attention[0]!.title}.`
     : state.run.status === "completed"

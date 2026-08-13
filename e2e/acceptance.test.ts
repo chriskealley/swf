@@ -252,10 +252,7 @@ describe("disposable operational acceptance", () => {
             >)
           : {};
         let result: unknown;
-        const requestUrl = new URL(
-          request.url ?? "/",
-          "http://127.0.0.1",
-        );
+        const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
         if (requestUrl.pathname === "/api/v1/projects") {
           result = await service.registerProject({
             projectId: String(body.projectId),

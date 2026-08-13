@@ -30,10 +30,7 @@ import {
   renderOperatorError,
   renderOperatorProjection,
 } from "./operator-renderer.js";
-import {
-  OrderedProgressSubscriber,
-  renderProgressLine,
-} from "./progress.js";
+import { OrderedProgressSubscriber, renderProgressLine } from "./progress.js";
 import {
   approvalChoices,
   interactionEnabled,
@@ -94,7 +91,10 @@ function fail(error: unknown, json = false, verbose = false): void {
       consola.error(
         `  ${Object.entries(alternative)
           .filter(([, value]) => value)
-          .map(([key, value]) => `--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)} ${value}`)
+          .map(
+            ([key, value]) =>
+              `--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)} ${value}`,
+          )
           .join(" ")}`,
       );
   } else consola.error(message);
@@ -171,7 +171,8 @@ function startProgress(
   if (!enabled) return { stop: async () => undefined };
   const controller = new AbortController();
   const subscriber = new OrderedProgressSubscriber(
-    (line) => console.error(renderProgressLine(line, Boolean(process.stderr.isTTY))),
+    (line) =>
+      console.error(renderProgressLine(line, Boolean(process.stderr.isTTY))),
     context,
   );
   const following = subscriber.follow(
@@ -417,7 +418,12 @@ const service = defineCommand({
   },
 });
 
-function queryCommand(name: string, resource: string, needsRun = true) {
+function queryCommand(
+  name: string,
+  resource: string,
+  options: { needsRun?: boolean; projection?: boolean } = {},
+) {
+  const { needsRun = true, projection = false } = options;
   return defineCommand({
     meta: { name, description: `Query SWF ${resource}` },
     args: {
@@ -440,19 +446,19 @@ function queryCommand(name: string, resource: string, needsRun = true) {
         const active = await client();
         if (needsRun) {
           const context = await selectedContext(active, args);
-          const result =
-            name === "status"
-              ? { projection: context.projection }
-              : await active.query(resource, {
-                  projectId: context.projectId,
-                  runId: context.runId,
-                });
+          const result = projection
+            ? { projection: context.projection }
+            : await active.query(resource, {
+                projectId: context.projectId,
+                runId: context.runId,
+              });
           output(result, args.json, args.verbose);
           return;
         }
         output(
           await active.query(resource, {
-            projectId: args.project,
+            projectId:
+              args.project ?? (await connectedProject(args.cwd)).projectId,
             runId: args.run,
           }),
           args.json,
@@ -512,10 +518,9 @@ function lifecycleCommand(
         } as const;
         const semantic =
           type in semanticTypes && (!input.phase || !input.gate)
-            ? resolveUniqueAction(
-                context.projection,
-                [...semanticTypes[type as keyof typeof semanticTypes]],
-              )
+            ? resolveUniqueAction(context.projection, [
+                ...semanticTypes[type as keyof typeof semanticTypes],
+              ])
             : undefined;
         const result = await active.command({
           type,
@@ -537,14 +542,18 @@ function lifecycleCommand(
   });
 }
 
-const status = queryCommand("status", "run");
+const status = queryCommand("status", "run", { projection: true });
 const events = queryCommand("events", "run");
 const artifacts = queryCommand("artifacts", "artifacts");
 const logs = queryCommand("log", "invocations");
 const costs = queryCommand("cost", "costs");
 const budgets = queryCommand("budget", "budgets");
-const operations = queryCommand("operations", "operations", false);
-const configuration = queryCommand("config", "configuration", false);
+const operations = queryCommand("operations", "operations", {
+  needsRun: false,
+});
+const configuration = queryCommand("config", "configuration", {
+  needsRun: false,
+});
 const pause = lifecycleCommand("pause", "pause");
 const resume = lifecycleCommand("resume", "resume");
 const cancel = lifecycleCommand("cancel", "cancel");
@@ -559,8 +568,11 @@ const blockedInput = defineCommand({
   },
   args: {
     change: { type: "positional", required: false },
-    response: { type: "positional", required: true },
-    invocation: { type: "string", description: "Advanced: explicit invocation ID" },
+    response: { type: "positional", required: false },
+    invocation: {
+      type: "string",
+      description: "Advanced: explicit invocation ID",
+    },
     project: { type: "string", description: "Advanced: explicit project ID" },
     run: { type: "string", description: "Advanced: explicit run ID" },
     cwd: { type: "string" },
@@ -569,15 +581,42 @@ const blockedInput = defineCommand({
   },
   async run({ args }) {
     try {
+      const positionals = ((args._ as string[] | undefined) ?? []).filter(
+        Boolean,
+      );
+      const [change, response] =
+        positionals.length > 1
+          ? [positionals[0], positionals.slice(1).join(" ")]
+          : [undefined, positionals[0]];
+      if (!response)
+        throw new Error(
+          "A response is required: swf input [change] <response>",
+        );
       const active = await client();
-      const context = await selectedContext(active, args);
+      let runId = args.run;
+      if (!runId && !change && args.invocation) {
+        const blocked =
+          await active.query<Array<{ invocationId: string; runId: string }>>(
+            "blocked-inputs",
+          );
+        runId = blocked.find(
+          ({ invocationId }) => invocationId === args.invocation,
+        )?.runId;
+      }
+      const context = await selectedContext(active, {
+        ...args,
+        change,
+        run: runId,
+      });
       const semantic = args.invocation
         ? undefined
         : resolveUniqueAction(context.projection, ["reply-to-invocation"]);
       const result = await active.command({
         type: "blocked-input",
+        projectId: context.projectId,
+        runId: context.runId,
         invocationId: args.invocation ?? semantic?.parameters.invocationId,
-        response: args.response,
+        response,
       });
       output(result, args.json, args.verbose);
     } catch (error) {
@@ -607,6 +646,10 @@ function workflowEntryCommand(type: "new" | "run" | "next") {
       "from-exploration": { type: "string" },
       cwd: { type: "string" },
       verbose: { type: "boolean" },
+      interactive: {
+        type: "boolean",
+        description: "Offer a TTY approval menu when a gate blocks the run",
+      },
       "no-interactive": { type: "boolean" },
       json: { type: "boolean" },
     },
@@ -638,7 +681,9 @@ function workflowEntryCommand(type: "new" | "run" | "next") {
           const projection = projectionFromResult(result);
           if (
             projection &&
-            projection.attention.some(({ type }) => type === "manual-approval") &&
+            projection.attention.some(
+              ({ type }) => type === "manual-approval",
+            ) &&
             interactionEnabled({
               interactive: Boolean(args.interactive),
               noInteractive: Boolean(args["no-interactive"]),

@@ -50,8 +50,11 @@ export async function resolveOperatorContext(input: {
     const runs = await input.client.query<
       Array<{ runId: string; changeName: string; updatedAt?: string }>
     >("runs", { projectId });
-    const matching = runs.filter(({ changeName }) => changeName === input.changeName);
-    if (!matching.length) throw new Error(`No run is bound to ${input.changeName}`);
+    const matching = runs.filter(
+      ({ changeName }) => changeName === input.changeName,
+    );
+    if (!matching.length)
+      throw new Error(`No run is bound to ${input.changeName}`);
     if (matching.length > 1)
       throw new AmbiguousOperatorContextError(
         `More than one run is bound to ${input.changeName}; pass --run.`,

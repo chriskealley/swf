@@ -127,10 +127,16 @@ describe("operator guidance acceptance", () => {
       AmbiguousOperatorContextError,
     );
     expect(OperatorProjectionSchema.parse(projection).schemaVersion).toBe(1);
-    expect(classifyOperatorError({ error: new Error("budget exhausted") })).toMatchObject({
+    expect(
+      classifyOperatorError({ error: new Error("budget exhausted") }),
+    ).toMatchObject({
       schemaVersion: 1,
       category: "budget",
     });
-    expect(duplicate.parameters).toMatchObject({ projectId, runId, phaseId: "planning" });
+    expect(duplicate.parameters).toMatchObject({
+      projectId,
+      runId,
+      phaseId: "planning",
+    });
   });
 });

@@ -79,7 +79,11 @@ describe("CLI operator context", () => {
       "operator-projection": projection(),
     });
     await expect(
-      resolveOperatorContext({ client, projectId, changeName: "operator-test" }),
+      resolveOperatorContext({
+        client,
+        projectId,
+        changeName: "operator-test",
+      }),
     ).resolves.toMatchObject({ projectId, runId, changeName: "operator-test" });
     await expect(
       resolveOperatorContext({ client, projectId, runId }),
@@ -116,13 +120,35 @@ describe("CLI operator context", () => {
       actionId: "approve:one",
       type: "approve" as const,
       label: "Approve planning",
-      parameters: { projectId, runId, changeName: "operator-test", phaseId: "planning", gateId: "gate" },
+      parameters: {
+        projectId,
+        runId,
+        changeName: "operator-test",
+        phaseId: "planning",
+        gateId: "gate",
+      },
       requiresConfirmation: true,
       recommended: true,
     };
-    expect(resolveUniqueAction(projection({ allowedActions: [approve] }), ["approve"])).toEqual(approve);
+    expect(
+      resolveUniqueAction(projection({ allowedActions: [approve] }), [
+        "approve",
+      ]),
+    ).toEqual(approve);
     expect(() =>
-      resolveUniqueAction(projection({ allowedActions: [approve, { ...approve, actionId: "approve:two", parameters: { ...approve.parameters, phaseId: "building" } }] }), ["approve"]),
+      resolveUniqueAction(
+        projection({
+          allowedActions: [
+            approve,
+            {
+              ...approve,
+              actionId: "approve:two",
+              parameters: { ...approve.parameters, phaseId: "building" },
+            },
+          ],
+        }),
+        ["approve"],
+      ),
     ).toThrow(AmbiguousOperatorContextError);
   });
 });
@@ -133,30 +159,38 @@ describe("CLI human rendering", () => {
       actionId: "approve:one",
       type: "approve" as const,
       label: "Approve planning",
-      parameters: { projectId, runId, changeName: "operator-test", phaseId: "planning", gateId: "gate" },
-      requiresConfirmation: true,
-      recommended: true,
-    };
-    const value = projection({
-      attention: [{
-        attentionId: "attention:one",
-        type: "manual-approval",
+      parameters: {
         projectId,
         runId,
         changeName: "operator-test",
         phaseId: "planning",
         gateId: "gate",
-        title: "planning requires approval",
-        reason: "Review planning evidence",
-        retryable: false,
-        evidence: {
-          checks: [{ id: "openspec", status: "passed" }],
-          changedPaths: ["openspec/changes/operator-test/tasks.md"],
-          risks: ["migration risk"],
-          artifactIds: ["44444444-4444-4444-8444-444444444444"],
+      },
+      requiresConfirmation: true,
+      recommended: true,
+    };
+    const value = projection({
+      attention: [
+        {
+          attentionId: "attention:one",
+          type: "manual-approval",
+          projectId,
+          runId,
+          changeName: "operator-test",
+          phaseId: "planning",
+          gateId: "gate",
+          title: "planning requires approval",
+          reason: "Review planning evidence",
+          retryable: false,
+          evidence: {
+            checks: [{ id: "openspec", status: "passed" }],
+            changedPaths: ["openspec/changes/operator-test/tasks.md"],
+            risks: ["migration risk"],
+            artifactIds: ["44444444-4444-4444-8444-444444444444"],
+          },
+          actionIds: [approve.actionId],
         },
-        actionIds: [approve.actionId],
-      }],
+      ],
       allowedActions: [approve],
     });
     const rendered = renderOperatorProjection(value);
@@ -165,7 +199,9 @@ describe("CLI human rendering", () => {
     expect(rendered).toContain("Handoff risks: migration risk");
     expect(rendered).toContain("swf approve operator-test");
     expect(rendered).not.toContain(projectId);
-    expect(renderOperatorProjection(value, { verbose: true })).toContain(projectId);
+    expect(renderOperatorProjection(value, { verbose: true })).toContain(
+      projectId,
+    );
     expect(renderActionCommand(approve)).toBe("swf approve operator-test");
     expect(projectionFromResult({ projection: value })).toEqual(value);
   });
@@ -173,7 +209,12 @@ describe("CLI human rendering", () => {
   it("renders paused and completed local delivery states", () => {
     expect(
       renderOperatorProjection(
-        projection({ status: "paused", completedPhaseId: "planning", nextPhaseId: "building", summary: "planning completed" }),
+        projection({
+          status: "paused",
+          completedPhaseId: "planning",
+          nextPhaseId: "building",
+          summary: "planning completed",
+        }),
       ),
     ).toContain("Next phase: building");
     expect(
@@ -198,7 +239,9 @@ describe("CLI human rendering", () => {
 describe("CLI progress and interaction", () => {
   it("renders bounded normal milestones and ignores unrelated events", async () => {
     const lines: string[] = [];
-    const subscriber = new OrderedProgressSubscriber((line) => lines.push(line));
+    const subscriber = new OrderedProgressSubscriber((line) =>
+      lines.push(line),
+    );
     await subscriber.follow(
       async function* () {
         yield { id: 1, type: "service.started", data: {} };
@@ -221,20 +264,41 @@ describe("CLI progress and interaction", () => {
 
   it("continues ordered milestones across reconnect and suppresses duplicates", async () => {
     const lines: string[] = [];
-    const subscriber = new OrderedProgressSubscriber((line) => lines.push(line), { projectId });
+    const subscriber = new OrderedProgressSubscriber(
+      (line) => lines.push(line),
+      { projectId },
+    );
     let calls = 0;
     const result = await subscriber.follow(async function* (after) {
       calls += 1;
       if (calls === 1) {
-        yield { id: 1, type: "phase.started", projectId, data: { phaseId: "planning" } };
+        yield {
+          id: 1,
+          type: "phase.started",
+          projectId,
+          data: { phaseId: "planning" },
+        };
         throw new Error("stream lost");
       }
       expect(after).toBe(1);
-      yield { id: 1, type: "phase.started", projectId, data: { phaseId: "planning" } };
-      yield { id: 2, type: "check.completed", projectId, data: { phaseId: "planning" } };
+      yield {
+        id: 1,
+        type: "phase.started",
+        projectId,
+        data: { phaseId: "planning" },
+      };
+      yield {
+        id: 2,
+        type: "check.completed",
+        projectId,
+        data: { phaseId: "planning" },
+      };
     });
     expect(result).toEqual({ connected: true, lastEventId: 2 });
-    expect(lines).toEqual(["phase.started planning", "check.completed planning"]);
+    expect(lines).toEqual([
+      "phase.started planning",
+      "check.completed planning",
+    ]);
     expect(renderProgressLine("phase.started", false)).toBe("phase.started");
     expect(renderProgressLine("phase.started", true)).not.toContain(
       String.fromCharCode(27),
@@ -246,8 +310,7 @@ describe("CLI progress and interaction", () => {
     const emitUnexpectedEvent = process.env.SWF_TEST_UNEXPECTED_EVENT === "1";
     const stream = await subscriber.follow(
       async function* () {
-        if (emitUnexpectedEvent)
-          yield { id: 0, type: "run.started", data: {} };
+        if (emitUnexpectedEvent) yield { id: 0, type: "run.started", data: {} };
         throw new Error("offline");
       },
       { attempts: 2 },
@@ -285,7 +348,9 @@ describe("CLI progress and interaction", () => {
       requiresConfirmation: true,
       recommended: true,
     };
-    const submit = vi.fn(async () => ({ projection: projection({ status: "paused" }) }));
+    const submit = vi.fn(async () => ({
+      projection: projection({ status: "paused" }),
+    }));
     const result = await runApprovalDecisionFlow({
       projection: projection({ allowedActions: [selected] }),
       actor: "chris",

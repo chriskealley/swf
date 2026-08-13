@@ -71,7 +71,10 @@ export default defineEventHandler(async (event) => {
     return { schemaVersion: 1, status: "accepted", result };
   } catch (error) {
     if (error instanceof OperatorCommandError) {
-      event.node.res.statusCode = 409;
+      // 409 is reserved for state conflicts; validation and configuration
+      // failures stay 400 so clients do not treat them as retryable races.
+      event.node.res.statusCode =
+        error.classified.category === "policy" ? 409 : 400;
       return {
         schemaVersion: 1,
         error: error.classified,

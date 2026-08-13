@@ -1,8 +1,4 @@
-import type {
-  CostSummary,
-  Invocation,
-  OperatorProjection,
-} from "./types.js";
+import type { CostSummary, Invocation, OperatorProjection } from "./types.js";
 
 export function dashboardGuidanceIdentity(projection: OperatorProjection) {
   return {

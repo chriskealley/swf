@@ -20,8 +20,12 @@ export function renderActionCommand(action: OperatorAction): string {
   switch (action.type) {
     case "run-phase":
       return `swf next ${change}`;
-    case "continue-run":
     case "retry":
+      // A delivery retry refreshes the delivery; it never reruns the workflow.
+      return p.deliveryId
+        ? `swf delivery refresh ${change}`
+        : `swf run ${change}`;
+    case "continue-run":
     case "resume":
       return `swf run ${change}`;
     case "approve":
@@ -81,14 +85,17 @@ export function renderOperatorProjection(
     if (approval.evidence?.risks.length)
       lines.push(`Handoff risks: ${approval.evidence.risks.join("; ")}`);
     if (approval.evidence?.artifactIds.length)
-      lines.push(`Evidence: ${approval.evidence.artifactIds.length} retained artifact(s)`);
+      lines.push(
+        `Evidence: ${approval.evidence.artifactIds.length} retained artifact(s)`,
+      );
   } else if (projection.status === "paused" && projection.completedPhaseId) {
     lines.push(
       "",
       `Completed phase: ${projection.completedPhaseId}`,
       `Checkpoints: ${projection.delivery?.checkpointCount ?? "recorded"}`,
     );
-    if (projection.nextPhaseId) lines.push(`Next phase: ${projection.nextPhaseId}`);
+    if (projection.nextPhaseId)
+      lines.push(`Next phase: ${projection.nextPhaseId}`);
   } else if (projection.status === "completed" && projection.delivery) {
     lines.push(
       "",
@@ -116,7 +123,10 @@ export function renderOperatorProjection(
       `Stopping phase: ${projection.stoppingPhaseId ?? "none"}`,
       `Artifacts: ${projection.evidence.artifactIds.join(", ") || "none"}`,
     );
-  return lines.filter((line, index, all) => line !== "" || all[index - 1] !== "").join("\n").trim();
+  return lines
+    .filter((line, index, all) => line !== "" || all[index - 1] !== "")
+    .join("\n")
+    .trim();
 }
 
 export function renderOperatorError(
@@ -127,7 +137,9 @@ export function renderOperatorError(
   const lines = [
     `${error.category} failure: ${error.message}`,
     error.runStatus ? `Run remains ${error.runStatus}.` : "",
-    error.retryable ? "This failure is safe to retry." : "Review the guidance before retrying.",
+    error.retryable
+      ? "This failure is safe to retry."
+      : "Review the guidance before retrying.",
   ].filter(Boolean);
   if (projection) lines.push("", renderOperatorProjection(projection, options));
   if (options.verbose && error.diagnosticRefs.length)
@@ -135,8 +147,11 @@ export function renderOperatorError(
   return lines.join("\n");
 }
 
-export function projectionFromResult(value: unknown): OperatorProjection | undefined {
-  if (!value || typeof value !== "object" || !("projection" in value)) return undefined;
+export function projectionFromResult(
+  value: unknown,
+): OperatorProjection | undefined {
+  if (!value || typeof value !== "object" || !("projection" in value))
+    return undefined;
   return (value as { projection?: OperatorProjection }).projection;
 }
 

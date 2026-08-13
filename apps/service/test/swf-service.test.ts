@@ -835,13 +835,13 @@ describe("user-scoped SWF service", () => {
     ).resolves.toMatchObject({ projection: { status: "running" } });
     await expect(
       service.command({
-      type: "reject",
-      projectId,
-      runId,
-      phaseId: "planning",
-      gateId: "planning-gate",
-      actorId: "operator",
-      reason: "needs changes",
+        type: "reject",
+        projectId,
+        runId,
+        phaseId: "planning",
+        gateId: "planning-gate",
+        actorId: "operator",
+        reason: "needs changes",
       }),
     ).resolves.toMatchObject({
       approval: { decision: "rejected" },
@@ -863,12 +863,12 @@ describe("user-scoped SWF service", () => {
     });
     await expect(
       service.command({
-      type: "approve",
-      projectId,
-      runId,
-      phaseId: "planning",
-      gateId: "planning-gate",
-      actorId: "operator",
+        type: "approve",
+        projectId,
+        runId,
+        phaseId: "planning",
+        gateId: "planning-gate",
+        actorId: "operator",
       }),
     ).resolves.toMatchObject({
       approval: { decision: "approved" },
@@ -876,11 +876,11 @@ describe("user-scoped SWF service", () => {
     });
     await expect(
       service.command({
-      type: "remediate",
-      projectId,
-      runId,
-      phaseId: "planning",
-      reason: "fix failing test",
+        type: "remediate",
+        projectId,
+        runId,
+        phaseId: "planning",
+        reason: "fix failing test",
       }),
     ).resolves.toMatchObject({ projection: { status: "running" } });
     await expect(

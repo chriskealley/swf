@@ -10,11 +10,11 @@ export function interactionEnabled(input: {
 }): boolean {
   return Boolean(
     input.interactive &&
-      !input.noInteractive &&
-      !input.json &&
-      input.stdinTty &&
-      input.stdoutTty &&
-      !input.ci,
+    !input.noInteractive &&
+    !input.json &&
+    input.stdinTty &&
+    input.stdoutTty &&
+    !input.ci,
   );
 }
 
@@ -40,7 +40,10 @@ export async function runApprovalDecisionFlow(input: {
   confirm: (action: OperatorAction) => Promise<boolean>;
   reason: (action: OperatorAction) => Promise<string | undefined>;
   submit: (command: Record<string, unknown>) => Promise<unknown>;
-}): Promise<{ status: "exited" | "review" | "cancelled" | "submitted"; result?: unknown }> {
+}): Promise<{
+  status: "exited" | "review" | "cancelled" | "submitted";
+  result?: unknown;
+}> {
   const selected = await input.choose(approvalChoices(input.projection));
   if (!selected) return { status: "exited" };
   if (selected.type === "inspect-evidence") return { status: "review" };

@@ -79,10 +79,12 @@ export class DashboardApi {
       result?: T;
       statusMessage?: string;
       message?: string;
+      error?: { message?: string };
     };
     if (!response.ok)
       throw new DashboardApiError(
-        body.message ??
+        body.error?.message ??
+          body.message ??
           body.statusMessage ??
           `Service returned HTTP ${response.status}`,
         response.status,
