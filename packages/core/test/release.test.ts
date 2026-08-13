@@ -19,8 +19,14 @@ afterEach(async () =>
 );
 
 class FakeRunner implements CommandRunner {
-  constructor(readonly dirty = false) {}
+  readonly calls: string[] = [];
+  constructor(
+    readonly dirty = false,
+    readonly targetCommit = "target",
+    readonly conflict = false,
+  ) {}
   async run(command: string, args: string[]) {
+    this.calls.push(`${command} ${args.join(" ")}`);
     if (command === "git" && args[0] === "status")
       return { code: 0, stdout: this.dirty ? " M file.ts\0" : "", stderr: "" };
     if (command === "git" && args[0] === "branch")
@@ -28,9 +34,13 @@ class FakeRunner implements CommandRunner {
     if (command === "git" && args[0] === "rev-parse")
       return {
         code: 0,
-        stdout: `${args[1] === "main" ? "target" : "source"}\n`,
+        stdout: `${args[1] === "main" ? this.targetCommit : "source"}\n`,
         stderr: "",
       };
+    if (command === "git" && args[0] === "merge-tree")
+      return this.conflict
+        ? { code: 1, stdout: "CONFLICT in app.ts\n", stderr: "" }
+        : { code: 0, stdout: "", stderr: "" };
     if (command === "git" && args[0] === "remote")
       return { code: 0, stdout: "git@example/repo\n", stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
@@ -62,6 +72,52 @@ describe("deterministic release and reviewed adoption", () => {
         cleanupPlan: ["retain worktree"],
       }),
     ).toContain("preflight blocked");
+  });
+
+  it("blocks target drift and merge conflicts without mutating either branch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "swf-release-safety-"));
+    roots.push(root);
+    const driftRunner = new FakeRunner(false, "target-advanced");
+    const drift = await releasePreflight({
+      runId: "8c86919c-3569-4e97-9f09-1bba7b49ed3d",
+      git: new GitClient(root, driftRunner),
+      runner: driftRunner,
+      sourceBranch: "swf/run",
+      targetBranch: "main",
+      remote: "origin",
+      mergeMethod: "merge",
+      expectedSourceCommit: "source",
+      expectedTargetCommit: "target",
+      requireCleanSource: true,
+    });
+    expect(drift.valid).toBe(false);
+    expect(drift.checks).toContainEqual(
+      expect.objectContaining({ id: "target-drift", status: "failed" }),
+    );
+
+    const conflictRunner = new FakeRunner(false, "target", true);
+    const conflict = await releasePreflight({
+      runId: "8c86919c-3569-4e97-9f09-1bba7b49ed3d",
+      git: new GitClient(root, conflictRunner),
+      runner: conflictRunner,
+      sourceBranch: "swf/run",
+      targetBranch: "main",
+      remote: "origin",
+      mergeMethod: "merge",
+      expectedSourceCommit: "source",
+      requireCleanSource: true,
+    });
+    expect(conflict.valid).toBe(false);
+    expect(conflict.checks).toContainEqual(
+      expect.objectContaining({ id: "merge-conflict", status: "failed" }),
+    );
+    expect(
+      [...driftRunner.calls, ...conflictRunner.calls].some((call) =>
+        /git (merge(?:\s|$)|rebase(?:\s|$)|branch -D|worktree remove)/.test(
+          call,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("applies only confirmed model mappings and discovered checks", async () => {

@@ -109,7 +109,7 @@ class SimulatedHerdr implements CommandRunner {
       return {
         code: 0,
         stdout:
-          '{"type":"message","usage":{"input_tokens":20,"output_tokens":5,"cost_usd":0.01}}\n',
+          '{"type":"message","usage":{"input_tokens":20,"output_tokens":5,"cost_usd":0.01}}\n{"type":"turn_end"}\n',
         stderr: "",
       };
     return { code: 0, stdout: "{}", stderr: "" };
@@ -293,7 +293,8 @@ describe("disposable operational acceptance", () => {
       const explored = await new NodeCommandRunner().run(
         process.execPath,
         [
-          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/cli.mjs"),
+          "--import",
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/loader.mjs"),
           join(repositoryRoot, "apps/cli/src/main.ts"),
           "explore",
           "start",
@@ -317,7 +318,8 @@ describe("disposable operational acceptance", () => {
       const cli = await new NodeCommandRunner().run(
         process.execPath,
         [
-          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/cli.mjs"),
+          "--import",
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/loader.mjs"),
           join(repositoryRoot, "apps/cli/src/main.ts"),
           "new",
           "cli-service-entry",
@@ -356,7 +358,8 @@ describe("disposable operational acceptance", () => {
       const next = await new NodeCommandRunner().run(
         process.execPath,
         [
-          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/cli.mjs"),
+          "--import",
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/loader.mjs"),
           join(repositoryRoot, "apps/cli/src/main.ts"),
           "next",
           "cli-service-entry",

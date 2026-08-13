@@ -34,7 +34,7 @@
 - [x] 4.4 Prevent Building from archiving the change or performing merge and delivery operations
 - [x] 4.5 Replace the generic Reviewing guideline with an independent structured review contract covering correctness, security, regressions, maintainability, and missing tests
 - [x] 4.6 Make Reviewing read-only by default and require separate explicit remediation authorization before review findings can cause code mutation
-- [ ] 4.7 Add contract and service integration tests proving each phase receives distinct responsibilities and prohibited actions
+- [x] 4.7 Add contract and service integration tests proving each phase receives distinct responsibilities and prohibited actions
 
 ## 5. OpenSpec Task Verification
 
@@ -61,7 +61,7 @@
 - [x] 6.9 Persist final delivery references and dossier updates before cleanup begins
 - [x] 6.10 Clean only recorded owned panes, tabs, workspaces, worktrees, and optionally configured source branches after successful delivery
 - [x] 6.11 Make OpenSpec archive a separate explicit deterministic workflow action and never infer it from Releasing
-- [ ] 6.12 Add integration tests for manual release, autonomous release, missing authorization, local merge, PR delivery, target drift, conflict, failure preservation, archive opt-in, and owned cleanup
+- [x] 6.12 Add integration tests for manual release, autonomous release, missing authorization, local merge, PR delivery, target drift, conflict, failure preservation, archive opt-in, and owned cleanup
 
 ## 7. Default Checks and Read-Only Discovery
 
@@ -92,11 +92,11 @@
 
 ## 10. Acceptance, Documentation, and Release Verification
 
-- [ ] 10.1 Add an end-to-end run proving static tier selection for Planning, Building, Reviewing, and Verifying and no model invocation for Releasing
+- [x] 10.1 Add an end-to-end run proving static tier selection for Planning, Building, Reviewing, and Verifying and no model invocation for Releasing
 - [x] 10.2 Add acceptance coverage proving Reviewing and Verifying have distinct contracts and that every OpenSpec task requires current evidence
-- [ ] 10.3 Add acceptance coverage for release approval, authorized automatic merge, delivery failure preservation, final dossier, and owned cleanup
+- [x] 10.3 Add acceptance coverage for release approval, authorized automatic merge, delivery failure preservation, final dossier, and owned cleanup
 - [x] 10.4 Add acceptance coverage proving check discovery and default updates are read-only until explicitly adopted
 - [x] 10.5 Update README and installation, project configuration, architecture, harness adapter, operations, delivery, and troubleshooting documentation
 - [x] 10.6 Document migration paths for direct-model existing profiles, unmapped tiers, template metadata absence, and custom release workflows
 - [x] 10.7 Run formatting, lint, type checking, unit, integration, E2E, OpenSpec validation, and Git whitespace verification
-- [ ] 10.8 Perform an opt-in live Pi/Herdr run using distinct concrete models for at least two tiers and retain evidence of deterministic verification and agent-free Releasing
+- [x] 10.8 Perform an opt-in live Pi/Herdr run using distinct concrete models for at least two tiers and retain evidence of deterministic verification and agent-free Releasing

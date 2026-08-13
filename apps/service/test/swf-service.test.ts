@@ -8,8 +8,9 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
+  defaultTemplateFiles,
   HerdrClient,
   NodeCommandRunner,
   RunEventStore,
@@ -79,7 +80,10 @@ async function setup(): Promise<{ service: SwfService; projectRoot: string }> {
   return { service, projectRoot };
 }
 
-async function createRun(projectRoot: string): Promise<void> {
+async function createRun(
+  projectRoot: string,
+  options: { policyId?: string } = {},
+): Promise<void> {
   const store = new RunEventStore(join(projectRoot, ".swf-state"));
   await store.create({
     projectId,
@@ -87,9 +91,52 @@ async function createRun(projectRoot: string): Promise<void> {
     changeName: "add-user-auth",
     changeIdentity: "changes/add-user-auth#2026-04-02",
     workflowId: "default",
+    policyId: options.policyId,
     description: "Add token authentication",
     phaseIds: ["planning"],
   });
+}
+
+async function setupPhaseContracts(): Promise<{
+  service: SwfService;
+  projectRoot: string;
+}> {
+  const home = await temporaryDirectory("swf-service-contracts-");
+  const projectRoot = await temporaryDirectory(
+    "swf-service-contracts-project-",
+  );
+  await mkdir(join(projectRoot, ".git"));
+  for (const [relativePath, contents] of Object.entries(
+    defaultTemplateFiles(projectId),
+  )) {
+    const path = join(projectRoot, ".swf", relativePath);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, contents);
+  }
+  await writeFile(
+    join(projectRoot, ".swf", "models.yaml"),
+    "schemaVersion: 1\nmodelTiers:\n  reasoning:\n    pi:\n      model: test/reasoning\n  coding:\n    pi:\n      model: test/coding\n  fast:\n    pi:\n      model: test/fast\n",
+  );
+  const service = new SwfService({
+    serviceHome: home,
+    projectTrust: async () => true,
+  });
+  await service.start();
+  await service.registerProject({
+    projectId,
+    displayName: "Contract project",
+    root: projectRoot,
+  });
+  await new RunEventStore(join(projectRoot, ".swf-state")).create({
+    projectId,
+    runId,
+    changeName: "contract-change",
+    changeIdentity: "changes/contract-change",
+    workflowId: "default",
+    description: "Exercise every phase contract",
+    phaseIds: ["planning", "building", "reviewing", "verifying", "releasing"],
+  });
+  return { service, projectRoot };
 }
 
 class SimulatedHerdrRunner implements CommandRunner {
@@ -230,9 +277,26 @@ class FakeHostingAdapter implements HostingAdapter {
   }
 }
 
+class ArchiveCommandRunner extends NodeCommandRunner {
+  readonly archiveCalls: string[][] = [];
+  override async run(
+    command: string,
+    args: string[],
+    options?: CommandOptions,
+  ): Promise<ProcessResult> {
+    if (command === "openspec") {
+      this.archiveCalls.push(args);
+      return { code: 0, stdout: "archived\n", stderr: "" };
+    }
+    return super.run(command, args, options);
+  }
+}
+
 async function setupDelivery(
   adapter: HostingAdapter,
   failureAction: "remediate" | "escalate" | "fail" = "escalate",
+  policyId: "manual" | "autonomous" = "manual",
+  commandRunner?: CommandRunner,
 ): Promise<{ service: SwfService; projectRoot: string }> {
   const home = await temporaryDirectory("swf-service-delivery-");
   const projectRoot = await temporaryDirectory("swf-service-delivery-project-");
@@ -248,12 +312,13 @@ async function setupDelivery(
     `schemaVersion: 1\nid: default\ndescription: Delivery test\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: []\n    work: []\n    checks: []\n    gate:\n      mode: manual\ndelivery:\n  mode: pull-request\n  mergeMethod: merge\n`,
   );
   await writeFile(
-    join(projectRoot, ".swf", "policies", "manual.yaml"),
-    `schemaVersion: 1\nid: manual\napprovalMode: manual\nmaxAttempts: 1\nriskOverrides: []\nallowDirectMerge: false\ndeliveryFailureAction: ${failureAction}\n`,
+    join(projectRoot, ".swf", "policies", `${policyId}.yaml`),
+    `schemaVersion: 1\nid: ${policyId}\napprovalMode: ${policyId === "autonomous" ? "automatic" : "manual"}\nmaxAttempts: 1\nriskOverrides: []\nallowDirectMerge: false\ndeliveryFailureAction: ${failureAction}\n`,
   );
   const service = new SwfService({
     serviceHome: home,
     hostingAdapter: adapter,
+    commandRunner,
     deliveryPollIntervalMs: 0,
     projectTrust: async () => true,
   });
@@ -263,7 +328,7 @@ async function setupDelivery(
     displayName: "Delivery project",
     root: projectRoot,
   });
-  await createRun(projectRoot);
+  await createRun(projectRoot, { policyId });
   const store = new RunEventStore(join(projectRoot, ".swf-state"));
   await store.append(runId, {
     type: "run.transitioned",
@@ -306,6 +371,74 @@ afterEach(async () => {
 });
 
 describe("user-scoped SWF service", () => {
+  it("exposes distinct responsibilities and prohibitions for every phase", async () => {
+    const { service } = await setupPhaseContracts();
+    const phases = [
+      "planning",
+      "building",
+      "reviewing",
+      "verifying",
+      "releasing",
+    ] as const;
+    const explanations = await Promise.all(
+      phases.map((phaseId) =>
+        service.query({
+          resource: "phase-explanation",
+          projectId,
+          runId,
+          phaseId,
+        }),
+      ),
+    );
+    const byPhase = Object.fromEntries(
+      phases.map((phaseId, index) => [phaseId, explanations[index]]),
+    ) as Record<
+      (typeof phases)[number],
+      {
+        explanation: {
+          contract: { objective: string; responsibilities: string[] };
+          prohibitedActions: string[];
+          modelRoute?: { requestedTier?: string };
+          tools: string[];
+        };
+      }
+    >;
+
+    expect(
+      new Set(
+        phases.map(
+          (phaseId) => byPhase[phaseId].explanation.contract.objective,
+        ),
+      ).size,
+    ).toBe(phases.length);
+    expect(byPhase.planning.explanation.contract.responsibilities).toContain(
+      "Validate OpenSpec artifacts strictly before completion.",
+    );
+    expect(byPhase.planning.explanation.prohibitedActions).toContain(
+      "implement application code",
+    );
+    expect(byPhase.building.explanation.contract.responsibilities).toContain(
+      "keep task checkboxes truthful",
+    );
+    expect(byPhase.building.explanation.prohibitedActions).toContain("merge");
+    expect(
+      byPhase.reviewing.explanation.contract.responsibilities[0],
+    ).toContain("security");
+    expect(byPhase.reviewing.explanation.prohibitedActions).toContain(
+      "mutate application code",
+    );
+    expect(byPhase.verifying.explanation.contract.responsibilities).toContain(
+      "map every task to implementation and evidence",
+    );
+    expect(byPhase.verifying.explanation.prohibitedActions).toContain(
+      "override failed checks",
+    );
+    expect(byPhase.releasing.explanation.modelRoute).toBeUndefined();
+    expect(byPhase.releasing.explanation.tools).not.toContain("agent");
+    expect(byPhase.releasing.explanation.prohibitedActions).toContain("merge");
+    await service.shutdown();
+  });
+
   it("creates a durable run and executes Planning through the service-owned scheduler", async () => {
     const home = await temporaryDirectory("swf-service-entry-");
     const projectRoot = await temporaryDirectory("swf-service-entry-project-");
@@ -894,6 +1027,45 @@ describe("user-scoped SWF service", () => {
     await service.shutdown();
   });
 
+  it("requires scoped delegation before autonomous pull-request merge", async () => {
+    const adapter = new FakeHostingAdapter();
+    const { service, projectRoot } = await setupDelivery(
+      adapter,
+      "escalate",
+      "autonomous",
+    );
+    await expect(
+      service.command({ type: "deliver", projectId, runId }),
+    ).rejects.toThrow("recorded delegated authorization");
+    expect(adapter.upserts).toBe(0);
+    expect(adapter.autoMerges).toBe(0);
+
+    await writeFile(
+      join(projectRoot, ".swf-state", "runs", runId, "authorization.json"),
+      JSON.stringify({
+        authorizationId: "delivery-authorization",
+        delegatedBy: { type: "user", id: "operator" },
+        scope: "run",
+        scopeId: runId,
+        acknowledgedAt: new Date().toISOString(),
+        configurationSource: "acceptance-test",
+      }),
+    );
+    await service.command({ type: "deliver", projectId, runId });
+    const deliveries = (await service.query({
+      resource: "delivery",
+      projectId,
+      runId,
+    })) as Record<string, { status: string; autoMergeRequested: boolean }>;
+    expect(Object.values(deliveries)[0]).toMatchObject({
+      status: "auto-merge-requested",
+      autoMergeRequested: true,
+    });
+    expect(adapter.upserts).toBe(1);
+    expect(adapter.autoMerges).toBe(1);
+    await service.shutdown();
+  });
+
   it("restores delivery monitoring after service restart", async () => {
     const firstAdapter = new FakeHostingAdapter();
     const { service } = await setupDelivery(firstAdapter);
@@ -920,6 +1092,57 @@ describe("user-scoped SWF service", () => {
     });
     expect(recoveredAdapter.cleanups).toBe(1);
     await recovered.shutdown();
+  });
+
+  it("archives only after successful delivery and explicit opt-in", async () => {
+    const adapter = new FakeHostingAdapter();
+    const runner = new ArchiveCommandRunner();
+    const { service } = await setupDelivery(
+      adapter,
+      "escalate",
+      "manual",
+      runner,
+    );
+    await service.command({ type: "deliver", projectId, runId });
+    expect(runner.archiveCalls).toHaveLength(0);
+    await expect(
+      service.command({
+        type: "archive-change",
+        projectId,
+        runId,
+        authorized: false,
+      }),
+    ).rejects.toThrow("explicit authorization");
+
+    adapter.release({ state: "merged", mergeState: "MERGED" });
+    await waitFor(async () => {
+      const deliveries = (await service.query({
+        resource: "delivery",
+        projectId,
+        runId,
+      })) as Record<
+        string,
+        { status: string; cleanup?: { branchDeleted: boolean } }
+      >;
+      const delivery = Object.values(deliveries)[0];
+      return (
+        delivery?.status === "merged" &&
+        delivery.cleanup?.branchDeleted === true
+      );
+    });
+    expect(runner.archiveCalls).toHaveLength(0);
+    await expect(
+      service.command({
+        type: "archive-change",
+        projectId,
+        runId,
+        authorized: true,
+      }),
+    ).resolves.toMatchObject({ archived: "add-user-auth" });
+    expect(runner.archiveCalls).toEqual([
+      ["archive", "change", "add-user-auth"],
+    ]);
+    await service.shutdown();
   });
 
   it("fails GitHub preflight before starting execution and preserves run state", async () => {
@@ -957,7 +1180,7 @@ describe("user-scoped SWF service", () => {
 
   it("applies configured delivery remediation after hosted checks fail", async () => {
     const adapter = new FakeHostingAdapter();
-    const { service } = await setupDelivery(adapter, "remediate");
+    const { service, projectRoot } = await setupDelivery(adapter, "remediate");
     await service.command({ type: "deliver", projectId, runId });
     adapter.release({
       state: "open",
@@ -985,6 +1208,10 @@ describe("user-scoped SWF service", () => {
       status: "checks-failed",
       failureReason: "Hosted checks failed",
     });
+    expect(adapter.cleanups).toBe(0);
+    await expect(
+      stat(join(projectRoot, ".swf-state", "runs", runId, "runtime.json")),
+    ).resolves.toBeDefined();
     await service.shutdown();
   });
 
