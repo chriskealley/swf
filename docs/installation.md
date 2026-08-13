@@ -73,6 +73,8 @@ swf service diagnostic
 
 Use `swf new`, `swf run`, or `swf explore` to begin work. The service continues after CLI, Pi, or dashboard clients disconnect. Use `swf service stop` for safe draining or `swf service stop --force` only when owned execution must be interrupted.
 
+From an initialized project, routine inspection and decisions use the change name (`swf status <change>`, `swf approve <change>`, `swf next <change>`). The CLI resolves the project from cwd and the run from its durable change binding. Use explicit IDs only for automation, cross-project work, or displayed ambiguity alternatives.
+
 The dashboard connects only to the loopback endpoint and credential published in the private service metadata. Adapter versions and capability limitations are in [harness-adapters.md](./harness-adapters.md). Security, autonomous-policy implications, pruning, budgets, reconciliation, migration, export/import, and crash recovery are covered in [operations.md](./operations.md).
 
 # Installation and first-run configuration

@@ -1,6 +1,7 @@
 import { createError, defineEventHandler, getHeader, getQuery } from "h3";
 import { getService } from "../../runtime.js";
 import type { ServiceQuery } from "../../swf-service.js";
+import { classifyOperatorError } from "@swf/core";
 
 const resources = new Set<ServiceQuery["resource"]>([
   "overview",
@@ -23,6 +24,7 @@ const resources = new Set<ServiceQuery["resource"]>([
   "exploration",
   "model-routes",
   "phase-explanation",
+  "operator-projection",
   "check-discovery",
   "defaults",
 ]);
@@ -60,9 +62,7 @@ export default defineEventHandler(async (event) => {
     });
     return { schemaVersion: 1, result };
   } catch (error) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: error instanceof Error ? error.message : "Invalid query",
-    });
+    event.node.res.statusCode = 400;
+    return { schemaVersion: 1, error: classifyOperatorError({ error }) };
   }
 });

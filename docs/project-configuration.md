@@ -53,3 +53,5 @@ The default workflow explicitly selects `delivery.mode: pull-request` and `merge
 Manual policy opens or updates a pull request and waits for a human merge. Automatic policy requires recorded delegated authorization before requesting auto-merge. Projects may select `squash`, `rebase`, or `repository-default` merge behavior. `local-branch` bypasses GitHub checks only when explicitly configured. `direct-merge` additionally requires `allowDirectMerge: true` in the resolved policy.
 
 Delivery failures use the policy's `deliveryFailureAction`, which is one of `remediate`, `escalate`, or `fail`. Execution status remains distinct from delivery status, so a completed run can continue to report `awaiting-merge` while the service monitors hosted checks and reviews.
+
+Operator guidance uses the configured workflow phase order, gate modes, checks, budgets, artifacts, and delivery policy. Configuration remains authoritative; semantic actions advertise only what current service state permits. If several gates or invocations match a shorthand command, SWF requires an explicit selector instead of choosing one.

@@ -5,3 +5,5 @@ The Releasing phase does not launch a general-purpose harness agent. It validate
 Local branch, pull-request, and direct-merge behavior remains explicitly configured in `.swf/workflows/*.yaml` and constrained by policy. A merge or hosted failure retains the source branch, worktree, dossier, and owned diagnostics. Cleanup runs only after durable delivery evidence and removes only resources in the run ownership record.
 
 OpenSpec archiving is a separate operator action. A completed delivery does not archive a change unless the operator explicitly invokes the archive workflow.
+
+Completed local-branch guidance includes the source branch, target branch, dossier reference, checkpoint count, and semantic review/merge actions. CLI, Pi, and dashboard render those actions for their medium, but the action data remains advisory and delivery policy is revalidated by the service.

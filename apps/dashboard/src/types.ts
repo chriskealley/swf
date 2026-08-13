@@ -209,3 +209,6 @@ export interface PruningPreview {
   totalBytes: number;
   expiresAt: string;
 }
+import type { OperatorProjection } from "@swf/core";
+
+export type { OperatorProjection };

@@ -13,6 +13,7 @@ import type {
   BudgetDecision,
   DashboardOverview,
   OutputResult,
+  OperatorProjection,
   PruningPreview,
   ProjectSummary,
   Run,
@@ -27,6 +28,7 @@ const adapters = ref<AdapterDiagnostic[]>([]);
 const project = ref<ProjectSummary>();
 const runs = ref<Run[]>([]);
 const detail = ref<RunDetail>();
+const guidance = ref<OperatorProjection>();
 const budgetDecisions = ref<BudgetDecision[]>([]);
 const output = ref<OutputResult>();
 const pruning = ref<PruningPreview>();
@@ -139,6 +141,7 @@ async function openProject(projectId: string, clearRun = true) {
   project.value = selected;
   if (clearRun) {
     detail.value = undefined;
+    guidance.value = undefined;
     budgetDecisions.value = [];
     output.value = undefined;
     pruning.value = undefined;
@@ -166,11 +169,16 @@ async function openRun(runId: string, clearOutput = true) {
         projectId: project.value!.projectId,
         runId,
       }),
+      api.value!.query<OperatorProjection>("operator-projection", {
+        projectId: project.value!.projectId,
+        runId,
+      }),
     ]),
   );
   if (loaded) {
     detail.value = loaded[0];
     budgetDecisions.value = loaded[1];
+    guidance.value = loaded[2];
   }
   if (clearOutput) output.value = undefined;
 }
@@ -226,28 +234,39 @@ async function deliveryCommand(type: "deliver" | "refresh-delivery") {
   await refreshCurrent();
 }
 
-async function decide(
-  type: "approve" | "reject",
-  phaseId: string,
-  gateId: string,
+async function runSemanticAction(
+  action: OperatorProjection["allowedActions"][number],
 ) {
-  if (!project.value || !detail.value) return;
-  const prompt =
-    type === "approve" ? "Approval reason (optional)" : "Required changes";
-  const reason = window.prompt(prompt, "") ?? undefined;
-  if (type === "reject" && !reason) return;
-  await busy(() =>
-    api.value!.command({
+  if (!api.value) return;
+  if (
+    action.requiresConfirmation &&
+    !window.confirm(`${action.label}? The service will revalidate current state.`)
+  )
+    return;
+  const reason = ["request-changes", "reject"].includes(action.type)
+    ? window.prompt("Reason", "") || undefined
+    : undefined;
+  if (["request-changes", "reject"].includes(action.type) && !reason) return;
+  const type =
+    action.type === "continue-run"
+      ? "run"
+      : action.type === "run-phase"
+        ? "next"
+        : action.type;
+  if (["inspect-evidence", "review-delivery", "merge-delivery"].includes(type)) {
+    message.value = `${action.label}. Use the referenced artifacts or branch details below.`;
+    return;
+  }
+  const result = await busy(() =>
+    api.value!.command<{ projection?: OperatorProjection }>({
       type,
-      projectId: project.value!.projectId,
-      runId: detail.value!.state.run.runId,
-      phaseId,
-      gateId,
+      ...action.parameters,
       actorId: "dashboard-operator",
       reason,
     }),
   );
-  message.value = `${type === "approve" ? "Approval" : "Request for changes"} recorded.`;
+  if (result?.projection) guidance.value = result.projection;
+  message.value = `${action.label} completed.`;
   await refreshCurrent();
 }
 
@@ -290,11 +309,13 @@ async function confirmPruning() {
 function backToProjects() {
   project.value = undefined;
   detail.value = undefined;
+  guidance.value = undefined;
   output.value = undefined;
   pruning.value = undefined;
 }
 function backToRuns() {
   detail.value = undefined;
+  guidance.value = undefined;
   output.value = undefined;
 }
 function capabilityNames(adapter: AdapterDiagnostic): string {
@@ -691,6 +712,30 @@ onUnmounted(() => {
             }}</strong>
           </div>
         </div>
+        <section
+          v-if="guidance"
+          class="gate"
+          aria-labelledby="operator-guidance-title"
+        >
+          <h2 id="operator-guidance-title">Operator guidance</h2>
+          <p>{{ guidance.summary }}</p>
+          <ul v-if="guidance.attention.length" class="compact-list">
+            <li v-for="item in guidance.attention" :key="item.attentionId">
+              <strong>{{ item.title }}</strong><span>{{ item.reason }}</span>
+            </li>
+          </ul>
+          <div class="controls" aria-label="Recommended actions">
+            <button
+              v-for="action in guidance.allowedActions"
+              :key="action.actionId"
+              type="button"
+              :class="{ primary: action.recommended }"
+              @click="runSemanticAction(action)"
+            >
+              {{ action.label }}
+            </button>
+          </div>
+        </section>
         <div class="controls" aria-label="Run controls">
           <button type="button" @click="runCommand('start')">Start</button
           ><button type="button" @click="runCommand('pause')">Pause</button
@@ -759,24 +804,6 @@ onUnmounted(() => {
                 <div v-if="phase.gate" class="gate">
                   <span>Gate {{ phase.gate.id }} · {{ phase.gate.status }}</span
                   ><span v-if="phase.gate.reason">{{ phase.gate.reason }}</span>
-                  <div
-                    v-if="
-                      phase.gate.status === 'pending' ||
-                      phase.gate.status === 'blocked'
-                    "
-                  >
-                    <button
-                      type="button"
-                      @click="decide('approve', phase.id, phase.gate.id)"
-                    >
-                      Approve</button
-                    ><button
-                      type="button"
-                      @click="decide('reject', phase.id, phase.gate.id)"
-                    >
-                      Request changes
-                    </button>
-                  </div>
                 </div>
               </article>
             </li>

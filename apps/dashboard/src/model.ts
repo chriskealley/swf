@@ -1,4 +1,16 @@
-import type { CostSummary, Invocation } from "./types.js";
+import type {
+  CostSummary,
+  Invocation,
+  OperatorProjection,
+} from "./types.js";
+
+export function dashboardGuidanceIdentity(projection: OperatorProjection) {
+  return {
+    stoppingPhaseId: projection.stoppingPhaseId,
+    attentionTypes: projection.attention.map(({ type }) => type),
+    actionTypes: projection.allowedActions.map(({ type }) => type),
+  };
+}
 
 export const activeStatuses = new Set([
   "pending",

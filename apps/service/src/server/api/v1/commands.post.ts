@@ -1,6 +1,9 @@
 import { createError, defineEventHandler, getHeader, readBody } from "h3";
 import { getService } from "../../runtime.js";
-import type { ServiceCommand } from "../../swf-service.js";
+import {
+  OperatorCommandError,
+  type ServiceCommand,
+} from "../../swf-service.js";
 
 const commandTypes = new Set<ServiceCommand["type"]>([
   "new",
@@ -67,6 +70,14 @@ export default defineEventHandler(async (event) => {
     const result = await service.command(command as ServiceCommand);
     return { schemaVersion: 1, status: "accepted", result };
   } catch (error) {
+    if (error instanceof OperatorCommandError) {
+      event.node.res.statusCode = 409;
+      return {
+        schemaVersion: 1,
+        error: error.classified,
+        projection: error.projection,
+      };
+    }
     throw createError({
       statusCode: 400,
       statusMessage: error instanceof Error ? error.message : "Invalid command",

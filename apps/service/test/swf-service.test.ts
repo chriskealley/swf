@@ -31,6 +31,7 @@ import {
 } from "@swf/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  OperatorCommandError,
   ServiceAlreadyRunningError,
   ServiceAuthenticationError,
   SwfService,
@@ -500,8 +501,33 @@ describe("user-scoped SWF service", () => {
       projectId,
       changeName: "service-entry",
       description: "Create a service-backed Planning change",
-    })) as { runId: string; status: string };
+    })) as {
+      runId: string;
+      status: string;
+      projection: {
+        stoppingPhaseId?: string;
+        attention: Array<{ type: string; phaseId?: string }>;
+        allowedActions: Array<{ type: string }>;
+      };
+    };
     expect(created.status).toBe("blocked");
+    expect(created.projection).toMatchObject({
+      stoppingPhaseId: "planning",
+      attention: [{ type: "manual-approval", phaseId: "planning" }],
+    });
+    expect(created.projection.allowedActions.map(({ type }) => type)).toEqual([
+      "inspect-evidence",
+      "approve",
+      "request-changes",
+      "reject",
+    ]);
+    await expect(
+      service.query({
+        resource: "operator-projection",
+        projectId,
+        runId: created.runId,
+      }),
+    ).resolves.toEqual(created.projection);
 
     let loaded = (await service.query({
       resource: "run",
@@ -521,7 +547,7 @@ describe("user-scoped SWF service", () => {
     expect(loaded.state.run.status).toBe("blocked");
     expect(loaded.state.phases.planning.status).toBe("blocked");
     expect(Object.keys(loaded.state.checkpoints)).toHaveLength(0);
-    await service.command({
+    const approved = (await service.command({
       type: "approve",
       projectId,
       runId: created.runId,
@@ -529,6 +555,21 @@ describe("user-scoped SWF service", () => {
       gateId: "planning-gate",
       actorId: "service-test-operator",
       reason: "Planning evidence is acceptable",
+    })) as {
+      approval: { actor: { id: string } };
+      projection: {
+        status: string;
+        completedPhaseId?: string;
+        attention: unknown[];
+      };
+    };
+    expect(approved).toMatchObject({
+      approval: { actor: { id: "service-test-operator" } },
+      projection: {
+        status: "paused",
+        completedPhaseId: "planning",
+        attention: [],
+      },
     });
     loaded = (await service.query({
       resource: "run",
@@ -550,14 +591,19 @@ describe("user-scoped SWF service", () => {
         ),
       ),
     ).resolves.toBeDefined();
-    await expect(
-      service.command({
+    const stale = await service
+      .command({
         type: "new",
         projectId,
         changeName: "service-entry",
         description: "duplicate",
-      }),
-    ).rejects.toThrow(/already bound/);
+      })
+      .catch((error: unknown) => error);
+    expect(stale).toBeInstanceOf(OperatorCommandError);
+    expect(stale).toMatchObject({
+      classified: { category: "policy" },
+      projection: { status: "paused", completedPhaseId: "planning" },
+    });
 
     const checkpoint = Object.values(loaded.state.checkpoints)[0]!;
     await writeFile(join(loaded.runtime.worktreePath, "later.txt"), "later\n");
@@ -641,7 +687,7 @@ describe("user-scoped SWF service", () => {
       }),
     ).resolves.toMatchObject({ checkId: "planning-files", status: "passed" });
     await service.shutdown();
-  });
+  }, 15_000);
 
   it("owns a user scope with private endpoint metadata and credentials", async () => {
     const home = await temporaryDirectory("swf-service-");
@@ -778,10 +824,17 @@ describe("user-scoped SWF service", () => {
     await expect(
       service.query({ resource: "runs", projectId }),
     ).resolves.toHaveLength(1);
-    await service.command({ type: "start", projectId, runId });
-    await service.command({ type: "pause", projectId, runId });
-    await service.command({ type: "resume", projectId, runId });
-    await service.command({
+    await expect(
+      service.command({ type: "start", projectId, runId }),
+    ).resolves.toMatchObject({ projection: { status: "running" } });
+    await expect(
+      service.command({ type: "pause", projectId, runId }),
+    ).resolves.toMatchObject({ projection: { status: "paused" } });
+    await expect(
+      service.command({ type: "resume", projectId, runId }),
+    ).resolves.toMatchObject({ projection: { status: "running" } });
+    await expect(
+      service.command({
       type: "reject",
       projectId,
       runId,
@@ -789,26 +842,53 @@ describe("user-scoped SWF service", () => {
       gateId: "planning-gate",
       actorId: "operator",
       reason: "needs changes",
+      }),
+    ).resolves.toMatchObject({
+      approval: { decision: "rejected" },
+      projection: { status: "running" },
     });
-    await service.command({
+    await expect(
+      service.command({
+        type: "request-changes",
+        projectId,
+        runId,
+        phaseId: "planning",
+        gateId: "planning-gate",
+        actorId: "operator",
+        reason: "revise the plan",
+      }),
+    ).resolves.toMatchObject({
+      approval: { decision: "request-changes" },
+      projection: { status: "running" },
+    });
+    await expect(
+      service.command({
       type: "approve",
       projectId,
       runId,
       phaseId: "planning",
       gateId: "planning-gate",
       actorId: "operator",
+      }),
+    ).resolves.toMatchObject({
+      approval: { decision: "approved" },
+      projection: { status: "running" },
     });
-    await service.command({
+    await expect(
+      service.command({
       type: "remediate",
       projectId,
       runId,
       phaseId: "planning",
       reason: "fix failing test",
-    });
+      }),
+    ).resolves.toMatchObject({ projection: { status: "running" } });
     await expect(
       service.query({ resource: "approvals", projectId, runId }),
-    ).resolves.toHaveLength(2);
-    await service.command({ type: "cancel", projectId, runId });
+    ).resolves.toHaveLength(3);
+    await expect(
+      service.command({ type: "cancel", projectId, runId }),
+    ).resolves.toMatchObject({ projection: { status: "cancelled" } });
 
     const run = (await service.query({
       resource: "run",
@@ -823,7 +903,7 @@ describe("user-scoped SWF service", () => {
     };
     expect(run.state.run.status).toBe("cancelled");
     expect(run.state.phases.planning?.gate?.status).toBe("satisfied");
-    expect(Object.keys(run.state.attempts)).toHaveLength(1);
+    expect(Object.keys(run.state.attempts)).toHaveLength(2);
     await expect(
       service.query({ resource: "costs", projectId, runId }),
     ).resolves.toEqual({ exactUsd: 0, estimatedUsd: 0, unknown: 0 });

@@ -14,6 +14,8 @@
 
 The core is intentionally framework-independent. The service is the only process permitted to schedule or mutate active runs. The CLI, dashboard, Pi extension, and generated harness skills are clients of the service.
 
+The service derives a rebuildable, versioned operator projection from durable state and resolved configuration. Typed attention and semantic actions flow unchanged to CLI, Pi, dashboard, and JSON clients; clients render controls or commands but never reinterpret raw statuses as workflow authority. Projection caches, if introduced, are disposable.
+
 ## Dependency direction
 
 ```text

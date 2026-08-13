@@ -88,7 +88,7 @@
 - [x] 9.2 Add CLI commands or extensions for model mapping preview, phase explanation, check discovery, defaults inspection, defaults diff, and selective adoption
 - [x] 9.3 Surface model route and verification/release evidence in dashboard phase and run views
 - [x] 9.4 Surface the same resolved phase and model information through Pi controls without reimplementing resolution client-side
-- [ ] 9.5 Integrate model, verification, release, and template attention with the operator projections defined by `improve-cli-operator-experience` when that change is available
+- [x] 9.5 Integrate model, verification, release, and template attention with the operator projections defined by `improve-cli-operator-experience` when that change is available
 
 ## 10. Acceptance, Documentation, and Release Verification
 

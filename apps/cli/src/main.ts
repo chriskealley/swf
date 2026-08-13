@@ -6,6 +6,7 @@ import consola from "consola";
 import { detectPackageManager } from "nypm";
 import {
   ServiceUnavailableError,
+  SwfOperatorError,
   SwfServiceClient,
   applySetupPlan,
   createSetupPlan,
@@ -17,32 +18,86 @@ import {
   type CheckStatus,
   type SetupAction,
 } from "@swf/core";
+import {
+  AmbiguousOperatorContextError,
+  resolveOperatorContext,
+  resolveUniqueAction,
+  type OperatorContext,
+} from "./operator-context.js";
+import {
+  projectionFromResult,
+  renderActionCommand,
+  renderOperatorError,
+  renderOperatorProjection,
+} from "./operator-renderer.js";
+import {
+  OrderedProgressSubscriber,
+  renderProgressLine,
+} from "./progress.js";
+import {
+  approvalChoices,
+  interactionEnabled,
+  runApprovalDecisionFlow,
+} from "./interaction.js";
 
 const SCHEMA_VERSION = 1;
-function output(value: unknown, json = false): void {
+function output(value: unknown, json = false, verbose = false): void {
   if (json)
     console.log(
       JSON.stringify({ schemaVersion: SCHEMA_VERSION, result: value }, null, 2),
     );
-  else
+  else {
+    const projection = projectionFromResult(value);
     consola.log(
-      typeof value === "string" ? value : JSON.stringify(value, null, 2),
+      projection
+        ? renderOperatorProjection(projection, { verbose })
+        : typeof value === "string"
+          ? value
+          : JSON.stringify(value, null, 2),
     );
+  }
 }
-function fail(error: unknown, json = false): void {
+function fail(error: unknown, json = false, verbose = false): void {
   const message = error instanceof Error ? error.message : "Unknown error";
   if (json)
     console.log(
       JSON.stringify(
-        {
-          schemaVersion: SCHEMA_VERSION,
-          error: { code: "SWF_ERROR", message },
-        },
+        error instanceof SwfOperatorError
+          ? {
+              schemaVersion: SCHEMA_VERSION,
+              error: error.detail,
+              projection: error.projection,
+            }
+          : {
+              schemaVersion: SCHEMA_VERSION,
+              error: {
+                schemaVersion: SCHEMA_VERSION,
+                code: "SWF_ERROR",
+                category: "infrastructure",
+                message,
+                retryable: false,
+                diagnosticRefs: [],
+                recoveryActions: [],
+              },
+            },
         null,
         2,
       ),
     );
-  else consola.error(message);
+  else if (error instanceof SwfOperatorError)
+    consola.error(
+      renderOperatorError(error.detail, error.projection, { verbose }),
+    );
+  else if (error instanceof AmbiguousOperatorContextError) {
+    consola.error(message);
+    for (const alternative of error.alternatives)
+      consola.error(
+        `  ${Object.entries(alternative)
+          .filter(([, value]) => value)
+          .map(([key, value]) => `--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)} ${value}`)
+          .join(" ")}`,
+      );
+  } else consola.error(message);
   process.exitCode = error instanceof ServiceUnavailableError ? 3 : 1;
 }
 async function client(): Promise<SwfServiceClient> {
@@ -79,6 +134,56 @@ async function boundRunId(
   const run = runs.find((candidate) => candidate.changeName === changeName);
   if (!run) throw new Error(`No run is bound to ${changeName}`);
   return run.runId;
+}
+
+interface ContextArgs {
+  change?: string;
+  cwd?: string;
+  project?: string;
+  run?: string;
+}
+
+async function selectedContext(
+  active: SwfServiceClient,
+  args: ContextArgs,
+): Promise<OperatorContext> {
+  if (args.project)
+    return resolveOperatorContext({
+      client: active,
+      projectId: args.project,
+      runId: args.run,
+      changeName: args.change,
+    });
+  const connected = await connectedProject(args.cwd);
+  return resolveOperatorContext({
+    client: active,
+    projectId: connected.projectId,
+    runId: args.run,
+    changeName: args.change,
+  });
+}
+
+function startProgress(
+  active: SwfServiceClient,
+  context: { projectId?: string; runId?: string },
+  enabled: boolean,
+): { stop: () => Promise<void> } {
+  if (!enabled) return { stop: async () => undefined };
+  const controller = new AbortController();
+  const subscriber = new OrderedProgressSubscriber(
+    (line) => console.error(renderProgressLine(line, Boolean(process.stderr.isTTY))),
+    context,
+  );
+  const following = subscriber.follow(
+    (after) => active.events({ after, signal: controller.signal }),
+    { attempts: 3 },
+  );
+  return {
+    stop: async () => {
+      controller.abort();
+      await following.catch(() => undefined);
+    },
+  };
 }
 function publicServiceMetadata<T extends { credential?: string }>(metadata: T) {
   const { credential: _credential, ...safe } = metadata;
@@ -316,27 +421,45 @@ function queryCommand(name: string, resource: string, needsRun = true) {
   return defineCommand({
     meta: { name, description: `Query SWF ${resource}` },
     args: {
+      change: { type: "positional", required: false },
       project: {
         type: "string",
-        required: resource !== "blocked-inputs" && resource !== "projects",
+        description: "Advanced: explicit project ID",
       },
-      run: { type: "string", required: needsRun },
+      run: { type: "string", description: "Advanced: explicit run ID" },
+      cwd: { type: "string" },
+      verbose: { type: "boolean" },
       json: { type: "boolean" },
     },
     async run({
       args,
     }: {
-      args: { project?: string; run?: string; json?: boolean };
+      args: ContextArgs & { json?: boolean; verbose?: boolean };
     }) {
       try {
+        const active = await client();
+        if (needsRun) {
+          const context = await selectedContext(active, args);
+          const result =
+            name === "status"
+              ? { projection: context.projection }
+              : await active.query(resource, {
+                  projectId: context.projectId,
+                  runId: context.runId,
+                });
+          output(result, args.json, args.verbose);
+          return;
+        }
         output(
-          await (
-            await client()
-          ).query(resource, { projectId: args.project, runId: args.run }),
+          await active.query(resource, {
+            projectId: args.project,
+            runId: args.run,
+          }),
           args.json,
+          args.verbose,
         );
       } catch (error) {
-        fail(error, args.json);
+        fail(error, args.json, args.verbose);
       }
     },
   });
@@ -349,46 +472,66 @@ function lifecycleCommand(
   return defineCommand({
     meta: { name, description: `${name} a SWF run` },
     args: {
-      project: { type: "string", required: true },
-      run: { type: "string", required: true },
+      change: { type: "positional", required: false },
+      project: { type: "string", description: "Advanced: explicit project ID" },
+      run: { type: "string", description: "Advanced: explicit run ID" },
       phase: { type: "string" },
       gate: { type: "string" },
       checkpoint: { type: "string" },
       reason: { type: "string" },
       actor: { type: "string" },
       authorized: { type: "boolean" },
+      cwd: { type: "string" },
+      verbose: { type: "boolean" },
+      interactive: { type: "boolean" },
+      "no-interactive": { type: "boolean" },
       json: { type: "boolean" },
     },
     async run({ args }) {
       const input = args as unknown as {
-        project: string;
-        run: string;
+        change?: string;
+        project?: string;
+        run?: string;
         phase?: string;
         gate?: string;
         checkpoint?: string;
         reason?: string;
         actor?: string;
         authorized?: boolean;
+        cwd?: string;
+        verbose?: boolean;
         json?: boolean;
       };
       try {
-        await (
-          await client()
-        ).command({
+        const active = await client();
+        const context = await selectedContext(active, input);
+        const semanticTypes = {
+          approve: ["approve"],
+          reject: ["reject"],
+          "request-changes": ["request-changes"],
+        } as const;
+        const semantic =
+          type in semanticTypes && (!input.phase || !input.gate)
+            ? resolveUniqueAction(
+                context.projection,
+                [...semanticTypes[type as keyof typeof semanticTypes]],
+              )
+            : undefined;
+        const result = await active.command({
           type,
-          projectId: input.project,
-          runId: input.run,
-          phaseId: input.phase,
-          gateId: input.gate,
+          projectId: context.projectId,
+          runId: context.runId,
+          phaseId: input.phase ?? semantic?.parameters.phaseId,
+          gateId: input.gate ?? semantic?.parameters.gateId,
           checkpointId: input.checkpoint,
           reason: input.reason,
           actorId: input.actor ?? "operator",
           authorized: input.authorized,
           ...extras,
         });
-        output({ accepted: true, type }, input.json);
+        output(result, input.json, input.verbose);
       } catch (error) {
-        fail(error, input.json);
+        fail(error, input.json, input.verbose);
       }
     },
   });
@@ -415,22 +558,30 @@ const blockedInput = defineCommand({
     description: "Reply to an agent blocked on operator input",
   },
   args: {
-    invocation: { type: "string", required: true },
+    change: { type: "positional", required: false },
     response: { type: "positional", required: true },
+    invocation: { type: "string", description: "Advanced: explicit invocation ID" },
+    project: { type: "string", description: "Advanced: explicit project ID" },
+    run: { type: "string", description: "Advanced: explicit run ID" },
+    cwd: { type: "string" },
+    verbose: { type: "boolean" },
     json: { type: "boolean" },
   },
   async run({ args }) {
     try {
-      await (
-        await client()
-      ).command({
+      const active = await client();
+      const context = await selectedContext(active, args);
+      const semantic = args.invocation
+        ? undefined
+        : resolveUniqueAction(context.projection, ["reply-to-invocation"]);
+      const result = await active.command({
         type: "blocked-input",
-        invocationId: args.invocation,
+        invocationId: args.invocation ?? semantic?.parameters.invocationId,
         response: args.response,
       });
-      output({ accepted: true }, args.json);
+      output(result, args.json, args.verbose);
     } catch (error) {
-      fail(error, args.json);
+      fail(error, args.json, args.verbose);
     }
   },
 });
@@ -455,33 +606,88 @@ function workflowEntryCommand(type: "new" | "run" | "next") {
       actor: { type: "string" },
       "from-exploration": { type: "string" },
       cwd: { type: "string" },
+      verbose: { type: "boolean" },
+      "no-interactive": { type: "boolean" },
       json: { type: "boolean" },
     },
     async run({ args }) {
       try {
         const { active, projectId } = await connectedProject(args.cwd);
-        const result = await active.command({
-          type,
-          projectId,
-          changeName: args.change,
-          description: args.description,
-          workflowId: args.workflow,
-          policyId: args.policy,
-          fromExplorationId: args["from-exploration"],
-          authorization: args["authorize-autonomous"]
-            ? {
-                authorizationId: crypto.randomUUID(),
-                delegatedBy: { type: "user", id: args.actor ?? "operator" },
-                scope: "project",
-                scopeId: projectId,
-                acknowledgedAt: new Date().toISOString(),
-                configurationSource: "cli:--authorize-autonomous",
-              }
-            : undefined,
-        });
-        output(result, args.json);
+        const progress = startProgress(active, { projectId }, !args.json);
+        try {
+          const result = await active.command({
+            type,
+            projectId,
+            changeName: args.change,
+            description: args.description,
+            workflowId: args.workflow,
+            policyId: args.policy,
+            fromExplorationId: args["from-exploration"],
+            authorization: args["authorize-autonomous"]
+              ? {
+                  authorizationId: crypto.randomUUID(),
+                  delegatedBy: { type: "user", id: args.actor ?? "operator" },
+                  scope: "project",
+                  scopeId: projectId,
+                  acknowledgedAt: new Date().toISOString(),
+                  configurationSource: "cli:--authorize-autonomous",
+                }
+              : undefined,
+          });
+          output(result, args.json, args.verbose);
+          const projection = projectionFromResult(result);
+          if (
+            projection &&
+            projection.attention.some(({ type }) => type === "manual-approval") &&
+            interactionEnabled({
+              interactive: Boolean(args.interactive),
+              noInteractive: Boolean(args["no-interactive"]),
+              json: Boolean(args.json),
+              stdinTty: Boolean(process.stdin.isTTY),
+              stdoutTty: Boolean(process.stdout.isTTY),
+              ci: Boolean(process.env.CI),
+            })
+          ) {
+            const flow = await runApprovalDecisionFlow({
+              projection,
+              actor: args.actor ?? "operator",
+              choose: async (choices) => {
+                const selected = await consola.prompt("Choose an action", {
+                  type: "select",
+                  options: choices.map(({ label, action }) => ({
+                    label,
+                    value: action?.actionId ?? "exit",
+                  })),
+                  initial: "exit",
+                });
+                return projection.allowedActions.find(
+                  ({ actionId }) => actionId === selected,
+                );
+              },
+              confirm: (action) =>
+                consola.prompt(`Confirm: ${action.label}?`, {
+                  type: "confirm",
+                  initial: false,
+                }),
+              reason: async (action) =>
+                action.type === "approve"
+                  ? undefined
+                  : consola.prompt("Reason", { type: "text" }),
+              submit: (decision) => active.command(decision),
+            });
+            if (flow.status === "review") {
+              const review = approvalChoices(projection).find(
+                ({ action }) => action?.type === "inspect-evidence",
+              )?.action;
+              if (review) consola.log(`Review: ${renderActionCommand(review)}`);
+            } else if (flow.status === "submitted")
+              output(flow.result, false, args.verbose);
+          }
+        } finally {
+          await progress.stop();
+        }
       } catch (error) {
-        fail(error, args.json);
+        fail(error, args.json, args.verbose);
       }
     },
   });

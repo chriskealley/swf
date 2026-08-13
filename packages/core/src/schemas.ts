@@ -534,6 +534,140 @@ export const DeliverySchema = z.object({
   updatedAt: IsoDateTime,
 });
 
+export const OperatorFailureCategorySchema = z.enum([
+  "configuration",
+  "dependency",
+  "infrastructure",
+  "harness",
+  "work",
+  "check",
+  "policy",
+  "budget",
+  "delivery",
+]);
+
+export const OperatorActionTypeSchema = z.enum([
+  "run-phase",
+  "continue-run",
+  "approve",
+  "request-changes",
+  "reject",
+  "reply-to-invocation",
+  "retry",
+  "resume",
+  "inspect-evidence",
+  "review-delivery",
+  "merge-delivery",
+  "configure",
+  "reconcile",
+]);
+
+export const OperatorActionParametersSchema = z
+  .object({
+    projectId: z.string().uuid(),
+    runId: z.string().uuid(),
+    changeName: Identifier,
+    phaseId: Identifier.optional(),
+    gateId: z.string().min(1).optional(),
+    invocationId: z.string().uuid().optional(),
+    artifactId: z.string().uuid().optional(),
+    deliveryId: z.string().uuid().optional(),
+    branch: z.string().min(1).optional(),
+    targetBranch: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const OperatorActionSchema = z.object({
+  actionId: z.string().min(1),
+  type: OperatorActionTypeSchema,
+  label: z.string().min(1),
+  parameters: OperatorActionParametersSchema,
+  requiresConfirmation: z.boolean().default(false),
+  recommended: z.boolean().default(false),
+});
+
+const EvidenceSummarySchema = z.object({
+  checks: z.array(
+    z.object({
+      id: z.string().min(1),
+      status: CheckStatusSchema,
+      reason: z.string().min(1).optional(),
+    }),
+  ),
+  changedPaths: z.array(z.string().min(1)),
+  risks: z.array(z.string().min(1)),
+  artifactIds: z.array(z.string().uuid()),
+});
+
+export const OperatorAttentionTypeSchema = z.enum([
+  "manual-approval",
+  "configuration-failure",
+  "blocked-input",
+  "failed-check",
+  "budget-block",
+  "dependency-failure",
+  "infrastructure-failure",
+  "harness-failure",
+  "work-failure",
+  "policy-failure",
+  "delivery-failure",
+]);
+
+export const OperatorAttentionSchema = z.object({
+  attentionId: z.string().min(1),
+  type: OperatorAttentionTypeSchema,
+  projectId: z.string().uuid(),
+  runId: z.string().uuid(),
+  changeName: Identifier,
+  phaseId: Identifier.optional(),
+  gateId: z.string().min(1).optional(),
+  invocationId: z.string().uuid().optional(),
+  title: z.string().min(1),
+  reason: z.string().min(1),
+  retryable: z.boolean(),
+  evidence: EvidenceSummarySchema.optional(),
+  actionIds: z.array(z.string().min(1)),
+});
+
+export const ClassifiedOperatorErrorSchema = z.object({
+  schemaVersion: SchemaVersion,
+  code: z.string().min(1),
+  category: OperatorFailureCategorySchema,
+  message: z.string().min(1),
+  retryable: z.boolean(),
+  runStatus: RunStatusSchema.optional(),
+  diagnosticRefs: z.array(z.string().min(1)).default([]),
+  recoveryActions: z.array(OperatorActionSchema).default([]),
+});
+
+export const OperatorProjectionSchema = z.object({
+  schemaVersion: SchemaVersion,
+  projectId: z.string().uuid(),
+  runId: z.string().uuid(),
+  changeName: Identifier,
+  workflowId: Identifier,
+  status: RunStatusSchema,
+  summary: z.string().min(1),
+  currentPhaseId: Identifier.optional(),
+  stoppingPhaseId: Identifier.optional(),
+  completedPhaseId: Identifier.optional(),
+  nextPhaseId: Identifier.optional(),
+  attention: z.array(OperatorAttentionSchema),
+  allowedActions: z.array(OperatorActionSchema),
+  recommendedActionId: z.string().min(1).optional(),
+  evidence: EvidenceSummarySchema,
+  delivery: z
+    .object({
+      deliveryId: z.string().uuid(),
+      status: z.string().min(1),
+      branch: z.string().min(1),
+      targetBranch: z.string().min(1),
+      dossierRef: z.string().min(1).optional(),
+      checkpointCount: z.number().int().nonnegative(),
+    })
+    .optional(),
+});
+
 export const documents = {
   projectConfig: ProjectConfigSchema,
   modelRouting: ModelRoutingSchema,
@@ -559,6 +693,10 @@ export const documents = {
   releasePreflight: ReleasePreflightSchema,
   cleanupState: CleanupStateSchema,
   reviewFindingResolution: ReviewFindingResolutionSchema,
+  operatorProjection: OperatorProjectionSchema,
+  operatorAction: OperatorActionSchema,
+  operatorAttention: OperatorAttentionSchema,
+  classifiedOperatorError: ClassifiedOperatorErrorSchema,
 } as const;
 
 export type DocumentName = keyof typeof documents;

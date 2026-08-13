@@ -181,39 +181,37 @@ SWF's operator workflow is centered on:
 - `swf archive` — explicitly archive a delivered OpenSpec change;
 - `swf check` — inspect or refresh declared checks.
 
-The current source CLI submits lifecycle operations using registered project and run IDs:
+Run ordinary commands from the initialized project using the OpenSpec change name:
 
 ```sh
-swf status --project <project-id> --run <run-id>
-swf run --project <project-id> --run <run-id>
-swf next --project <project-id> --run <run-id>
-swf phase list --project <project-id> --run <run-id>
+swf new improve-login --description "Improve login reliability"
+swf status improve-login
+swf approve improve-login --actor <operator-id>
+swf next improve-login       # exactly one eligible phase
+swf run improve-login        # automatic progression
 ```
 
-Project IDs are in `.swf/config.yaml`; run IDs are visible through the dashboard, Pi extension, service API, and run listings.
+The CLI shows bounded progress, the actual stopping phase, evidence-oriented attention, and executable next commands. Add `--verbose` for internal IDs and diagnostics. Explicit `--project`, `--run`, `--phase`, and `--gate` selectors remain available for automation and ambiguity resolution.
 
 ### Run control and approvals
 
 ```sh
-swf pause --project <project-id> --run <run-id>
-swf resume --project <project-id> --run <run-id>
-swf cancel --project <project-id> --run <run-id>
-
-swf approve \
-  --project <project-id> \
-  --run <run-id> \
-  --phase <phase-id> \
-  --gate <gate-id> \
-  --actor <operator-id>
+swf pause improve-login
+swf resume improve-login
+swf cancel improve-login
+swf approve improve-login --actor <operator-id>
+swf request-changes improve-login --reason "Revise migration handling"
 ```
+
+Interactive approval is conservative and opt-in with `--interactive`. JSON, CI, piped output, and `--no-interactive` never prompt. `--json` writes one versioned result or classified error document to stdout; human progress is written separately to stderr.
 
 ### Evidence, costs, and configuration
 
 ```sh
-swf artifacts --project <project-id> --run <run-id>
-swf log --project <project-id> --run <run-id>
-swf cost --project <project-id> --run <run-id>
-swf budget --project <project-id> --run <run-id>
+swf artifacts improve-login
+swf log improve-login
+swf cost improve-login
+swf budget improve-login
 swf config --project <project-id>
 ```
 
@@ -278,6 +276,12 @@ pnpm dev:dashboard
 Open the local URL printed by Vite, then enter the service endpoint and credential from the private service metadata. Dashboard credentials remain in memory and are sent only to loopback HTTP endpoints.
 
 The dashboard provides project and run timelines, phase status, retained output, artifacts, delivery state, cost provenance, budget status, adapter capabilities, safe controls, and preview-plus-confirmation pruning.
+
+Its Operator guidance panel consumes the same attention and semantic actions as the CLI. Dashboard controls submit the service-provided parameters and the service revalidates them before mutation.
+
+## Pi extension
+
+The Pi status widget displays the service-owned stopping phase and attention summary. `/swf-approve`, `/swf-request-changes`, and `/swf-continue` use the unique semantic action advertised by the service; explicit IDs remain accepted when guidance is ambiguous. The `swf_query` tool exposes `operator-projection`, and `swf_command` accepts an `actionId` from that projection.
 
 ## Development
 

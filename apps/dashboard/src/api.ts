@@ -109,12 +109,12 @@ export class DashboardApi {
     return this.request<T>(`/api/v1/query?${query}`);
   }
 
-  command(command: Record<string, unknown>): Promise<void> {
-    return this.request<unknown>("/api/v1/commands", {
+  command<T = unknown>(command: Record<string, unknown>): Promise<T> {
+    return this.request<T>("/api/v1/commands", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(command),
-    }).then(() => undefined);
+    });
   }
 
   previewPruning(

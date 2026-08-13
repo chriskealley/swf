@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { OperatorAction, OperatorProjection } from "@swf/core";
 
 interface RunSummary {
   runId?: string;
@@ -21,7 +22,7 @@ interface SwfServiceClient {
     resource: string,
     input?: { projectId?: string; runId?: string },
   ): Promise<T>;
-  command(command: Record<string, unknown>): Promise<void>;
+  command(command: Record<string, unknown>): Promise<unknown>;
 }
 
 async function withClient<T>(
@@ -70,7 +71,7 @@ async function withClient<T>(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(command),
-      }).then(() => undefined),
+      }),
   });
 }
 
@@ -87,8 +88,16 @@ function text(value: unknown) {
   };
 }
 
+export function piGuidanceIdentity(projection: OperatorProjection) {
+  return {
+    stoppingPhaseId: projection.stoppingPhaseId,
+    attentionTypes: projection.attention.map(({ type }) => type),
+    actionTypes: projection.allowedActions.map(({ type }) => type),
+  };
+}
+
 export default function (pi: ExtensionAPI) {
-  let current: RunSummary | undefined;
+  let current: OperatorProjection | undefined;
 
   const refresh = async (ctx: {
     ui: {
@@ -112,39 +121,15 @@ export default function (pi: ExtensionAPI) {
       );
       const summary = runs[0];
       if (summary?.runId) {
-        const loaded = await withClient((service) =>
-          service.query<{
-            state: { run: RunSummary; phases: RunSummary["phases"] };
-          }>("run", { projectId: project.projectId, runId: summary.runId }),
+        current = await withClient((service) =>
+          service.query<OperatorProjection>("operator-projection", {
+            projectId: project.projectId,
+            runId: summary.runId,
+          }),
         );
-        current = {
-          ...loaded.state.run,
-          phases: loaded.state.phases,
-          costs: await withClient((service) =>
-            service.query("costs", {
-              projectId: project.projectId,
-              runId: summary.runId,
-            }),
-          ),
-        };
       } else current = undefined;
-      const phase =
-        current?.phases &&
-        Object.entries(current.phases).find(
-          ([, value]) =>
-            value.status === "running" || value.status === "blocked",
-        );
-      const checks = current?.phases
-        ? Object.values(current.phases).reduce(
-            (count, item) => count + Object.keys(item.checks ?? {}).length,
-            0,
-          )
-        : 0;
-      const spend = current?.costs
-        ? ` · $${((current.costs.exactUsd ?? 0) + (current.costs.estimatedUsd ?? 0)).toFixed(2)}${current.costs.unknown ? " +unknown" : ""}`
-        : "";
       const label = current
-        ? `SWF ${current.status ?? "unknown"}${phase ? ` · ${phase[0]} ${phase[1].status}` : ""} · ${checks} checks${spend}`
+        ? `SWF ${current.status} · ${current.stoppingPhaseId ?? current.currentPhaseId ?? "workflow"} · ${current.attention[0]?.title ?? current.summary}`
         : "SWF: no runs";
       ctx.ui.setStatus("swf", label);
       ctx.ui.setWidget("swf", [label]);
@@ -181,6 +166,7 @@ export default function (pi: ExtensionAPI) {
           "blocked-inputs",
           "model-routes",
           "phase-explanation",
+          "operator-projection",
           "check-discovery",
           "defaults",
         ]),
@@ -238,6 +224,7 @@ export default function (pi: ExtensionAPI) {
     ],
     parameters: objectSchema(
       {
+        actionId: { type: "string" },
         action: enumSchema([
           "start",
           "pause",
@@ -278,7 +265,7 @@ export default function (pi: ExtensionAPI) {
         rollbackBackupId: { type: "string" },
         authorized: { type: "boolean" },
       },
-      ["action"],
+      [],
     ) as never,
     renderCall(args, theme) {
       return {
@@ -306,7 +293,8 @@ export default function (pi: ExtensionAPI) {
     async execute(
       _id,
       params: {
-        action: string;
+        actionId?: string;
+        action?: string;
         projectId?: string;
         runId?: string;
         phaseId?: string;
@@ -327,13 +315,20 @@ export default function (pi: ExtensionAPI) {
       _update,
       ctx,
     ) {
-      await withClient((service) =>
+      const semantic = params.actionId
+        ? current?.allowedActions.find(
+            ({ actionId }) => actionId === params.actionId,
+          )
+        : undefined;
+      if (params.actionId && !semantic)
+        throw new Error("The requested semantic action is stale or unavailable");
+      const result = await withClient((service) =>
         service.command({
-          type: params.action,
-          projectId: params.projectId,
-          runId: params.runId,
-          phaseId: params.phaseId,
-          gateId: params.gateId,
+          type: semantic?.type ?? params.action,
+          projectId: semantic?.parameters.projectId ?? params.projectId,
+          runId: semantic?.parameters.runId ?? params.runId,
+          phaseId: semantic?.parameters.phaseId ?? params.phaseId,
+          gateId: semantic?.parameters.gateId ?? params.gateId,
           checkpointId: params.checkpointId,
           reason: params.reason,
           actorId: params.actorId ?? "pi-operator",
@@ -348,7 +343,7 @@ export default function (pi: ExtensionAPI) {
         }),
       );
       await refresh(ctx);
-      return text({ accepted: true, action: params.action });
+      return text(result);
     },
   });
 
@@ -359,11 +354,22 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify("SWF status refreshed", "info");
     },
   });
+  const currentAction = (type: OperatorAction["type"]) => {
+    const matches = current?.allowedActions.filter(
+      (action) => action.type === type,
+    ) ?? [];
+    return matches.length === 1 ? matches[0] : undefined;
+  };
   pi.registerCommand("swf-approve", {
     description: "Approve a gate through the SWF service",
     handler: async (args, ctx) => {
       const [projectId, runId, phaseId, gateId] = args.split(/\s+/);
-      if (!projectId || !runId || !phaseId || !gateId) {
+      const semantic = currentAction("approve");
+      const parameters = semantic?.parameters;
+      if (
+        (!projectId || !runId || !phaseId || !gateId) &&
+        !semantic
+      ) {
         ctx.ui.notify(
           "Usage: /swf-approve <project> <run> <phase> <gate>",
           "warning",
@@ -378,10 +384,10 @@ export default function (pi: ExtensionAPI) {
       await withClient((service) =>
         service.command({
           type: "approve",
-          projectId,
-          runId,
-          phaseId,
-          gateId,
+          projectId: parameters?.projectId ?? projectId,
+          runId: parameters?.runId ?? runId,
+          phaseId: parameters?.phaseId ?? phaseId,
+          gateId: parameters?.gateId ?? gateId,
           actorId: "pi-operator",
         }),
       );
@@ -392,7 +398,9 @@ export default function (pi: ExtensionAPI) {
     description: "Reject a gate through the SWF service",
     handler: async (args, ctx) => {
       const [projectId, runId, phaseId, gateId] = args.split(/\s+/);
-      if (!projectId || !runId || !phaseId || !gateId) {
+      const semantic = currentAction("reject");
+      const parameters = semantic?.parameters;
+      if ((!projectId || !runId || !phaseId || !gateId) && !semantic) {
         ctx.ui.notify(
           "Usage: /swf-reject <project> <run> <phase> <gate>",
           "warning",
@@ -405,10 +413,10 @@ export default function (pi: ExtensionAPI) {
       await withClient((service) =>
         service.command({
           type: "reject",
-          projectId,
-          runId,
-          phaseId,
-          gateId,
+          projectId: parameters?.projectId ?? projectId,
+          runId: parameters?.runId ?? runId,
+          phaseId: parameters?.phaseId ?? phaseId,
+          gateId: parameters?.gateId ?? gateId,
           actorId: "pi-operator",
           reason,
         }),
@@ -420,7 +428,9 @@ export default function (pi: ExtensionAPI) {
     description: "Request changes for a gate through the SWF service",
     handler: async (args, ctx) => {
       const [projectId, runId, phaseId, gateId] = args.split(/\s+/);
-      if (!projectId || !runId || !phaseId || !gateId) {
+      const semantic = currentAction("request-changes");
+      const parameters = semantic?.parameters;
+      if ((!projectId || !runId || !phaseId || !gateId) && !semantic) {
         ctx.ui.notify(
           "Usage: /swf-request-changes <project> <run> <phase> <gate>",
           "warning",
@@ -434,12 +444,32 @@ export default function (pi: ExtensionAPI) {
       await withClient((service) =>
         service.command({
           type: "request-changes",
-          projectId,
-          runId,
-          phaseId,
-          gateId,
+          projectId: parameters?.projectId ?? projectId,
+          runId: parameters?.runId ?? runId,
+          phaseId: parameters?.phaseId ?? phaseId,
+          gateId: parameters?.gateId ?? gateId,
           actorId: "pi-operator",
           reason,
+        }),
+      );
+      await refresh(ctx);
+    },
+  });
+  pi.registerCommand("swf-continue", {
+    description: "Continue the current SWF run using service guidance",
+    handler: async (_args, ctx) => {
+      const semantic =
+        currentAction("continue-run") ?? currentAction("run-phase");
+      if (!semantic) {
+        ctx.ui.notify("No unique continuation action is currently available", "warning");
+        return;
+      }
+      await withClient((service) =>
+        service.command({
+          type: semantic.type === "run-phase" ? "next" : "run",
+          projectId: semantic.parameters.projectId,
+          changeName: semantic.parameters.changeName,
+          phaseId: semantic.parameters.phaseId,
         }),
       );
       await refresh(ctx);

@@ -41,7 +41,9 @@ import {
   assertChecksAdopted,
   assertLoopbackHttpEndpoint,
   auditOpenSpecTasks,
+  buildOperatorProjection,
   buildPhasePrompt,
+  classifyOperatorError,
   phaseContractFor,
   createRunEvent,
   enforcePrivatePermissions,
@@ -103,6 +105,8 @@ import {
   type EventType,
   type HarnessAdapter,
   type HostingAdapter,
+  type ClassifiedOperatorError,
+  type OperatorProjection,
   type RedactionOptions,
   type Run,
   type RunState,
@@ -140,6 +144,16 @@ export class ServiceAuthenticationError extends Error {
   constructor() {
     super("SWF service credentials are required");
     this.name = "ServiceAuthenticationError";
+  }
+}
+
+export class OperatorCommandError extends Error {
+  constructor(
+    readonly classified: ClassifiedOperatorError,
+    readonly projection?: OperatorProjection,
+  ) {
+    super(classified.message);
+    this.name = "OperatorCommandError";
   }
 }
 
@@ -457,6 +471,7 @@ export interface ServiceQuery {
     | "exploration"
     | "model-routes"
     | "phase-explanation"
+    | "operator-projection"
     | "check-discovery"
     | "defaults";
   projectId?: string;
@@ -1005,6 +1020,82 @@ export class SwfService {
     });
   }
 
+  private async operatorProjection(
+    projectId: string,
+    runId: string,
+  ): Promise<OperatorProjection> {
+    const { project, store } = await this.runStore(projectId);
+    const state = (await store.load(runId)).state;
+    const location = await findProjectRoot(project.root);
+    if (!location?.initialized)
+      throw new Error("Operator projection requires initialized configuration");
+    const settings = await loadProjectDeliverySettings(
+      location,
+      state.run.workflowId,
+      state.run.policyId ?? "manual",
+    );
+    const budgets = await this.budgetReport(projectId, runId).catch(() => []);
+    const failures: Array<{
+      category: "configuration";
+      code: string;
+      message: string;
+      phaseId?: string;
+      retryable: false;
+    }> = [];
+    const execution = await loadProjectExecutionSettings(
+      location,
+      state.run.workflowId,
+      state.run.policyId ?? "manual",
+    ).catch(() => undefined);
+    if (execution) {
+      for (const phase of execution.workflow.phases) {
+        const profile = execution.profiles[phase.profile];
+        if (!profile?.modelTier) continue;
+        const diagnostic = diagnoseModelRoutes({
+          tiers: [profile.modelTier],
+          harnesses: [profile.harness ?? "pi"],
+          sources: {
+            project: { modelTiers: execution.modelRouting.modelTiers },
+          },
+        })[0];
+        if (diagnostic?.status === "unresolved")
+          failures.push({
+            category: "configuration",
+            code: "MODEL_ROUTE_UNRESOLVED",
+            message:
+              diagnostic.message ??
+              `Model route ${diagnostic.path} is unresolved`,
+            phaseId: phase.id,
+            retryable: false,
+          });
+      }
+      const metadata = await readTemplateMetadata(location.configDirectory);
+      if (metadata) {
+        const projectConfig = await readProjectConfig(location);
+        const conflicts = (
+          await inspectTemplateDiff({
+            configDirectory: location.configDirectory,
+            adopted: metadata,
+            installed: defaultTemplateFiles(projectConfig.projectId),
+          })
+        ).filter(({ status }) => status === "conflict");
+        if (conflicts.length)
+          failures.push({
+            category: "configuration",
+            code: "TEMPLATE_ATTENTION_REQUIRED",
+            message: `Default template conflicts require review: ${conflicts.map(({ path }) => path).join(", ")}`,
+            retryable: false,
+          });
+      }
+    }
+    return buildOperatorProjection({
+      state,
+      workflow: settings.workflow,
+      budgets,
+      failures,
+    });
+  }
+
   private async overview(): Promise<unknown> {
     const projects = await this.registry.reconcile();
     const summaries = await Promise.all(
@@ -1259,6 +1350,8 @@ export class SwfService {
       return this.readOutput(project, query.runId, query.ref, query.raw);
     }
     const loaded = await store.load(query.runId);
+    if (query.resource === "operator-projection")
+      return this.operatorProjection(query.projectId, query.runId);
     if (query.resource === "phase-explanation")
       return this.queryUnredacted({ ...query, resource: "phases" });
     switch (query.resource) {
@@ -3695,7 +3788,53 @@ export class SwfService {
   }
 
   async command(command: ServiceCommand): Promise<unknown> {
-    return this.redactor.value(await this.commandUnredacted(command));
+    try {
+      const result = await this.commandUnredacted(command);
+      const projectId = "projectId" in command ? command.projectId : undefined;
+      let runId =
+        "runId" in command
+          ? command.runId
+          : result && typeof result === "object" && "runId" in result
+            ? String(result.runId)
+            : undefined;
+      if (!runId && projectId && "changeName" in command) {
+        const { store } = await this.runStore(projectId);
+        runId = await store.findRunByChangeIdentity(
+          `openspec/changes/${command.changeName}`,
+        );
+      }
+      if (!projectId || !runId) return this.redactor.value(result);
+      const projection = await this.operatorProjection(projectId, runId);
+      const compatible =
+        result && typeof result === "object" && !Array.isArray(result)
+          ? result
+          : result === undefined
+            ? {}
+            : { value: result };
+      return this.redactor.value({ ...compatible, projection });
+    } catch (error) {
+      const projectId = "projectId" in command ? command.projectId : undefined;
+      let runId = "runId" in command ? command.runId : undefined;
+      if (!runId && projectId && "changeName" in command) {
+        const { store } = await this.runStore(projectId);
+        runId = await store
+          .findRunByChangeIdentity(`openspec/changes/${command.changeName}`)
+          .catch(() => undefined);
+      }
+      const projection =
+        projectId && runId
+          ? await this.operatorProjection(projectId, runId).catch(
+              () => undefined,
+            )
+          : undefined;
+      throw new OperatorCommandError(
+        classifyOperatorError({
+          error,
+          recoveryActions: projection?.allowedActions ?? [],
+        }),
+        projection,
+      );
+    }
   }
 
   private async commandUnredacted(command: ServiceCommand): Promise<unknown> {

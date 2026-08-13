@@ -122,6 +122,12 @@ Run exports and the committed OpenSpec evidence dossier are complementary backup
 
 Start the service and dashboard, then enter the loopback service endpoint and bearer credential from the private service metadata. Credentials remain in browser memory and are sent only to loopback HTTP endpoints. The dashboard provides project/run timelines, retained output, artifact and delivery inspection, cost provenance, adapter capabilities, safe run controls, and preview-plus-confirmation retention controls.
 
+## Operator guidance and progress
+
+Use `swf status <change>` as the primary recovery and orientation command. It reports the actual stopping phase, typed attention, retained evidence, and service-authorized next actions. Workflow commands stream bounded durable milestones; stream loss does not change execution and the final projection remains authoritative. Human progress goes to stderr, while `--json` emits one versioned document to stdout and never prompts.
+
+For unattended operation, pass `--no-interactive` explicitly. TTY approval menus require `--interactive`, default to exiting without mutation, preserve actor/reason fields, and ask for confirmation before decisions.
+
 ## Autonomous-policy implications
 
 Autonomous execution and automatic merge are separate authorizations. Automatic gates require recorded delegated human authorization, and automatic pull-request merging requires delivery authorization and repository support. Sensitive-path, secret-finding, destructive-operation, elevated-risk, and budget rules can force manual intervention. Direct merge is disabled unless both the workflow selects it and resolved policy has `allowDirectMerge: true`.

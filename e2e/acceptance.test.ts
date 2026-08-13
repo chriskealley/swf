@@ -199,11 +199,15 @@ async function configurePlanningFactory(root: string): Promise<void> {
   );
   await writeFile(
     join(root, ".swf", "workflows", "default.yaml"),
-    `schemaVersion: 1\nid: default\ndescription: CLI service acceptance\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: [structured-events]\n    work:\n      - id: planning-agent\n        type: agent\n        profile: planner\n        options: {}\n      - id: planning-command\n        type: command\n        command: test -f openspec/changes/*/proposal.md\n        options: {}\n    checks:\n      - id: planning-files\n        type: command\n        required: true\n        command: test -f openspec/changes/*/tasks.md\n        options: {}\n    gate:\n      mode: automatic\n  - id: building\n    title: Building\n    profile: planner\n    guidelines: []\n    requiredCapabilities: []\n    work:\n      - id: building-command\n        type: command\n        command: test -f openspec/changes/*/proposal.md\n        options: {}\n    checks: []\n    gate:\n      mode: automatic\ndelivery:\n  mode: local-branch\n  mergeMethod: merge\n`,
+    `schemaVersion: 1\nid: default\ndescription: CLI service acceptance\nphases:\n  - id: planning\n    title: Planning\n    profile: planner\n    guidelines: []\n    requiredCapabilities: [structured-events]\n    work:\n      - id: planning-agent\n        type: agent\n        profile: planner\n        options: {}\n      - id: planning-command\n        type: command\n        command: test -f openspec/changes/*/proposal.md\n        options: {}\n    checks:\n      - id: planning-files\n        type: command\n        required: true\n        command: test -f openspec/changes/*/tasks.md\n        options: {}\n    gate:\n      mode: manual\n  - id: building\n    title: Building\n    profile: planner\n    guidelines: []\n    requiredCapabilities: []\n    work:\n      - id: building-command\n        type: command\n        command: test -f openspec/changes/*/proposal.md\n        options: {}\n    checks: []\n    gate:\n      mode: automatic\ndelivery:\n  mode: local-branch\n  mergeMethod: merge\n`,
   );
   await writeFile(
     join(root, ".swf", "policies", "manual.yaml"),
     `schemaVersion: 1\nid: manual\napprovalMode: manual\nmaxAttempts: 1\nriskOverrides: []\n`,
+  );
+  await writeFile(
+    join(root, ".swf", "policies", "autonomous.yaml"),
+    `schemaVersion: 1\nid: autonomous\napprovalMode: automatic\nmaxAttempts: 1\nriskOverrides: []\n`,
   );
   await writeFile(
     join(root, ".swf", "profiles", "planner.yaml"),
@@ -248,14 +252,26 @@ describe("disposable operational acceptance", () => {
             >)
           : {};
         let result: unknown;
-        if (request.url === "/api/v1/projects") {
+        const requestUrl = new URL(
+          request.url ?? "/",
+          "http://127.0.0.1",
+        );
+        if (requestUrl.pathname === "/api/v1/projects") {
           result = await service.registerProject({
             projectId: String(body.projectId),
             displayName: String(body.displayName),
             root: String(body.root),
           });
-        } else if (request.url === "/api/v1/commands") {
+        } else if (requestUrl.pathname === "/api/v1/commands") {
           result = await service.command(body as never);
+        } else if (requestUrl.pathname === "/api/v1/query") {
+          result = await service.query({
+            resource: requestUrl.searchParams.get("resource") as never,
+            projectId: requestUrl.searchParams.get("projectId") ?? undefined,
+            runId: requestUrl.searchParams.get("runId") ?? undefined,
+            phaseId: requestUrl.searchParams.get("phaseId") ?? undefined,
+            ref: requestUrl.searchParams.get("ref") ?? undefined,
+          });
         } else {
           response.statusCode = 404;
           throw new Error("Not found");
@@ -305,7 +321,7 @@ describe("disposable operational acceptance", () => {
         ],
         {
           cwd: root,
-          env: { SWF_SERVICE_HOME: serviceHome },
+          env: { SWF_SERVICE_HOME: serviceHome, CONSOLA_LEVEL: "5" },
           timeoutMs: 30_000,
         },
       );
@@ -340,8 +356,56 @@ describe("disposable operational acceptance", () => {
       };
       expect(output).toMatchObject({
         schemaVersion: 1,
-        result: { status: "paused" },
+        result: {
+          status: "blocked",
+          projection: {
+            stoppingPhaseId: "planning",
+            attention: [{ type: "manual-approval" }],
+          },
+        },
       });
+      const humanStatus = await new NodeCommandRunner().run(
+        process.execPath,
+        [
+          "--import",
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/loader.mjs"),
+          join(repositoryRoot, "apps/cli/src/main.ts"),
+          "status",
+          "cli-service-entry",
+          "--no-interactive",
+        ],
+        {
+          cwd: root,
+          env: { SWF_SERVICE_HOME: serviceHome, CONSOLA_LEVEL: "5" },
+          timeoutMs: 30_000,
+        },
+      );
+      expect(humanStatus.code, humanStatus.stderr).toBe(0);
+      expect(humanStatus.stdout).toContain("Approval required: planning");
+      expect(humanStatus.stdout).toContain("swf approve cli-service-entry");
+
+      const approved = await new NodeCommandRunner().run(
+        process.execPath,
+        [
+          "--import",
+          join(repositoryRoot, "apps/cli/node_modules/tsx/dist/loader.mjs"),
+          join(repositoryRoot, "apps/cli/src/main.ts"),
+          "approve",
+          "cli-service-entry",
+          "--actor",
+          "acceptance-operator",
+          "--reason",
+          "Planning evidence reviewed",
+          "--no-interactive",
+        ],
+        {
+          cwd: root,
+          env: { SWF_SERVICE_HOME: serviceHome, CONSOLA_LEVEL: "5" },
+          timeoutMs: 30_000,
+        },
+      );
+      expect(approved.code, approved.stderr).toBe(0);
+      expect(approved.stdout).toContain("planning completed");
       const run = (await service.query({
         resource: "run",
         projectId,
@@ -363,22 +427,16 @@ describe("disposable operational acceptance", () => {
           join(repositoryRoot, "apps/cli/src/main.ts"),
           "next",
           "cli-service-entry",
-          "--json",
+          "--no-interactive",
         ],
         {
           cwd: root,
-          env: { SWF_SERVICE_HOME: serviceHome },
+          env: { SWF_SERVICE_HOME: serviceHome, CONSOLA_LEVEL: "5" },
           timeoutMs: 30_000,
         },
       );
       expect(next.code, next.stderr).toBe(0);
-      expect(JSON.parse(next.stdout)).toMatchObject({
-        result: {
-          runId: output.result.runId,
-          phaseId: "building",
-          status: "completed",
-        },
-      });
+      expect(next.stdout).toContain("cli-service-entry completed");
 
       const automatic = await new NodeCommandRunner().run(
         process.execPath,
@@ -389,6 +447,9 @@ describe("disposable operational acceptance", () => {
           "automatic-entry",
           "--description",
           "Run every eligible phase",
+          "--policy",
+          "autonomous",
+          "--authorize-autonomous",
           "--json",
         ],
         {
