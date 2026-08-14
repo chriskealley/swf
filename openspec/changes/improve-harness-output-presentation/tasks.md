@@ -8,7 +8,7 @@
 
 ## 2. Private Protocol Capture and Bridge Foundation
 
-- [ ] 2.1 Implement an owned harness bridge process that spawns a native harness with controlled stdin, stdout, stderr, signals, cwd, and environment
+- [ ] 2.1 Pin one compatible Effect v4 beta package set and implement an owned harness bridge process whose Effect services and Layers spawn a native harness with controlled stdin, stdout, stderr, signals, cwd, and environment
 - [ ] 2.2 Create private invocation metadata, native stream, normalized stream, and cursor files with `0600` permissions under the run raw-output directory
 - [ ] 2.3 Implement protocol-specific incremental framing with partial-record buffering and Pi-compliant LF semantics that preserve U+2028 and U+2029
 - [ ] 2.4 Parse native records in memory, apply structural redaction before persistence and display, and retain bounded diagnostics for malformed records
@@ -16,6 +16,10 @@
 - [ ] 2.6 Forward cancellation and termination safely and record bridge processes, files, and ephemeral resources in run ownership
 - [ ] 2.7 Isolate renderer failure from capture and normalization failure and publish explicit presentation-degraded diagnostics
 - [ ] 2.8 Add bridge tests for framing, backpressure, partial records, process exit, signals, stderr, permissions, redaction, and renderer degradation
+- [ ] 2.9 Define Promise-based bridge and lifecycle boundaries for existing scheduler, service, and adapter callers so Effect remains isolated from unrelated packages during migration
+- [ ] 2.10 Supervise bridge invocations in service- or run-owned Effect scopes so blocked invocations remain addressable after a scheduler response and close only on settlement, cancellation, cleanup, or shutdown
+- [ ] 2.11 Replace manual bridge timeout, polling, retry, and cancellation coordination with Effect schedules, interruption, and exactly-once scoped finalizers
+- [ ] 2.12 Add virtual-time lifecycle tests proving normal settlement, blocked-input continuation, timeout cancellation, graceful safe-boundary drain, forced interruption and join, exactly-once finalization, and no late writes after shutdown reconciliation begins
 
 ## 3. Pi RPC Codec and Migration
 
@@ -59,11 +63,11 @@
 - [ ] 7.1 Add incremental normalized-stream consumption with durable cursors and bounded polling or private transport
 - [ ] 7.2 Publish significant normalized milestones through authenticated ordered service events while coalescing high-frequency updates
 - [ ] 7.3 Build invocation status, usage, evidence summaries, blocked input, and settlement from normalized events rather than pane content
-- [ ] 7.4 Reconcile active bridge and harness processes after service restart and resume from the last durable cursor without duplicate milestones
+- [ ] 7.4 Reconcile active bridge and harness processes after service restart from durable ownership records, recreate service/run Effect supervision, and resume from the last durable cursor without duplicate milestones
 - [ ] 7.5 Rebuild missing cursor metadata from framed retained records and durable normalized identities
 - [ ] 7.6 Fail closed with actionable compatibility evidence when required capture or normalization semantics cannot be recovered
 - [ ] 7.7 Integrate normalized progress with CLI and dashboard event consumers when `improve-cli-operator-experience` is available
-- [ ] 7.8 Add recovery tests for service restart, bridge survival, missing cursor, duplicate records, truncated trailing records, renderer failure, and missing native files
+- [ ] 7.8 Add recovery tests for service restart, bridge survival beyond the prior Effect runtime, missing cursor, duplicate records, truncated trailing records, renderer failure, and missing native files
 
 ## 8. Inspection, Retention, and Security
 
@@ -87,6 +91,6 @@
 - [ ] 10.1 Add end-to-end simulated runs proving compact readable panes and complete private capture for Pi, Claude, and Codex
 - [ ] 10.2 Verify pane truncation and unrelated pane text cannot alter parsing, settlement, evidence, or usage
 - [ ] 10.3 Verify quiet, normal, verbose, and protocol output behavior in TTY and non-TTY Herdr contexts
-- [ ] 10.4 Verify blocked input, cancellation, retry, resume, settlement, malformed protocols, service restart, retention, and cleanup across supported capabilities
+- [ ] 10.4 Verify blocked input, cancellation, retry, resume, settlement, malformed protocols, service restart, graceful and forced shutdown joining, retention, and cleanup across supported capabilities
 - [ ] 10.5 Run formatting, lint, type checking, unit, integration, E2E, OpenSpec validation, and Git whitespace verification
 - [ ] 10.6 Perform opt-in live Pi, Claude, and Codex smoke tests where installed and authenticated, retaining compact-output screenshots or text evidence and private protocol verification without committing raw transcripts

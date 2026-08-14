@@ -54,7 +54,33 @@ The bridge pre-creates private invocation files, records its process as an owned
 
 A shell `tee | jq` pipeline was rejected because it cannot provide robust framing, ownership, redaction, bidirectional control, normalized indexes, renderer degradation handling, or cross-platform process semantics.
 
-### 2. Store raw and normalized streams separately
+### 2. Use Effect v4 for bridge and invocation lifecycles
+
+The harness bridge and its in-process service integration will use the Effect v4 beta runtime. This is an intentional experimental dependency choice: the project accepts beta API movement in exchange for evaluating Effect's structured concurrency, scopes, typed failures, scheduling, and deterministic lifecycle tests in the part of SWF where those capabilities have the clearest value.
+
+Effect owns live execution, not durable workflow truth:
+
+```text
+durable run events and reducer     authoritative across restarts
+                 │
+                 ▼
+service/run Effect scope           owns live bridge resources
+                 │
+                 ├── supervised invocation fiber
+                 ├── blocked-input coordination
+                 ├── timeout/retry schedule
+                 └── finalizers for cancellation and cleanup
+```
+
+Bridge and invocation resources belong to a service or run scope rather than the lexical scope of one scheduler call. A blocked invocation may outlive a scheduler response and remain addressable for operator input; returning `blocked` must not close its bridge, native process, or control channel. Terminal settlement, explicit cancellation, run cleanup, or service shutdown closes the owning scope.
+
+Graceful shutdown stops admission and joins owned invocation fibers at their declared safe boundaries. Force shutdown interrupts owned fibers, runs their cancellation and cleanup finalizers exactly once, and joins them before durable shutdown reconciliation begins. This ordering prevents late invocation writes from racing with run pausing, snapshot rebuilding, or service lock removal.
+
+Effect services and Layers will provide bridge process control, clock, filesystem access, protocol capture, normalization, and lifecycle supervision. Existing scheduler, service API, and adapter callers retain Promise-based boundaries during migration so Effect does not need to spread through unrelated packages. Virtual time will cover polling, timeout, retry, and shutdown tests.
+
+Effect `Ref`, `SubscriptionRef`, and related in-memory primitives are not substitutes for the durable `RunEventStore`, append-only normalized files, or cursor metadata. Durable recovery continues to derive from persisted events and ownership records, including after the Effect runtime itself has terminated.
+
+### 3. Store raw and normalized streams separately
 
 Each invocation receives bounded metadata and append-only streams under its private run state:
 
@@ -73,7 +99,7 @@ Files are mode `0600`; parent directories remain private. Native records are fra
 
 The portable dossier includes compact invocation conclusions, model/harness identity, normalized usage, and evidence references—not native streams, partial messages, or thinking signatures.
 
-### 3. Define a common event model with explicit capability gaps
+### 4. Define a common event model with explicit capability gaps
 
 A normalized event envelope carries project, run, phase, work unit, invocation, harness, native session, source cursor, timestamp, and event-specific data.
 
@@ -106,7 +132,7 @@ Adapters map native records to this model through version-aware codecs. The comm
 
 High-frequency deltas are retained natively but coalesced before durable service publication and human rendering.
 
-### 4. Make settlement explicit
+### 5. Make settlement explicit
 
 The normalizer distinguishes:
 
@@ -126,7 +152,7 @@ retry/compaction/follow-up pending?
 
 Initial Herdr idle state after prompt submission is not completion. Pi requires `agent_settled` or equivalent terminal evidence after observed start. Claude and Codex mappings use their terminal result/process semantics plus pending continuation state. Unknown required terminal shapes fail closed with protocol diagnostics.
 
-### 5. Render normalized events, never native objects
+### 6. Render normalized events, never native objects
 
 The bridge feeds normalized events into a renderer configured as:
 
@@ -153,13 +179,13 @@ Completed in 2m 41s · 21,282 tokens · $0.021
 
 Renderers remove repeated partial snapshots, internal protocol IDs, encrypted thinking signatures, full message objects, and unbounded tool output. Tool arguments are summarized by harness-aware rules; unknown tools receive a generic bounded description. Explicit inspection remains available through authenticated raw-output APIs.
 
-### 6. Keep presentation disposable and failure-isolated
+### 7. Keep presentation disposable and failure-isolated
 
 The service adapter tails or incrementally reads the normalized stream, not pane output. Presentation can be cleared, truncated, recolored, or changed without affecting execution. A renderer error produces a presentation-degraded diagnostic and falls back to quiet milestones where possible; it does not fail otherwise healthy harness work.
 
 Conversely, capture or normalization failure is operationally significant because machine correctness depends on it. The service fails closed if required lifecycle records cannot be established.
 
-### 7. Integrate normalized milestones with service progress
+### 8. Integrate normalized milestones with service progress
 
 Significant normalized events are projected into the existing authenticated ordered event stream. CLI and dashboard progress can consume the same common milestones, while Herdr panes render locally from the bridge.
 
@@ -174,13 +200,13 @@ normalized event
 
 This complements `improve-cli-operator-experience`: that change explains workflow attention and next actions; this change explains what an active harness is doing. Neither client derives workflow truth from visual output.
 
-### 8. Preserve harness-specific controls
+### 9. Preserve harness-specific controls
 
 Pi bridge mode remains bidirectional for prompt, steer/follow-up where used, abort, extension UI requests, and settlement. Claude and Codex retain their native one-shot and resume mechanisms. Adapter capability declarations continue to determine which normalized actions are valid.
 
 Native launch options are reviewed for avoidable verbosity. For example, Claude's explicit `--verbose` should be retained only if required for correct stream semantics in the supported installed version. Removing a flag is not considered a substitute for channel separation.
 
-### 9. Retention and inspection remain explicit
+### 10. Retention and inspection remain explicit
 
 Native files participate in existing raw retention previews and confirmation. Pruning preserves normalized milestones, invocation state, usage, final summaries, cursors needed to identify terminal state, and audit markers that native output is unavailable.
 
@@ -189,6 +215,9 @@ Authenticated inspection supports bounded invocation/cursor ranges and redaction
 ## Risks / Trade-offs
 
 - **Bridge adds another process and failure surface** → Keep it small, dependency-light, owned, health-reported, and covered by live protocol fixtures.
+- **Effect v4 is a beta dependency with a moving API** → Pin all Effect packages to one exact beta version, isolate Effect behind bridge and lifecycle interfaces, keep Promise boundaries, and require an explicit dependency-upgrade verification step.
+- **A blocked scheduler result may accidentally close its invocation scope** → Attach invocation resources to the run/service supervisor and test that blocked input survives the scheduler return until terminal settlement or cancellation.
+- **Interrupted fibers may race durable shutdown reconciliation** → Force shutdown interrupts and joins every owned fiber before appending shutdown transitions, rebuilding snapshots, or releasing service ownership.
 - **Harness protocols evolve** → Version codecs, preserve unknown events natively, distinguish optional from required shapes, and fail closed on terminal ambiguity.
 - **Inline redaction can affect protocol fidelity** → Parse and normalize in memory first, structurally redact persisted values, and retain bounded metadata for parser diagnostics.
 - **High-frequency streams can consume storage** → Coalesce normalized updates, retain raw streams under configurable retention, and preserve existing previewed pruning.
@@ -200,14 +229,16 @@ Authenticated inspection supports bounded invocation/cursor ranges and redaction
 
 ## Migration Plan
 
-1. Define normalized schemas, codec contracts, stream metadata, cursors, and presentation configuration additively.
-2. Implement the bridge and fixture-driven codecs without changing default adapter launches.
-3. Migrate Pi first because it has the strictest bidirectional framing and noisiest stream; validate blocked input, cancellation, retry, and settlement.
-4. Migrate Claude stream-json and Codex JSONL while preserving resume and usage semantics.
-5. Switch service adapters from transcript parsing to normalized stream consumption.
-6. Enable `normal` compact pane presentation for new invocations, retaining an explicit protocol diagnostic fallback.
-7. Integrate normalized milestones with service progress and raw retention inspection.
-8. Remove obsolete transcript-parsing assumptions after all adapters and acceptance tests pass.
+1. Pin a compatible Effect v4 beta package set and establish bridge lifecycle services, Layers, Promise boundaries, and virtual-time test support.
+2. Define normalized schemas, codec contracts, stream metadata, cursors, and presentation configuration additively.
+3. Implement the scoped bridge and fixture-driven codecs without changing default adapter launches.
+4. Migrate Pi first because it has the strictest bidirectional framing and noisiest stream; validate blocked input, cancellation, retry, settlement, and scope survival.
+5. Migrate Claude stream-json and Codex JSONL while preserving resume and usage semantics.
+6. Switch service adapters from transcript parsing to normalized stream consumption.
+7. Replace manual active-work and bridge cancellation coordination with supervised fibers only after equivalent graceful and forced shutdown behavior is proven.
+8. Enable `normal` compact pane presentation for new invocations, retaining an explicit protocol diagnostic fallback.
+9. Integrate normalized milestones with service progress and raw retention inspection.
+10. Remove obsolete transcript-parsing assumptions after all adapters and acceptance tests pass.
 
 Rollback can restore direct harness commands and transcript parsing for a supported adapter while leaving additive retained normalized files readable. No existing durable events need rewriting.
 

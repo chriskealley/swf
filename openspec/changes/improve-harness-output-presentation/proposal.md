@@ -5,6 +5,7 @@ SWF launches Pi, Claude Code, and Codex CLI in structured machine modes but expo
 ## What Changes
 
 - Separate each harness's complete machine protocol channel from its human-visible Herdr pane presentation.
+- Use the Effect v4 beta runtime inside the harness bridge for scoped resource ownership, supervised invocation fibers, interruption, timeout, retry, and lifecycle testing while preserving Promise-based boundaries for existing callers.
 - Normalize Pi RPC, Claude stream-json, Codex JSONL, and future adapter events into a shared SWF harness lifecycle model.
 - Render compact, regular-session-like milestones in owned Herdr panes instead of raw protocol objects.
 - Add `quiet`, `normal`, `verbose`, and diagnostic `protocol` presentation levels with safe defaults and configuration provenance.
@@ -29,6 +30,7 @@ None. The repository does not yet contain archived main capability specs for har
 
 - Affects core harness event types, adapter interfaces, Pi/Claude/Codex launch commands, Herdr execution, invocation observation, collection, cancellation, and recovery.
 - Adds a bridge or equivalent transport between harness subprocesses, private raw event storage, SWF normalization, and compact terminal rendering.
+- Adds Effect v4 beta as an intentional experimental runtime dependency for the bridge and service-owned harness lifecycle; it does not replace SWF's durable event store, schemas, or authoritative run-state reducer.
 - Affects invocation artifacts, usage accounting, retention, redaction, service event streaming, diagnostics, and live harness acceptance tests.
 - May consume the shared operator projection and progress presentation introduced by `improve-cli-operator-experience`, but remains independently useful for Herdr pane readability.
 - Does not replace native machine protocols, weaken audit retention, expose raw thinking signatures, or make pane text a source of workflow truth.
