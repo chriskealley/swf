@@ -1,22 +1,22 @@
 ## 1. Normalized Harness Event Model
 
-- [ ] 1.1 Define versioned envelopes and event schemas for process, readiness, prompt, work, message, tool, blocked input, usage, retry, compaction, completion, settlement, cancellation, failure, and diagnostics
-- [ ] 1.2 Include project, run, phase, work unit, invocation, harness, native session, source cursor, timestamp, and usage quality correlation fields
-- [ ] 1.3 Define adapter codec interfaces for native framing, parsing, normalization, terminal semantics, capability gaps, and optional versus required events
-- [ ] 1.4 Add stable native-event identities and idempotent normalized-event handling for replay and recovery
-- [ ] 1.5 Add schema and reducer tests for ordering, correlation, duplicate suppression, unknown optional events, and incompatible required events
+- [x] 1.1 Define versioned envelopes and event schemas for process, readiness, prompt, work, message, tool, blocked input, usage, retry, compaction, completion, settlement, cancellation, failure, and diagnostics
+- [x] 1.2 Include project, run, phase, work unit, invocation, harness, native session, source cursor, timestamp, and usage quality correlation fields
+- [x] 1.3 Define adapter codec interfaces for native framing, parsing, normalization, terminal semantics, capability gaps, and optional versus required events
+- [x] 1.4 Add stable native-event identities and idempotent normalized-event handling for replay and recovery
+- [x] 1.5 Add schema and reducer tests for ordering, correlation, duplicate suppression, unknown optional events, and incompatible required events
 
 ## 2. Private Protocol Capture and Bridge Foundation
 
-- [ ] 2.1 Pin one compatible Effect v4 beta package set and implement an owned harness bridge process whose Effect services and Layers spawn a native harness with controlled stdin, stdout, stderr, signals, cwd, and environment
-- [ ] 2.2 Create private invocation metadata, native stream, normalized stream, and cursor files with `0600` permissions under the run raw-output directory
-- [ ] 2.3 Implement protocol-specific incremental framing with partial-record buffering and Pi-compliant LF semantics that preserve U+2028 and U+2029
-- [ ] 2.4 Parse native records in memory, apply structural redaction before persistence and display, and retain bounded diagnostics for malformed records
+- [x] 2.1 Pin one compatible Effect v4 beta package set and implement an owned harness bridge process whose Effect services and Layers spawn a native harness with controlled stdin, stdout, stderr, signals, cwd, and environment
+- [x] 2.2 Create private invocation metadata, native stream, normalized stream, and cursor files with `0600` permissions under the run raw-output directory
+- [x] 2.3 Implement protocol-specific incremental framing with partial-record buffering and Pi-compliant LF semantics that preserve U+2028 and U+2029
+- [x] 2.4 Parse native records in memory, apply structural redaction before persistence and display, and retain bounded diagnostics for malformed records
 - [ ] 2.5 Relay bidirectional commands and native responses without exposing prompts, credentials, or protocol payloads in process titles or pane output
 - [ ] 2.6 Forward cancellation and termination safely and record bridge processes, files, and ephemeral resources in run ownership
-- [ ] 2.7 Isolate renderer failure from capture and normalization failure and publish explicit presentation-degraded diagnostics
+- [x] 2.7 Isolate renderer failure from capture and normalization failure and publish explicit presentation-degraded diagnostics
 - [ ] 2.8 Add bridge tests for framing, backpressure, partial records, process exit, signals, stderr, permissions, redaction, and renderer degradation
-- [ ] 2.9 Define Promise-based bridge and lifecycle boundaries for existing scheduler, service, and adapter callers so Effect remains isolated from unrelated packages during migration
+- [x] 2.9 Define Promise-based bridge and lifecycle boundaries for existing scheduler, service, and adapter callers so Effect remains isolated from unrelated packages during migration
 - [ ] 2.10 Supervise bridge invocations in service- or run-owned Effect scopes so blocked invocations remain addressable after a scheduler response and close only on settlement, cancellation, cleanup, or shutdown
 - [ ] 2.11 Replace manual bridge timeout, polling, retry, and cancellation coordination with Effect schedules, interruption, and exactly-once scoped finalizers
 - [ ] 2.12 Add virtual-time lifecycle tests proving normal settlement, blocked-input continuation, timeout cancellation, graceful safe-boundary drain, forced interruption and join, exactly-once finalization, and no late writes after shutdown reconciliation begins
@@ -48,13 +48,13 @@
 
 ## 6. Compact Herdr Pane Rendering
 
-- [ ] 6.1 Add versioned presentation configuration and precedence for `quiet`, `normal`, `verbose`, and `protocol` levels with `normal` as the generated default
-- [ ] 6.2 Implement a shared renderer for invocation header, readiness, work, summarized tools, blocked attention, retry, failure, completion, duration, and usage
-- [ ] 6.3 Add harness-aware summaries for built-in read, write, edit, shell, search, and validation tools without exposing full arguments by default
-- [ ] 6.4 Collapse repeated partial messages and accumulated tool updates and omit signatures, internal IDs, native objects, and raw thinking outside protocol mode
-- [ ] 6.5 Bound and redact commands, paths, message text, and tool output in verbose mode and provide explicit retained-output references
-- [ ] 6.6 Implement quiet rendering with only startup, attention, failure, and final summary milestones
-- [ ] 6.7 Implement explicit audited protocol rendering of redacted native records with a machine-output warning
+- [x] 6.1 Add versioned presentation configuration and precedence for `quiet`, `normal`, `verbose`, and `protocol` levels with `normal` as the generated default
+- [x] 6.2 Implement a shared renderer for invocation header, readiness, work, summarized tools, blocked attention, retry, failure, completion, duration, and usage
+- [x] 6.3 Add harness-aware summaries for built-in read, write, edit, shell, search, and validation tools without exposing full arguments by default
+- [x] 6.4 Collapse repeated partial messages and accumulated tool updates and omit signatures, internal IDs, native objects, and raw thinking outside protocol mode
+- [x] 6.5 Bound and redact commands, paths, message text, and tool output in verbose mode and provide explicit retained-output references
+- [x] 6.6 Implement quiet rendering with only startup, attention, failure, and final summary milestones
+- [x] 6.7 Implement explicit audited protocol rendering of redacted native records with a machine-output warning
 - [ ] 6.8 Set informative owned pane labels and titles containing change or run, phase, harness, and normalized status
 - [ ] 6.9 Add semantic renderer tests across Pi, Claude, Codex, custom tools, long output, secrets, retries, failures, and usage-quality variants
 
@@ -64,7 +64,7 @@
 - [ ] 7.2 Publish significant normalized milestones through authenticated ordered service events while coalescing high-frequency updates
 - [ ] 7.3 Build invocation status, usage, evidence summaries, blocked input, and settlement from normalized events rather than pane content
 - [ ] 7.4 Reconcile active bridge and harness processes after service restart from durable ownership records, recreate service/run Effect supervision, and resume from the last durable cursor without duplicate milestones
-- [ ] 7.5 Rebuild missing cursor metadata from framed retained records and durable normalized identities
+- [x] 7.5 Rebuild missing cursor metadata from framed retained records and durable normalized identities
 - [ ] 7.6 Fail closed with actionable compatibility evidence when required capture or normalization semantics cannot be recovered
 - [ ] 7.7 Integrate normalized progress with CLI and dashboard event consumers when `improve-cli-operator-experience` is available
 - [ ] 7.8 Add recovery tests for service restart, bridge survival beyond the prior Effect runtime, missing cursor, duplicate records, truncated trailing records, renderer failure, and missing native files
