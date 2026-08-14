@@ -25,6 +25,7 @@ import {
   GitClient,
   GitCommandError,
   HarnessWorkExecutor,
+  HarnessEventSchema,
   HerdrClient,
   NodeCommandRunner,
   PiHarnessAdapter,
@@ -820,6 +821,38 @@ export class SwfService {
         data: { ...input },
       });
     }
+  }
+
+  reportHarnessProgress(
+    projectId: string,
+    invocation: AdapterInvocation,
+    observation: AdapterObservation,
+  ): void {
+    let pendingMessage: ReturnType<typeof HarnessEventSchema.parse> | undefined;
+    const publish = (event: ReturnType<typeof HarnessEventSchema.parse>) => {
+      this.broker.publish({
+        type: "harness.progress",
+        projectId,
+        runId: invocation.runId,
+        data: { event },
+      });
+    };
+    const flushMessage = () => {
+      if (pendingMessage) publish(pendingMessage);
+      pendingMessage = undefined;
+    };
+    for (const candidate of observation.structuredEvents) {
+      const parsed = HarnessEventSchema.safeParse(candidate);
+      if (!parsed.success) continue;
+      if (parsed.data.type === "toolProgress") continue;
+      if (parsed.data.type === "messageSummary") {
+        pendingMessage = parsed.data;
+        continue;
+      }
+      flushMessage();
+      publish(parsed.data);
+    }
+    flushMessage();
   }
 
   blockedInputs() {
@@ -2422,13 +2455,46 @@ export class SwfService {
       new HarnessWorkExecutor(
         registry,
         {
+          projectId: project.projectId,
+          stateDirectory: project.stateDirectory,
           runId,
           workspaceId: runtime.workspaceId,
           cwd: runtime.worktree.path,
           afterLaunch: async (launchedAdapter, invocation) => {
+            const ownership = new RuntimeOwnershipStore(project.stateDirectory);
+            await ownership.addResources(
+              runId,
+              {
+                workspaceId: invocation.workspaceId ?? runtime.workspaceId,
+                tabId: invocation.tabId,
+                paneId: invocation.paneId,
+                terminalId: invocation.terminalId,
+                processId: invocation.processId,
+              },
+              runtime.workspaceId,
+            );
+            for (const processId of invocation.ownedProcessIds ?? [])
+              await ownership.addResource(runId, {
+                kind: "process",
+                resourceId: processId,
+                parentId: invocation.paneId,
+                metadata: { invocationId: invocation.invocationId },
+              });
+            if (invocation.protocolDirectory)
+              await ownership.addResource(runId, {
+                kind: "protocol",
+                resourceId: invocation.protocolDirectory,
+                parentId: invocation.invocationId,
+                metadata: { retained: "true" },
+              });
             active = { adapter: launchedAdapter, invocation };
           },
           onObservation: async (observedAdapter, invocation, observation) => {
+            this.reportHarnessProgress(
+              project.projectId,
+              invocation,
+              observation,
+            );
             this.reportBlockedAgent(observedAdapter, invocation, observation);
           },
           afterCollect: async (invocation, result) => {

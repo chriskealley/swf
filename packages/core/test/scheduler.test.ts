@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   BlockedAgentRouter,
   HerdrClient,
+  HarnessProtocolStore,
   PiHarnessAdapter,
   WorkflowScheduler,
   applyRerunInvalidation,
@@ -15,6 +16,7 @@ import {
   createRunState,
   evaluatePhaseEligibility,
   normalizePlanningInput,
+  normalizedEvent,
   previewPhaseRerun,
   produceDefaultPlanningArtifacts,
   validatePlanningArtifacts,
@@ -294,7 +296,10 @@ describe("workflow scheduling and adapters", () => {
   it("launches Pi via Herdr with model and tool choices and passes adapter conformance", async () => {
     const runner = new FakeHerdrRunner();
     const adapter = new PiHarnessAdapter(new HerdrClient(runner));
+    const stateDirectory = await temporaryDirectory();
     const request: AdapterLaunchRequest = {
+      projectId: "37bf77bd-cfc8-46fe-92b0-ca5d6201c13b",
+      stateDirectory,
       runId: "8c86919c-3569-4e97-9f09-1bba7b49ed3d",
       phaseId: "planning",
       workUnitId: "plan-agent",
@@ -310,19 +315,141 @@ describe("workflow scheduling and adapters", () => {
       requiredCapabilities: ["structured-events", "model-selection"],
     });
     const invocation = await adapter.launch(request);
+    const protocol = new HarnessProtocolStore(
+      stateDirectory,
+      request.runId,
+      invocation.invocationId,
+    );
+    const correlation = {
+      projectId: request.projectId!,
+      runId: request.runId,
+      phaseId: request.phaseId,
+      workUnitId: request.workUnitId,
+      invocationId: invocation.invocationId,
+      harness: "pi",
+    };
+    await expect(adapter.observe(invocation)).resolves.toMatchObject({
+      status: "running",
+    });
+    await protocol.appendNormalized(
+      normalizedEvent({
+        ...correlation,
+        sourceCursor: "blocked",
+        timestamp: new Date().toISOString(),
+        type: "blocked",
+        required: false,
+        sequence: 0,
+        data: {
+          requestId: "question-1",
+          method: "confirm",
+          prompt: "Apply changes?",
+        },
+      }),
+    );
+    await expect(adapter.observe(invocation)).resolves.toMatchObject({
+      status: "blocked",
+      blockedPrompt: "Apply changes?",
+    });
+    await adapter.submit(invocation, "yes");
+    expect((await protocol.readControl()).commands.at(-1)).toEqual({
+      action: "send",
+      value: {
+        type: "extension_ui_response",
+        id: "question-1",
+        confirmed: true,
+      },
+    });
+    await protocol.appendNormalized(
+      normalizedEvent({
+        ...correlation,
+        sourceCursor: "0",
+        timestamp: new Date().toISOString(),
+        type: "completed",
+        required: false,
+        sequence: 0,
+        data: { nativeType: "agent_end", willRetry: true },
+      }),
+    );
+    await expect(adapter.observe(invocation)).resolves.toMatchObject({
+      status: "running",
+    });
+    await protocol.appendNormalized(
+      normalizedEvent({
+        ...correlation,
+        sourceCursor: "1",
+        timestamp: new Date().toISOString(),
+        type: "usage",
+        required: false,
+        sequence: 1,
+        data: {},
+        usage: {
+          inputTokens: 3,
+          outputTokens: 5,
+          totalTokens: 8,
+          costUsd: 0.01,
+          quality: "exact",
+        },
+      }),
+    );
+    await protocol.appendNormalized(
+      normalizedEvent({
+        ...correlation,
+        sourceCursor: "2",
+        timestamp: new Date().toISOString(),
+        type: "settled",
+        required: true,
+        sequence: 2,
+        data: {},
+      }),
+    );
     const result = await adapter.collect(invocation);
     expect(result.usage).toMatchObject({
       inputTokens: 3,
       outputTokens: 5,
       quality: "exact",
     });
-    expect(
-      runner.calls.some((call) =>
-        call.includes(
-          "'pi' '--mode' 'rpc' '--no-session' '--model' 'openai/gpt-test'",
+    const invocationDirectories = await readdir(
+      join(stateDirectory, "runs", request.runId, "raw", "invocations"),
+    );
+    const descriptor = JSON.parse(
+      await readFile(
+        join(
+          stateDirectory,
+          "runs",
+          request.runId,
+          "raw",
+          "invocations",
+          invocationDirectories.at(-1)!,
+          "bridge.json",
         ),
+        "utf8",
       ),
-    ).toBe(true);
+    ) as { command: string; args: string[] };
+    expect(descriptor).toMatchObject({
+      command: "pi",
+      args: [
+        "--mode",
+        "rpc",
+        "--no-session",
+        "--model",
+        "openai/gpt-test",
+        "--tools",
+        "read,bash",
+        "--exclude-tools",
+        "write",
+      ],
+    });
+    expect(runner.calls.join("\n")).not.toContain("Plan the change");
+    expect(runner.calls).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          `pane rename ${invocation.paneId} ${request.runId} · planning · pi · blocked`,
+        ),
+        expect.stringContaining(
+          `pane report-metadata ${invocation.paneId} --source swf --title ${request.runId} · planning · pi · completed`,
+        ),
+      ]),
+    );
   });
 
   it("routes blocked input only to the recorded owned invocation", async () => {

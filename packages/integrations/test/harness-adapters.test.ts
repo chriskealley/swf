@@ -1,10 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   AdapterRegistry,
+  ClaudeStreamJsonCodec,
+  CodexJsonlCodec,
+  HarnessProtocolStore,
   HarnessWorkExecutor,
   HerdrClient,
   WorkflowScheduler,
   assertAdapterConformance,
+  normalizeNativeRecord,
+  reduceHarnessEvents,
   type AdapterLaunchRequest,
   type CommandOptions,
   type CommandRunner,
@@ -54,7 +62,56 @@ class HarnessRunner implements CommandRunner {
       };
     if (args.slice(0, 2).join(" ") === "pane run") {
       const launched = args.at(-1) ?? "";
-      if (launched.includes("codex"))
+      if (launched.includes("harness-bridge-cli")) {
+        const descriptorPath = [...launched.matchAll(/'([^']+)'/g)].at(-1)?.[1];
+        if (!descriptorPath) throw new Error("Missing bridge descriptor path");
+        const descriptor = JSON.parse(await readFile(descriptorPath, "utf8")) as {
+          stateDirectory: string;
+          command: string;
+          args: string[];
+          context: {
+            projectId: string;
+            runId: string;
+            phaseId: string;
+            workUnitId: string;
+            invocationId: string;
+            harness: string;
+          };
+        };
+        this.calls.push(`native ${descriptor.command} ${descriptor.args.join(" ")}`);
+        const store = new HarnessProtocolStore(
+          descriptor.stateDirectory,
+          descriptor.context.runId,
+          descriptor.context.invocationId,
+        );
+        const codec =
+          descriptor.command === "claude"
+            ? new ClaudeStreamJsonCodec()
+            : new CodexJsonlCodec();
+        const records =
+          descriptor.command === "claude"
+            ? [
+                { type: "system", subtype: "init", session_id: "550e8400-e29b-41d4-a716-446655440000", model: "test-model", tools: ["Read", "Edit"] },
+                { type: "assistant", session_id: "550e8400-e29b-41d4-a716-446655440000", message: { content: [{ type: "text", text: "done" }], usage: { input_tokens: 8, output_tokens: 3 } } },
+                { type: "result", session_id: "550e8400-e29b-41d4-a716-446655440000", usage: { input_tokens: 8, output_tokens: 3 }, total_cost_usd: 0.02 },
+              ]
+            : [
+                { type: "thread.started", thread_id: "0199a213-81c0-7800-8aa1-bbab2a035a53" },
+                { type: "turn.completed", usage: { input_tokens: 10, output_tokens: 4 } },
+              ];
+        const start = (await store.events()).reduce(
+          (maximum, event) => Math.max(maximum, event.sequence),
+          0,
+        );
+        for (const [index, value] of records.entries()) {
+          const cursor = String(start + index + 1);
+          const native = codec.parse(JSON.stringify(value), cursor);
+          await store.appendNative({ cursor, value });
+          for (const event of normalizeNativeRecord(codec, native, descriptor.context))
+            await store.appendNormalized(event);
+        }
+        this.transcript = "compact bridge output\n";
+      } else if (launched.includes("codex"))
         this.transcript =
           '{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}\n{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":4}}\n';
       else if (launched.includes("claude"))
@@ -83,6 +140,8 @@ function request(
   overrides: Partial<AdapterLaunchRequest> = {},
 ): AdapterLaunchRequest {
   return {
+    projectId: "37bf77bd-cfc8-46fe-92b0-ca5d6201c13b",
+    stateDirectory: testStateDirectory,
     runId: "8c86919c-3569-4e97-9f09-1bba7b49ed3d",
     phaseId: "building",
     workUnitId: "agent",
@@ -94,7 +153,123 @@ function request(
   };
 }
 
+const testStateDirectory = join(
+  tmpdir(),
+  `swf-harness-adapters-${process.pid}`,
+);
+
+afterAll(async () => {
+  await rm(testStateDirectory, { recursive: true, force: true });
+});
+
 describe("additional harness adapters", () => {
+  it("normalizes Claude 2.1.229 stream-json messages, tool failure, usage, and settlement", async () => {
+    const fixture = await readFile(
+      new URL("./fixtures/claude-stream-json-2.1.229.jsonl", import.meta.url),
+      "utf8",
+    );
+    const codec = new ClaudeStreamJsonCodec();
+    const correlation = {
+      projectId: "project",
+      runId: "run",
+      phaseId: "building",
+      workUnitId: "agent",
+      invocationId: "claude-fixture",
+      harness: "claude",
+    };
+    const events = fixture
+      .trim()
+      .split("\n")
+      .flatMap((line, index) =>
+        normalizeNativeRecord(
+          codec,
+          codec.parse(line, String(index + 1)),
+          correlation,
+        ),
+      );
+    expect(events.map(({ type }) => type)).toEqual([
+      "ready",
+      "workStarted",
+      "messageSummary",
+      "toolStarted",
+      "usage",
+      "toolCompleted",
+      "workStarted",
+      "messageSummary",
+      "usage",
+      "completed",
+      "usage",
+      "settled",
+    ]);
+    expect(events.find(({ type }) => type === "toolCompleted")?.data).toMatchObject({
+      toolCallId: "tool-1",
+      failed: true,
+    });
+    expect(reduceHarnessEvents(events)).toMatchObject({
+      status: "settled",
+      nativeSessionId: "550e8400-e29b-41d4-a716-446655440000",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        costUsd: 0.02,
+        quality: "estimated",
+      },
+    });
+  });
+
+  it("normalizes Codex 0.147 JSONL items without treating item completion as settlement", async () => {
+    const fixture = await readFile(
+      new URL("./fixtures/codex-jsonl-0.147.0.jsonl", import.meta.url),
+      "utf8",
+    );
+    const codec = new CodexJsonlCodec();
+    const correlation = {
+      projectId: "project",
+      runId: "run",
+      phaseId: "building",
+      workUnitId: "agent",
+      invocationId: "codex-fixture",
+      harness: "codex",
+    };
+    const events = fixture
+      .trim()
+      .split("\n")
+      .flatMap((line, index) =>
+        normalizeNativeRecord(
+          codec,
+          codec.parse(line, String(index + 1)),
+          correlation,
+        ),
+      );
+    const commandCompletion = events.find(
+      ({ type, data }) =>
+        type === "toolCompleted" && data.itemType === "command_execution",
+    );
+    expect(commandCompletion?.data).toMatchObject({
+      command: "pnpm test",
+      output: "all tests passed",
+      failed: false,
+    });
+    expect(events.filter(({ type }) => type === "messageSummary")).toHaveLength(1);
+    expect(events.some(({ data }) => data.summary === "private reasoning")).toBe(false);
+    expect(events.at(-3)?.type).toBe("completed");
+    expect(events.at(-2)).toMatchObject({
+      type: "usage",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        totalTokens: 14,
+        quality: "exact",
+      },
+    });
+    expect(events.at(-1)?.type).toBe("settled");
+    expect(reduceHarnessEvents(events)).toMatchObject({
+      status: "settled",
+      nativeSessionId: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+    });
+  });
+
   it("passes Codex conformance for every advertised capability", async () => {
     const runner = new HarnessRunner();
     const adapter = new CodexHarnessAdapter(new HerdrClient(runner));
@@ -119,11 +294,12 @@ describe("additional harness adapters", () => {
     await expect(
       adapter.validate({ tools: ["read"] }, ["tool-selection"]),
     ).resolves.toMatchObject({ valid: false });
-    expect(runner.calls.join("\n")).toContain("'codex' 'exec' '--json'");
+    expect(runner.calls.join("\n")).toContain("native codex exec --json");
     expect(runner.calls.join("\n")).toContain(
-      "'codex' 'exec' 'resume' '--json'",
+      "native codex exec resume --json",
     );
-    expect(runner.calls.join("\n")).toContain("'--sandbox' 'workspace-write'");
+    expect(runner.calls.join("\n")).toContain("--sandbox workspace-write");
+    expect(runner.calls.join("\n")).not.toContain("Implement the change");
   });
 
   it("passes Claude conformance with structured resume, model, tools, and estimated usage", async () => {
@@ -154,15 +330,26 @@ describe("additional harness adapters", () => {
       quality: "estimated",
     });
     expect(runner.calls.join("\n")).toContain(
-      "'--output-format' 'stream-json'",
+      "native claude --print --output-format stream-json",
     );
-    expect(runner.calls.join("\n")).toContain("'--allowedTools' 'Read' 'Edit'");
+    expect(runner.calls.join("\n")).toContain("--allowedTools Read Edit");
     expect(runner.calls.join("\n")).toContain(
-      "'--disallowedTools' 'Bash(rm *)'",
+      "--disallowedTools Bash(rm *)",
     );
     expect(runner.calls.join("\n")).toContain(
-      "'--resume' '550e8400-e29b-41d4-a716-446655440000'",
+      "--resume 550e8400-e29b-41d4-a716-446655440000",
     );
+    expect(runner.calls.join("\n")).toContain("--verbose");
+    expect(runner.calls.join("\n")).not.toContain("Implement the change");
+    await adapter.cancel(invocation);
+    const protocol = new HarnessProtocolStore(
+      launch.stateDirectory!,
+      launch.runId,
+      invocation.invocationId,
+    );
+    expect((await protocol.readControl()).commands.at(-1)).toEqual({
+      action: "cancel",
+    });
   });
 
   it("passes Copilot conformance without claiming undocumented structured events or usage", async () => {
@@ -231,6 +418,8 @@ describe("additional harness adapters", () => {
     const scheduler = new WorkflowScheduler(
       workflow,
       new HarnessWorkExecutor(registry, {
+        projectId: "37bf77bd-cfc8-46fe-92b0-ca5d6201c13b",
+        stateDirectory: testStateDirectory,
         runId: "8c86919c-3569-4e97-9f09-1bba7b49ed3d",
         workspaceId: "workspace",
         cwd: "/repo/worktree",
@@ -261,8 +450,10 @@ describe("additional harness adapters", () => {
     const launches = runner.calls.filter((call) =>
       call.startsWith("herdr pane run"),
     );
-    expect(launches.some((call) => call.includes("'codex' 'exec'"))).toBe(true);
-    expect(launches.some((call) => call.includes("'claude' '--print'"))).toBe(
+    expect(runner.calls.some((call) => call.includes("native codex exec"))).toBe(
+      true,
+    );
+    expect(runner.calls.some((call) => call.includes("native claude --print"))).toBe(
       true,
     );
     expect(launches.some((call) => call.includes("'copilot' '--prompt'"))).toBe(
@@ -289,5 +480,36 @@ describe("additional harness adapters", () => {
     ).availability();
     expect(result.valid).toBe(false);
     expect(result.errors).toEqual(["Herdr integration is missing: claude"]);
+
+    class AuthenticationUnavailableRunner extends HarnessRunner {
+      override async run(
+        command: string,
+        args: string[],
+        options?: CommandOptions,
+      ) {
+        if (command === "claude" && args[0] === "auth")
+          return { code: 0, stdout: '{"loggedIn":false}', stderr: "" };
+        if (command === "codex" && args.join(" ") === "login status")
+          return { code: 1, stdout: "", stderr: "not logged in" };
+        return super.run(command, args, options);
+      }
+    }
+    const authenticationRunner = new AuthenticationUnavailableRunner();
+    await expect(
+      new ClaudeHarnessAdapter(
+        new HerdrClient(authenticationRunner),
+      ).availability(),
+    ).resolves.toMatchObject({
+      valid: false,
+      errors: [expect.stringContaining("Claude authentication is unavailable")],
+    });
+    await expect(
+      new CodexHarnessAdapter(
+        new HerdrClient(authenticationRunner),
+      ).availability(),
+    ).resolves.toMatchObject({
+      valid: false,
+      errors: [expect.stringContaining("Codex authentication is unavailable")],
+    });
   });
 });

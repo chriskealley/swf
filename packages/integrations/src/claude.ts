@@ -3,6 +3,7 @@ import {
   type AdapterInvocation,
   type AdapterLaunchRequest,
   type AdapterResult,
+  ClaudeStreamJsonCodec,
   type HerdrClient,
 } from "@swf/core";
 import {
@@ -56,7 +57,7 @@ export class ClaudeHarnessAdapter extends CliHarnessAdapter {
 
   private arguments(
     options: ClaudeSessionOptions,
-    prompt: string,
+    prompt?: string,
     sessionId?: string,
   ): string[] {
     const args = [
@@ -77,8 +78,27 @@ export class ClaudeHarnessAdapter extends CliHarnessAdapter {
     args.push("--allowedTools", ...tools);
     if (options.excludeTools?.length)
       args.push("--disallowedTools", ...options.excludeTools);
-    args.push(prompt);
+    if (prompt !== undefined) args.push(prompt);
     return args;
+  }
+
+  protected override bridgeCodec(): ClaudeStreamJsonCodec {
+    return new ClaudeStreamJsonCodec();
+  }
+
+  protected override bridgeLaunchArguments(
+    request: AdapterLaunchRequest,
+  ): string[] {
+    return this.arguments(request).slice(1);
+  }
+
+  protected override bridgeResumeArguments(
+    invocation: AdapterInvocation,
+  ): string[] {
+    const options = this.sessions.get(invocation.invocationId) ?? {};
+    const args = this.arguments(options, undefined, invocation.nativeSessionId);
+    if (!invocation.nativeSessionId) args.push("--continue");
+    return args.slice(1);
   }
 
   protected launchCommand(request: AdapterLaunchRequest): string {

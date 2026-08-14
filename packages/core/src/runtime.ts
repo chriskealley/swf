@@ -9,7 +9,13 @@ import {
 } from "./herdr.js";
 
 export type OwnedResourceKind =
-  "workspace" | "worktree" | "tab" | "pane" | "terminal" | "process";
+  | "workspace"
+  | "worktree"
+  | "tab"
+  | "pane"
+  | "terminal"
+  | "process"
+  | "protocol";
 
 export interface OwnedResource {
   resourceId: string;
@@ -101,6 +107,32 @@ export class RuntimeOwnershipStore {
       }
     }
     return this.save(next);
+  }
+
+  async addResource(
+    runId: string,
+    resource: Omit<OwnedResource, "createdAt"> & { createdAt?: string },
+  ): Promise<RunRuntimeOwnership> {
+    const ownership = await this.load(runId);
+    if (!ownership)
+      throw new Error(`No runtime ownership exists for run ${runId}`);
+    if (
+      ownership.resources.some(
+        ({ kind, resourceId }) =>
+          kind === resource.kind && resourceId === resource.resourceId,
+      )
+    )
+      return ownership;
+    return this.save({
+      ...ownership,
+      resources: [
+        ...ownership.resources,
+        {
+          ...resource,
+          createdAt: resource.createdAt ?? new Date().toISOString(),
+        },
+      ],
+    });
   }
 }
 

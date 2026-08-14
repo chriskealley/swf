@@ -86,6 +86,7 @@ function toolSummary(
 export class HarnessPaneRenderer {
   readonly config: HarnessPresentationConfig;
   private readonly seen = new Set<string>();
+  private latestUsage?: HarnessEvent["usage"];
   constructor(
     config: Partial<HarnessPresentationConfig> = {},
     readonly redactor = new Redactor(),
@@ -100,28 +101,32 @@ export class HarnessPaneRenderer {
     if (this.seen.has(event.eventId)) return undefined;
     this.seen.add(event.eventId);
     const { level, maxTextLength, maxToolLength } = this.config;
+    if (event.usage) this.latestUsage = event.usage;
     if (level === "protocol")
       return `⚠ protocol mode: redacted machine output may be sensitive\n${bounded(nativeRecord ?? event.data, maxTextLength, this.redactor)}`;
     if (event.type === "processStarted")
-      return `${event.phaseId} · ${event.harness} · ${event.runId}`;
+      return [event.phaseId, event.harness, event.data.model, event.runId]
+        .filter(Boolean)
+        .join(" · ");
     if (event.type === "blocked")
       return `! Input required: ${bounded(event.data.prompt, maxTextLength, this.redactor)}`;
     if (event.type === "failed")
       return `✗ Failed: ${bounded(event.data.summary ?? event.data.message, maxTextLength, this.redactor)}`;
     if (event.type === "cancelled") return "– Cancelled";
-    if (event.type === "settled" || event.type === "completed") {
+    if (event.type === "completed") return undefined;
+    if (event.type === "settled") {
+      const usage = event.usage ?? this.latestUsage;
       const duration = event.data.durationMs
         ? ` in ${Math.round(Number(event.data.durationMs) / 1000)}s`
         : "";
       const tokens =
-        event.usage?.totalTokens !== undefined
-          ? ` · ${event.usage.totalTokens.toLocaleString()} tokens`
+        usage?.totalTokens !== undefined
+          ? ` · ${usage.totalTokens.toLocaleString()} tokens`
           : "";
       const cost =
-        event.usage?.costUsd !== undefined
-          ? ` · $${event.usage.costUsd.toFixed(3)}`
-          : "";
-      return `✓ Completed${duration}${tokens}${cost}`;
+        usage?.costUsd !== undefined ? ` · $${usage.costUsd.toFixed(3)}` : "";
+      const quality = ` · usage ${usage?.quality ?? "unknown"}`;
+      return `✓ Completed${duration}${tokens}${cost}${quality}`;
     }
     if (level === "quiet") return undefined;
     if (event.type === "ready") return "  Ready";

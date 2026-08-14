@@ -7,8 +7,15 @@ import {
   type AdapterResult,
   type AdapterValidation,
   type HarnessAdapter,
+  type HarnessCodec,
+  HarnessNormalizedStreamConsumer,
+  HarnessProtocolStore,
+  harnessBridgeCommand,
+  harnessPaneLabel,
+  reduceHarnessEvents,
   type HerdrAgentStatus,
   HerdrClient,
+  writeHarnessBridgeDescriptor,
 } from "@swf/core";
 
 export function shellQuote(value: string): string {
@@ -96,6 +103,12 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
   abstract readonly executable: string;
   abstract readonly capabilities: AdapterCapabilities;
 
+  private readonly bridgeStores = new Map<string, HarnessProtocolStore>();
+  private readonly bridgeConsumers = new Map<
+    string,
+    HarnessNormalizedStreamConsumer
+  >();
+
   constructor(readonly herdr: HerdrClient) {}
 
   protected abstract launchCommand(request: AdapterLaunchRequest): string;
@@ -106,6 +119,22 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
   protected abstract usage(
     events: Array<Record<string, unknown>>,
   ): AdapterResult["usage"];
+
+  protected bridgeCodec(): HarnessCodec | undefined {
+    return undefined;
+  }
+
+  protected bridgeLaunchArguments(
+    _request: AdapterLaunchRequest,
+  ): string[] | undefined {
+    return undefined;
+  }
+
+  protected bridgeResumeArguments(
+    _invocation: AdapterInvocation,
+  ): string[] | undefined {
+    return undefined;
+  }
 
   protected events(transcript: string): Array<Record<string, unknown>> {
     return this.capabilities.structuredEvents ? parseJsonLines(transcript) : [];
@@ -167,6 +196,10 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
   async launch(request: AdapterLaunchRequest): Promise<AdapterInvocation> {
     const validation = await this.validate(request);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
+    const codec = this.bridgeCodec();
+    const bridgeArguments = this.bridgeLaunchArguments(request);
+    if (codec && bridgeArguments)
+      return this.launchBridge(request, codec, bridgeArguments);
     const observation = await this.herdr.launch({
       workspaceId: request.workspaceId,
       cwd: request.cwd,
@@ -194,6 +227,38 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
       throw new Error(
         `${this.id} cannot submit a follow-up because resume is unsupported`,
       );
+    const store = this.bridgeStores.get(invocation.invocationId);
+    const bridgeArguments = this.bridgeResumeArguments(invocation);
+    if (store && bridgeArguments) {
+      const metadata = await store.metadata();
+      const descriptorPath = await writeHarnessBridgeDescriptor(store, {
+        schemaVersion: 1,
+        stateDirectory: store.stateDirectory,
+        command: this.executable,
+        args: bridgeArguments,
+        cwd: metadata.cwd ?? process.cwd(),
+        context: {
+          projectId: metadata.projectId,
+          runId: invocation.runId,
+          phaseId: invocation.phaseId,
+          workUnitId: invocation.workUnitId,
+          invocationId: invocation.invocationId,
+          harness: this.id,
+          nativeSessionId: invocation.nativeSessionId,
+        },
+        codecVersion: metadata.codecVersion,
+        presentationLevel: metadata.presentationLevel as
+          "quiet" | "normal" | "verbose" | "protocol",
+        initialInput: { format: "text", value: `${prompt}\n` },
+        closeInputAfterInitial: true,
+        controlOffset: await store.controlSize(),
+      });
+      await this.herdr.submitPrompt(
+        invocation.paneId,
+        harnessBridgeCommand(descriptorPath),
+      );
+      return;
+    }
     await this.herdr.submitPrompt(
       invocation.paneId,
       this.resumeCommand(invocation, prompt),
@@ -201,6 +266,44 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
   }
 
   async observe(invocation: AdapterInvocation): Promise<AdapterObservation> {
+    const store = this.bridgeStores.get(invocation.invocationId);
+    if (store) {
+      const consumer = this.bridgeConsumers.get(invocation.invocationId);
+      if (!consumer)
+        throw new Error(
+          `No normalized consumer is registered for ${invocation.invocationId}`,
+        );
+      const { events, state } = await consumer.poll();
+      invocation.nativeSessionId = state.nativeSessionId;
+      const status =
+        state.status === "settled"
+          ? "completed"
+          : state.status === "failed"
+            ? "failed"
+            : state.status === "cancelled"
+              ? "cancelled"
+              : state.status === "blocked"
+                ? "blocked"
+                : "running";
+      invocation.status = status;
+      await this.herdr
+        .presentPane(
+          invocation.paneId,
+          harnessPaneLabel({
+            runId: invocation.runId,
+            phaseId: invocation.phaseId,
+            harness: this.id,
+            status,
+          }),
+        )
+        .catch(() => undefined);
+      return {
+        status,
+        message: state.diagnostics.at(-1),
+        blockedPrompt: state.blockedPrompt,
+        structuredEvents: events as Array<Record<string, unknown>>,
+      };
+    }
     const observation = await this.herdr.observe(invocation.paneId);
     const transcript = await this.herdr.transcript(invocation.paneId, 400);
     return {
@@ -213,10 +316,33 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
   }
 
   async cancel(invocation: AdapterInvocation): Promise<void> {
+    const store = this.bridgeStores.get(invocation.invocationId);
+    if (store) {
+      await store.appendControl({ action: "cancel" });
+      return;
+    }
     await this.herdr.cancel(invocation.paneId);
   }
 
   async collect(invocation: AdapterInvocation): Promise<AdapterResult> {
+    const store = this.bridgeStores.get(invocation.invocationId);
+    if (store) {
+      const observation = await this.observe(invocation);
+      const events = await store.events();
+      const status =
+        observation.status === "completed"
+          ? "completed"
+          : observation.status === "cancelled"
+            ? "cancelled"
+            : "failed";
+      return {
+        status,
+        transcript: events.map((event) => JSON.stringify(event)).join("\n"),
+        usage: [...events].reverse().find(({ usage }) => usage)?.usage ?? {
+          quality: "unknown",
+        },
+      };
+    }
     const observation = await this.observe(invocation);
     const transcript = await this.herdr.transcript(invocation.paneId, 2_000);
     const status =
@@ -226,6 +352,100 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
           ? "cancelled"
           : "failed";
     return { status, transcript, usage: this.usage(this.events(transcript)) };
+  }
+
+  private async launchBridge(
+    request: AdapterLaunchRequest,
+    codec: HarnessCodec,
+    args: string[],
+  ): Promise<AdapterInvocation> {
+    if (!request.stateDirectory || !request.projectId)
+      throw new Error(
+        `${this.id} bridge launch requires projectId and stateDirectory`,
+      );
+    const invocationId = request.invocationId ?? randomUUID();
+    const store = new HarnessProtocolStore(
+      request.stateDirectory,
+      request.runId,
+      invocationId,
+    );
+    const descriptorPath = await writeHarnessBridgeDescriptor(store, {
+      schemaVersion: 1,
+      stateDirectory: request.stateDirectory,
+      command: this.executable,
+      args,
+      cwd: request.cwd,
+      environment: request.environment,
+      context: {
+        projectId: request.projectId,
+        runId: request.runId,
+        phaseId: request.phaseId,
+        workUnitId: request.workUnitId,
+        invocationId,
+        harness: this.id,
+      },
+      codecVersion: codec.version,
+      presentationLevel: request.presentationLevel ?? "normal",
+      initialInput: { format: "text", value: `${request.prompt}\n` },
+      closeInputAfterInitial: true,
+      controlOffset: await store.controlSize(),
+    });
+    const observation = await this.herdr.launch({
+      workspaceId: request.workspaceId,
+      cwd: request.cwd,
+      label: harnessPaneLabel({
+        runId: request.runId,
+        phaseId: request.phaseId,
+        harness: this.id,
+        status: "starting",
+      }),
+      command: harnessBridgeCommand(descriptorPath),
+      environment: request.environment,
+      timeoutMs: request.timeoutMs,
+    });
+    this.bridgeStores.set(invocationId, store);
+    const consumer = new HarnessNormalizedStreamConsumer(store);
+    this.bridgeConsumers.set(invocationId, consumer);
+    const metadata = await store.metadata();
+    // Derive launch metadata without advancing the durable service cursor. The
+    // first observation must still publish every normalized startup milestone.
+    const state = reduceHarnessEvents(await store.events());
+    const invocation: AdapterInvocation = {
+      invocationId,
+      runId: request.runId,
+      phaseId: request.phaseId,
+      workUnitId: request.workUnitId,
+      paneId: observation.paneId!,
+      workspaceId: observation.workspaceId ?? request.workspaceId,
+      tabId: observation.tabId,
+      terminalId: observation.terminalId,
+      processId: observation.processId,
+      ownedProcessIds: [
+        observation.processId,
+        metadata.bridgePid === undefined
+          ? undefined
+          : String(metadata.bridgePid),
+        metadata.nativePid === undefined
+          ? undefined
+          : String(metadata.nativePid),
+      ].filter((value): value is string => value !== undefined),
+      protocolDirectory: store.directory,
+      status: state.status === "settled" ? "completed" : "running",
+      startedAt: new Date().toISOString(),
+      nativeSessionId: state.nativeSessionId,
+    };
+    await this.herdr
+      .presentPane(
+        invocation.paneId,
+        harnessPaneLabel({
+          runId: invocation.runId,
+          phaseId: invocation.phaseId,
+          harness: this.id,
+          status: invocation.status,
+        }),
+      )
+      .catch(() => undefined);
+    return invocation;
   }
 }
 

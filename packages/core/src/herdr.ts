@@ -269,6 +269,15 @@ export class HerdrClient {
     await this.execute(["pane", "run", paneId, prompt], undefined, true);
   }
 
+  async presentPane(paneId: string, title: string): Promise<void> {
+    await this.execute(["pane", "rename", paneId, title], undefined, true);
+    await this.execute(
+      ["pane", "report-metadata", paneId, "--source", "swf", "--title", title],
+      undefined,
+      true,
+    );
+  }
+
   async transcript(paneId: string, lines = 200): Promise<string> {
     const result = await this.runner.run(this.executable, [
       "pane",

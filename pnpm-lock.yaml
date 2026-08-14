@@ -110,6 +110,9 @@ importers:
       effect:
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.6
       yaml:
         specifier: ^2.9.0
         version: 2.9.0

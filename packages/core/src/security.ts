@@ -9,7 +9,7 @@ export interface RedactionOptions {
 }
 
 const secretKey =
-  /^(?:password|passwd|secret|credential|authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|auth[-_]?token)$/i;
+  /^(?:password|passwd|secret|credential|authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|auth[-_]?token|thinking[-_]?signature|signature|encrypted[-_]?content)$/i;
 const defaultPatterns = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi,
   /\b(?:sk|rk|pk)-(?:proj-)?[A-Za-z0-9_-]{16,}\b/g,

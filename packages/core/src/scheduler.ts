@@ -12,6 +12,19 @@ import {
   resolveConfigurationSources,
   type ConfigurationSources,
 } from "./project.js";
+import { PiRpcCodec } from "./harness-codecs.js";
+import {
+  HarnessNormalizedStreamConsumer,
+  HarnessProtocolStore,
+} from "./harness-protocol.js";
+import {
+  harnessBridgeCommand,
+  writeHarnessBridgeDescriptor,
+} from "./harness-bridge.js";
+import {
+  harnessPaneLabel,
+  type HarnessPresentationLevel,
+} from "./harness-presentation.js";
 
 export type Workflow = DocumentValue<"workflow">;
 export type WorkflowPhase = DocumentValue<"workflow">["phases"][number];
@@ -34,6 +47,8 @@ export interface AdapterValidation {
 }
 
 export interface AdapterLaunchRequest {
+  projectId?: string;
+  stateDirectory?: string;
   invocationId?: string;
   runId: string;
   phaseId: string;
@@ -46,6 +61,7 @@ export interface AdapterLaunchRequest {
   excludeTools?: string[];
   timeoutMs?: number;
   environment?: Record<string, string>;
+  presentationLevel?: HarnessPresentationLevel;
 }
 
 export interface AdapterInvocation {
@@ -54,6 +70,12 @@ export interface AdapterInvocation {
   phaseId: string;
   workUnitId: string;
   paneId: string;
+  workspaceId?: string;
+  tabId?: string;
+  terminalId?: string;
+  processId?: string;
+  ownedProcessIds?: string[];
+  protocolDirectory?: string;
   status:
     "running" | "blocked" | "completed" | "failed" | "cancelled" | "unknown";
   startedAt: string;
@@ -114,10 +136,6 @@ export class AdapterRegistry {
   }
 }
 
-function shellQuote(value: string): string {
-  return "'" + value.replaceAll("'", "'\"'\"'") + "'";
-}
-
 function toAdapterStatus(
   status: HerdrAgentStatus,
 ): AdapterInvocation["status"] {
@@ -125,79 +143,6 @@ function toAdapterStatus(
   if (status === "blocked") return "blocked";
   if (status === "idle" || status === "done") return "completed";
   return "unknown";
-}
-
-function structuredEvents(transcript: string): Array<Record<string, unknown>> {
-  return transcript
-    .split("\n")
-    .filter(Boolean)
-    .flatMap((line) => {
-      try {
-        const value = JSON.parse(line) as unknown;
-        return typeof value === "object" &&
-          value !== null &&
-          !Array.isArray(value)
-          ? [value as Record<string, unknown>]
-          : [];
-      } catch {
-        return [];
-      }
-    });
-}
-
-function numeric(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function extractUsage(
-  events: Array<Record<string, unknown>>,
-): AdapterResult["usage"] {
-  let inputTokens: number | undefined;
-  let outputTokens: number | undefined;
-  let totalTokens: number | undefined;
-  let costUsd: number | undefined;
-  for (const event of events) {
-    const message = event.message as Record<string, unknown> | undefined;
-    const result = event.result as Record<string, unknown> | undefined;
-    const usage = (event.usage ??
-      message?.usage ??
-      result?.usage ??
-      event) as Record<string, unknown>;
-    inputTokens =
-      numeric(usage.input_tokens ?? usage.inputTokens ?? usage.input) ??
-      inputTokens;
-    outputTokens =
-      numeric(usage.output_tokens ?? usage.outputTokens ?? usage.output) ??
-      outputTokens;
-    totalTokens =
-      numeric(usage.total_tokens ?? usage.totalTokens ?? usage.total) ??
-      totalTokens;
-    const cost = usage.cost as Record<string, unknown> | number | undefined;
-    costUsd =
-      numeric(
-        usage.cost_usd ??
-          usage.costUsd ??
-          (typeof cost === "object" ? cost?.total : cost),
-      ) ?? costUsd;
-  }
-  return {
-    inputTokens,
-    outputTokens,
-    totalTokens:
-      totalTokens ??
-      (inputTokens !== undefined || outputTokens !== undefined
-        ? (inputTokens ?? 0) + (outputTokens ?? 0)
-        : undefined),
-    costUsd,
-    quality:
-      totalTokens === undefined &&
-      inputTokens === undefined &&
-      outputTokens === undefined
-        ? "unknown"
-        : "exact",
-  };
 }
 
 export class PiHarnessAdapter implements HarnessAdapter {
@@ -211,6 +156,17 @@ export class PiHarnessAdapter implements HarnessAdapter {
     resume: false,
     usage: true,
   };
+
+  private readonly stores = new Map<string, HarnessProtocolStore>();
+  private readonly consumers = new Map<
+    string,
+    HarnessNormalizedStreamConsumer
+  >();
+  private readonly blockedRequests = new Map<
+    string,
+    { id: string; method?: string }
+  >();
+  private readonly prompted = new Set<string>();
 
   constructor(readonly herdr: HerdrClient) {}
 
@@ -254,92 +210,182 @@ export class PiHarnessAdapter implements HarnessAdapter {
     return { valid: errors.length === 0, errors };
   }
 
-  private command(request: AdapterLaunchRequest): string {
-    // Pi RPC mode provides LF-delimited structured events and accepts prompts
-    // through the owned Herdr pane without requiring a separate process.
+  private arguments(request: AdapterLaunchRequest): string[] {
     const args = ["pi", "--mode", "rpc", "--no-session"];
     if (request.model) args.push("--model", request.model);
     if (request.tools?.length) args.push("--tools", request.tools.join(","));
     if (request.excludeTools?.length)
       args.push("--exclude-tools", request.excludeTools.join(","));
-    return args.map(shellQuote).join(" ");
+    return args;
   }
 
   async launch(request: AdapterLaunchRequest): Promise<AdapterInvocation> {
     const validation = await this.validate(request);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
+    if (!request.stateDirectory || !request.projectId)
+      throw new Error("Pi bridge launch requires projectId and stateDirectory");
+    const invocationId = request.invocationId ?? randomUUID();
+    const codec = new PiRpcCodec();
+    const store = new HarnessProtocolStore(
+      request.stateDirectory,
+      request.runId,
+      invocationId,
+    );
+    const descriptorPath = await writeHarnessBridgeDescriptor(store, {
+      schemaVersion: 1,
+      stateDirectory: request.stateDirectory,
+      command: "pi",
+      args: this.arguments(request).slice(1),
+      cwd: request.cwd,
+      environment: request.environment,
+      context: {
+        projectId: request.projectId,
+        runId: request.runId,
+        phaseId: request.phaseId,
+        workUnitId: request.workUnitId,
+        invocationId,
+        harness: this.id,
+      },
+      codecVersion: codec.version,
+      presentationLevel: request.presentationLevel ?? "normal",
+    });
     const observation = await this.herdr.launch({
       workspaceId: request.workspaceId,
       cwd: request.cwd,
-      label: `pi-${request.phaseId}-${request.workUnitId}`,
-      command: this.command(request),
+      label: harnessPaneLabel({
+        runId: request.runId,
+        phaseId: request.phaseId,
+        harness: this.id,
+        status: "starting",
+      }),
+      command: harnessBridgeCommand(descriptorPath),
       environment: request.environment,
       timeoutMs: request.timeoutMs,
     });
     const invocation: AdapterInvocation = {
-      invocationId: request.invocationId ?? randomUUID(),
+      invocationId,
       runId: request.runId,
       phaseId: request.phaseId,
       workUnitId: request.workUnitId,
       paneId: observation.paneId!,
+      workspaceId: observation.workspaceId ?? request.workspaceId,
+      tabId: observation.tabId,
+      terminalId: observation.terminalId,
+      processId: observation.processId,
+      protocolDirectory: store.directory,
       status: toAdapterStatus(observation.status),
       startedAt: new Date().toISOString(),
-      nativeSessionId: observation.processId,
+      nativeSessionId: undefined,
     };
-    await this.submit(invocation, request.prompt);
-    const startDeadline =
-      Date.now() + Math.min(request.timeoutMs ?? 30_000, 30_000);
-    while (true) {
-      const observation = await this.herdr.observe(invocation.paneId);
-      if (observation.status === "working" || observation.status === "blocked")
-        break;
-      const transcript = await this.herdr.transcript(invocation.paneId, 200);
-      if (
-        structuredEvents(transcript).some(({ type }) =>
-          ["agent_settled", "turn_end"].includes(String(type)),
-        )
+    await this.herdr
+      .presentPane(
+        invocation.paneId,
+        harnessPaneLabel({
+          runId: invocation.runId,
+          phaseId: invocation.phaseId,
+          harness: this.id,
+          status: invocation.status,
+        }),
       )
-        break;
-      if (Date.now() >= startDeadline)
-        throw new Error(
-          `Pi invocation ${invocation.invocationId} did not start within 30 seconds`,
-        );
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+      .catch(() => undefined);
+    const metadata = await store.metadata();
+    invocation.ownedProcessIds = [
+      observation.processId,
+      metadata.bridgePid === undefined ? undefined : String(metadata.bridgePid),
+      metadata.nativePid === undefined ? undefined : String(metadata.nativePid),
+    ].filter((value): value is string => value !== undefined);
+    this.stores.set(invocationId, store);
+    this.consumers.set(
+      invocationId,
+      new HarnessNormalizedStreamConsumer(store),
+    );
+    await store.appendControl({
+      action: "send",
+      value: { type: "get_state", id: randomUUID() },
+    });
+    await this.submit(invocation, request.prompt);
     return invocation;
   }
 
   async submit(invocation: AdapterInvocation, prompt: string): Promise<void> {
-    await this.herdr.submitPrompt(
-      invocation.paneId,
-      JSON.stringify({ type: "prompt", message: prompt }),
-    );
+    const store = this.store(invocation);
+    const blocked = this.blockedRequests.get(invocation.invocationId);
+    const blockedResponse = blocked
+      ? blocked.method === "confirm"
+        ? {
+            type: "extension_ui_response",
+            id: blocked.id,
+            confirmed: /^(?:y|yes|true|confirm|ok)$/i.test(prompt.trim()),
+          }
+        : { type: "extension_ui_response", id: blocked.id, value: prompt }
+      : undefined;
+    const followUp = this.prompted.has(invocation.invocationId);
+    await store.appendControl({
+      action: "send",
+      value: blockedResponse ?? {
+        type: followUp ? "follow_up" : "prompt",
+        id: randomUUID(),
+        message: prompt,
+      },
+    });
+    this.prompted.add(invocation.invocationId);
+    this.blockedRequests.delete(invocation.invocationId);
   }
 
   async observe(invocation: AdapterInvocation): Promise<AdapterObservation> {
-    const observation = await this.herdr.observe(invocation.paneId);
-    const transcript = await this.herdr.transcript(invocation.paneId, 200);
-    const events = structuredEvents(transcript);
+    const { events, state } = await this.consumer(invocation).poll();
+    const blocked = [...events]
+      .reverse()
+      .find(({ type }) => type === "blocked");
+    const blockedRequestId = blocked?.data.requestId;
+    if (typeof blockedRequestId === "string")
+      this.blockedRequests.set(invocation.invocationId, {
+        id: blockedRequestId,
+        method:
+          typeof blocked?.data.method === "string"
+            ? blocked.data.method
+            : undefined,
+      });
+    const status: AdapterInvocation["status"] =
+      state.status === "settled"
+        ? "completed"
+        : state.status === "failed"
+          ? "failed"
+          : state.status === "cancelled"
+            ? "cancelled"
+            : state.status === "blocked"
+              ? "blocked"
+              : "running";
+    invocation.status = status;
+    await this.herdr
+      .presentPane(
+        invocation.paneId,
+        harnessPaneLabel({
+          runId: invocation.runId,
+          phaseId: invocation.phaseId,
+          harness: this.id,
+          status,
+        }),
+      )
+      .catch(() => undefined);
     return {
-      status: toAdapterStatus(observation.status),
-      message: observation.message,
-      blockedPrompt:
-        observation.status === "blocked" ? observation.message : undefined,
-      structuredEvents: events,
+      status,
+      message: state.diagnostics.at(-1),
+      blockedPrompt: state.blockedPrompt,
+      structuredEvents: events as Array<Record<string, unknown>>,
     };
   }
 
   async cancel(invocation: AdapterInvocation): Promise<void> {
-    await this.herdr.submitPrompt(
-      invocation.paneId,
-      JSON.stringify({ type: "abort" }),
-    );
-    await this.herdr.cancel(invocation.paneId);
+    await this.store(invocation).appendControl({
+      action: "cancel",
+      value: { type: "abort", id: randomUUID() },
+    });
   }
 
   async collect(invocation: AdapterInvocation): Promise<AdapterResult> {
     const observation = await this.observe(invocation);
-    const transcript = await this.herdr.transcript(invocation.paneId, 2_000);
+    const events = await this.store(invocation).events();
     const status =
       observation.status === "completed"
         ? "completed"
@@ -348,9 +394,31 @@ export class PiHarnessAdapter implements HarnessAdapter {
           : "failed";
     return {
       status,
-      transcript,
-      usage: extractUsage(structuredEvents(transcript)),
+      transcript: events.map((event) => JSON.stringify(event)).join("\n"),
+      usage: [...events].reverse().find(({ usage }) => usage)?.usage ?? {
+        quality: "unknown",
+      },
     };
+  }
+
+  private store(invocation: AdapterInvocation): HarnessProtocolStore {
+    const store = this.stores.get(invocation.invocationId);
+    if (!store)
+      throw new Error(
+        `No Pi bridge store is registered for ${invocation.invocationId}`,
+      );
+    return store;
+  }
+
+  private consumer(
+    invocation: AdapterInvocation,
+  ): HarnessNormalizedStreamConsumer {
+    const consumer = this.consumers.get(invocation.invocationId);
+    if (!consumer)
+      throw new Error(
+        `No Pi normalized consumer is registered for ${invocation.invocationId}`,
+      );
+    return consumer;
   }
 }
 
@@ -475,6 +543,8 @@ export class HarnessWorkExecutor implements WorkExecutor {
   constructor(
     readonly adapters: AdapterRegistry,
     readonly context: {
+      projectId?: string;
+      stateDirectory?: string;
       runId: string;
       workspaceId: string;
       cwd: string;
@@ -537,6 +607,8 @@ export class HarnessWorkExecutor implements WorkExecutor {
         : `${context.phase.title}: ${context.phase.id}`;
     const invocationId = randomUUID();
     const request: AdapterLaunchRequest = {
+      projectId: this.context.projectId,
+      stateDirectory: this.context.stateDirectory,
       invocationId,
       runId: this.context.runId,
       phaseId: context.phase.id,

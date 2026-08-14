@@ -12,14 +12,18 @@ import {
 import { dirname, join, resolve, sep } from "node:path";
 import {
   HarnessEventSchema,
+  initialHarnessInvocationState,
+  reduceHarnessEvent,
   type HarnessCorrelation,
   type HarnessEvent,
+  type HarnessInvocationState,
 } from "./harness-events.js";
 import { Redactor } from "./security.js";
 
 export interface HarnessInvocationMetadata extends HarnessCorrelation {
   schemaVersion: 1;
   codecVersion: string;
+  cwd?: string;
   presentationLevel: string;
   createdAt: string;
   bridgePid?: number;
@@ -50,6 +54,8 @@ export class HarnessProtocolStore {
   readonly nativePath: string;
   readonly normalizedPath: string;
   readonly cursorPath: string;
+  readonly controlPath: string;
+  readonly serviceCursorPath: string;
   constructor(
     readonly stateDirectory: string,
     readonly runId: string,
@@ -69,6 +75,8 @@ export class HarnessProtocolStore {
     this.nativePath = join(this.directory, "native.jsonl");
     this.normalizedPath = join(this.directory, "normalized.jsonl");
     this.cursorPath = join(this.directory, "cursor.json");
+    this.controlPath = join(this.directory, "control.jsonl");
+    this.serviceCursorPath = join(this.directory, "service-cursor.json");
   }
 
   async initialize(metadata: HarnessInvocationMetadata): Promise<void> {
@@ -77,6 +85,7 @@ export class HarnessProtocolStore {
     await Promise.all([
       this.ensureFile(this.nativePath),
       this.ensureFile(this.normalizedPath),
+      this.ensureFile(this.controlPath),
     ]);
     const recorded =
       metadata.presentationLevel === "protocol"
@@ -92,6 +101,18 @@ export class HarnessProtocolStore {
       normalizedOffset: 0,
       updatedAt: new Date().toISOString(),
     });
+  }
+  async metadata(): Promise<HarnessInvocationMetadata> {
+    return JSON.parse(
+      await readFile(this.metadataPath, "utf8"),
+    ) as HarnessInvocationMetadata;
+  }
+  async updateMetadata(
+    update: Partial<HarnessInvocationMetadata>,
+  ): Promise<HarnessInvocationMetadata> {
+    const next = this.redactor.value({ ...(await this.metadata()), ...update });
+    await atomicWrite(this.metadataPath, `${JSON.stringify(next, null, 2)}\n`);
+    return next;
   }
   private async ensureFile(path: string) {
     const handle = await open(path, "a", 0o600);
@@ -115,6 +136,48 @@ export class HarnessProtocolStore {
   }
   async appendNormalized(event: HarnessEvent): Promise<number> {
     return this.append(this.normalizedPath, HarnessEventSchema.parse(event));
+  }
+  async appendControl(value: unknown): Promise<number> {
+    const line = `${JSON.stringify(value)}\n`;
+    const handle = await open(this.controlPath, "a", 0o600);
+    try {
+      await handle.writeFile(line);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await chmod(this.controlPath, 0o600);
+    return Buffer.byteLength(line);
+  }
+  async controlSize(): Promise<number> {
+    return (await lstat(this.controlPath).catch(() => undefined))?.size ?? 0;
+  }
+  async nativeRecordCount(): Promise<number> {
+    const value = await readFile(this.nativePath, "utf8").catch(() => "");
+    return value.split("\n").filter(Boolean).length;
+  }
+  async readControl(offset = 0): Promise<{
+    commands: unknown[];
+    offset: number;
+  }> {
+    const value = await readFile(this.controlPath, "utf8").catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+      throw error;
+    });
+    const bytes = Buffer.from(value);
+    if (offset > bytes.length) offset = 0;
+    const unread = bytes.subarray(offset).toString("utf8");
+    const finalLf = unread.lastIndexOf("\n");
+    if (finalLf < 0) return { commands: [], offset };
+    const complete = unread.slice(0, finalLf);
+    const commands = complete
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as unknown);
+    return {
+      commands,
+      offset: offset + Buffer.byteLength(unread.slice(0, finalLf + 1)),
+    };
   }
   async readCursor(): Promise<HarnessCursor> {
     try {
@@ -194,5 +257,147 @@ export class HarnessProtocolStore {
     await unlink(this.nativePath).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     });
+  }
+}
+
+interface SerializedHarnessInvocationState extends Omit<
+  HarnessInvocationState,
+  "seenEventIds"
+> {
+  seenEventIds: string[];
+}
+
+export interface HarnessServiceCursor {
+  schemaVersion: 1;
+  offset: number;
+  state: SerializedHarnessInvocationState;
+  updatedAt: string;
+}
+
+export class HarnessNormalizedStreamConsumer {
+  constructor(
+    readonly store: HarnessProtocolStore,
+    readonly maxBytes = 256_000,
+  ) {}
+
+  async load(): Promise<HarnessServiceCursor> {
+    try {
+      return JSON.parse(
+        await readFile(this.store.serviceCursorPath, "utf8"),
+      ) as HarnessServiceCursor;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        return this.initialCursor();
+      throw new Error(
+        `Durable normalized cursor is unreadable for invocation ${this.store.invocationId}: ${this.store.serviceCursorPath}`,
+        { cause: error },
+      );
+    }
+  }
+
+  async poll(): Promise<{
+    events: HarnessEvent[];
+    state: HarnessInvocationState;
+    cursor: HarnessServiceCursor;
+  }> {
+    if (!Number.isSafeInteger(this.maxBytes) || this.maxBytes < 1)
+      throw new Error(
+        "Normalized stream polling requires a positive byte bound",
+      );
+    const previous = await this.load();
+    const info = await lstat(this.store.normalizedPath).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        throw new Error(
+          `Required normalized capture is missing for invocation ${this.store.invocationId}: ${this.store.normalizedPath}`,
+          { cause: error },
+        );
+      throw error;
+    });
+    if (info.isSymbolicLink())
+      throw new Error("Normalized stream consumer refuses symbolic links");
+    if (previous.offset > info.size)
+      throw new Error(
+        "Normalized stream was truncated behind its durable cursor",
+      );
+    const handle = await open(this.store.normalizedPath, "r");
+    let bytesRead = 0;
+    const buffer = Buffer.alloc(
+      Math.min(this.maxBytes, info.size - previous.offset),
+    );
+    try {
+      if (buffer.length)
+        ({ bytesRead } = await handle.read(
+          buffer,
+          0,
+          buffer.length,
+          previous.offset,
+        ));
+    } finally {
+      await handle.close();
+    }
+    const unread = buffer.subarray(0, bytesRead).toString("utf8");
+    const finalLf = unread.lastIndexOf("\n");
+    if (finalLf < 0 && bytesRead === this.maxBytes)
+      throw new Error(
+        `Normalized stream record exceeds the ${this.maxBytes}-byte polling bound`,
+      );
+    const complete = finalLf < 0 ? "" : unread.slice(0, finalLf);
+    const consumedBytes =
+      finalLf < 0 ? 0 : Buffer.byteLength(unread.slice(0, finalLf + 1));
+    let state = this.deserialize(previous.state);
+    const events: HarnessEvent[] = [];
+    for (const line of complete.split("\n").filter(Boolean)) {
+      let event: HarnessEvent;
+      try {
+        event = HarnessEventSchema.parse(JSON.parse(line));
+      } catch (error) {
+        throw new Error(
+          `Normalized capture is incompatible at byte ${previous.offset} for invocation ${this.store.invocationId}`,
+          { cause: error },
+        );
+      }
+      if (state.seenEventIds.has(event.eventId)) continue;
+      state = reduceHarnessEvent(state, event);
+      events.push(event);
+    }
+    const cursor: HarnessServiceCursor = {
+      schemaVersion: 1,
+      offset: previous.offset + consumedBytes,
+      state: this.serialize(state),
+      updatedAt: new Date().toISOString(),
+    };
+    await atomicWrite(
+      this.store.serviceCursorPath,
+      `${JSON.stringify(cursor, null, 2)}\n`,
+    );
+    return { events, state, cursor };
+  }
+
+  async reset(): Promise<void> {
+    await atomicWrite(
+      this.store.serviceCursorPath,
+      `${JSON.stringify(this.initialCursor(), null, 2)}\n`,
+    );
+  }
+
+  private initialCursor(): HarnessServiceCursor {
+    return {
+      schemaVersion: 1,
+      offset: 0,
+      state: this.serialize(initialHarnessInvocationState()),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private serialize(
+    state: HarnessInvocationState,
+  ): SerializedHarnessInvocationState {
+    return { ...state, seenEventIds: [...state.seenEventIds] };
+  }
+
+  private deserialize(
+    state: SerializedHarnessInvocationState,
+  ): HarnessInvocationState {
+    return { ...state, seenEventIds: new Set(state.seenEventIds) };
   }
 }

@@ -1,0 +1,12 @@
+{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item-1","type":"command_execution","command":"pnpm test","status":"in_progress"}}
+{"type":"item.updated","item":{"id":"item-1","type":"command_execution","command":"pnpm test","aggregated_output":"running"}}
+{"type":"item.completed","item":{"id":"item-1","type":"command_execution","command":"pnpm test","aggregated_output":"all tests passed","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item-2","type":"reasoning","text":"private reasoning"}}
+{"type":"item.completed","item":{"id":"item-2","type":"reasoning","text":"private reasoning"}}
+{"type":"item.completed","item":{"id":"item-3","type":"agent_message","text":"Implemented the change"}}
+{"type":"item.started","item":{"id":"item-4","type":"file_change","changes":[{"path":"src/app.ts","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item-4","type":"file_change","changes":[{"path":"src/app.ts","kind":"update"}],"status":"completed"}}
+{"type":"future.optional","payload":{"value":true}}
+{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":4}}

@@ -12,10 +12,10 @@
 - [x] 2.2 Create private invocation metadata, native stream, normalized stream, and cursor files with `0600` permissions under the run raw-output directory
 - [x] 2.3 Implement protocol-specific incremental framing with partial-record buffering and Pi-compliant LF semantics that preserve U+2028 and U+2029
 - [x] 2.4 Parse native records in memory, apply structural redaction before persistence and display, and retain bounded diagnostics for malformed records
-- [ ] 2.5 Relay bidirectional commands and native responses without exposing prompts, credentials, or protocol payloads in process titles or pane output
-- [ ] 2.6 Forward cancellation and termination safely and record bridge processes, files, and ephemeral resources in run ownership
+- [x] 2.5 Relay bidirectional commands and native responses without exposing prompts, credentials, or protocol payloads in process titles or pane output
+- [x] 2.6 Forward cancellation and termination safely and record bridge processes, files, and ephemeral resources in run ownership
 - [x] 2.7 Isolate renderer failure from capture and normalization failure and publish explicit presentation-degraded diagnostics
-- [ ] 2.8 Add bridge tests for framing, backpressure, partial records, process exit, signals, stderr, permissions, redaction, and renderer degradation
+- [x] 2.8 Add bridge tests for framing, backpressure, partial records, process exit, signals, stderr, permissions, redaction, and renderer degradation
 - [x] 2.9 Define Promise-based bridge and lifecycle boundaries for existing scheduler, service, and adapter callers so Effect remains isolated from unrelated packages during migration
 - [ ] 2.10 Supervise bridge invocations in service- or run-owned Effect scopes so blocked invocations remain addressable after a scheduler response and close only on settlement, cancellation, cleanup, or shutdown
 - [ ] 2.11 Replace manual bridge timeout, polling, retry, and cancellation coordination with Effect schedules, interruption, and exactly-once scoped finalizers
@@ -23,28 +23,28 @@
 
 ## 3. Pi RPC Codec and Migration
 
-- [ ] 3.1 Implement Pi RPC command, response, agent, turn, message, tool, extension UI, retry, compaction, usage, and settlement normalization
-- [ ] 3.2 Preserve strict request/response correlation and support prompt, blocked-input response, follow-up behavior, abort, and session identity
-- [ ] 3.3 Require observed work start or explicit terminal native evidence after prompt acceptance so initial idle is never treated as completion
-- [ ] 3.4 Keep invocations active across low-level `agent_end`, retry, compaction retry, and queued continuation until `agent_settled` or terminal failure
-- [ ] 3.5 Migrate the Pi adapter from Herdr transcript parsing to bridge normalized-stream consumption
-- [ ] 3.6 Add fixture and integration tests using real Pi event shapes, repeated partial messages, thinking signatures, tool streams, extension UI events, retries, cancellation, and malformed terminal records
+- [x] 3.1 Implement Pi RPC command, response, agent, turn, message, tool, extension UI, retry, compaction, usage, and settlement normalization
+- [x] 3.2 Preserve strict request/response correlation and support prompt, blocked-input response, follow-up behavior, abort, and session identity
+- [x] 3.3 Require observed work start or explicit terminal native evidence after prompt acceptance so initial idle is never treated as completion
+- [x] 3.4 Keep invocations active across low-level `agent_end`, retry, compaction retry, and queued continuation until `agent_settled` or terminal failure
+- [x] 3.5 Migrate the Pi adapter from Herdr transcript parsing to bridge normalized-stream consumption
+- [x] 3.6 Add fixture and integration tests using real Pi event shapes, repeated partial messages, thinking signatures, tool streams, extension UI events, retries, cancellation, and malformed terminal records
 
 ## 4. Claude Code Codec and Migration
 
-- [ ] 4.1 Implement Claude stream-json normalization for system/session metadata, assistant messages, tool activity, results, usage, terminal result, failure, and resume identity
-- [ ] 4.2 Preserve Claude tool allowlists, permission mode, concrete model, cancellation, and resume behavior through the bridge
-- [ ] 4.3 Investigate whether `--verbose` is required for supported Claude stream-json correctness and remove it only if protocol fixtures prove equivalent required events
-- [ ] 4.4 Migrate the Claude adapter from pane transcript parsing to bridge normalized-stream consumption
-- [ ] 4.5 Add fixture and integration tests for normal completion, tool failure, estimated usage, resume, unavailable authentication, cancellation, and protocol-version changes
+- [x] 4.1 Implement Claude stream-json normalization for system/session metadata, assistant messages, tool activity, results, usage, terminal result, failure, and resume identity
+- [x] 4.2 Preserve Claude tool allowlists, permission mode, concrete model, cancellation, and resume behavior through the bridge
+- [x] 4.3 Investigate whether `--verbose` is required for supported Claude stream-json correctness and remove it only if protocol fixtures prove equivalent required events
+- [x] 4.4 Migrate the Claude adapter from pane transcript parsing to bridge normalized-stream consumption
+- [x] 4.5 Add fixture and integration tests for normal completion, tool failure, estimated usage, resume, unavailable authentication, cancellation, and protocol-version changes
 
 ## 5. Codex CLI Codec and Migration
 
-- [ ] 5.1 Implement Codex JSONL normalization for thread/session startup, turns, items, commands, messages, usage, completion, failure, and resume identity
-- [ ] 5.2 Preserve Codex sandbox, approval policy, cwd, model selection, cancellation, and resume behavior through the bridge
-- [ ] 5.3 Use native terminal events and process state to distinguish item completion from fully settled invocation completion
-- [ ] 5.4 Migrate the Codex adapter from pane transcript parsing to bridge normalized-stream consumption
-- [ ] 5.5 Add fixture and integration tests for normal completion, command output, review or item events, usage, resume, authentication failure, cancellation, and unknown optional events
+- [x] 5.1 Implement Codex JSONL normalization for thread/session startup, turns, items, commands, messages, usage, completion, failure, and resume identity
+- [x] 5.2 Preserve Codex sandbox, approval policy, cwd, model selection, cancellation, and resume behavior through the bridge
+- [x] 5.3 Use native terminal events and process state to distinguish item completion from fully settled invocation completion
+- [x] 5.4 Migrate the Codex adapter from pane transcript parsing to bridge normalized-stream consumption
+- [x] 5.5 Add fixture and integration tests for normal completion, command output, review or item events, usage, resume, authentication failure, cancellation, and unknown optional events
 
 ## 6. Compact Herdr Pane Rendering
 
@@ -55,17 +55,17 @@
 - [x] 6.5 Bound and redact commands, paths, message text, and tool output in verbose mode and provide explicit retained-output references
 - [x] 6.6 Implement quiet rendering with only startup, attention, failure, and final summary milestones
 - [x] 6.7 Implement explicit audited protocol rendering of redacted native records with a machine-output warning
-- [ ] 6.8 Set informative owned pane labels and titles containing change or run, phase, harness, and normalized status
-- [ ] 6.9 Add semantic renderer tests across Pi, Claude, Codex, custom tools, long output, secrets, retries, failures, and usage-quality variants
+- [x] 6.8 Set informative owned pane labels and titles containing change or run, phase, harness, and normalized status
+- [x] 6.9 Add semantic renderer tests across Pi, Claude, Codex, custom tools, long output, secrets, retries, failures, and usage-quality variants
 
 ## 7. Service Consumption, Progress, and Recovery
 
-- [ ] 7.1 Add incremental normalized-stream consumption with durable cursors and bounded polling or private transport
-- [ ] 7.2 Publish significant normalized milestones through authenticated ordered service events while coalescing high-frequency updates
-- [ ] 7.3 Build invocation status, usage, evidence summaries, blocked input, and settlement from normalized events rather than pane content
+- [x] 7.1 Add incremental normalized-stream consumption with durable cursors and bounded polling or private transport
+- [x] 7.2 Publish significant normalized milestones through authenticated ordered service events while coalescing high-frequency updates
+- [x] 7.3 Build invocation status, usage, evidence summaries, blocked input, and settlement from normalized events rather than pane content
 - [ ] 7.4 Reconcile active bridge and harness processes after service restart from durable ownership records, recreate service/run Effect supervision, and resume from the last durable cursor without duplicate milestones
 - [x] 7.5 Rebuild missing cursor metadata from framed retained records and durable normalized identities
-- [ ] 7.6 Fail closed with actionable compatibility evidence when required capture or normalization semantics cannot be recovered
+- [x] 7.6 Fail closed with actionable compatibility evidence when required capture or normalization semantics cannot be recovered
 - [ ] 7.7 Integrate normalized progress with CLI and dashboard event consumers when `improve-cli-operator-experience` is available
 - [ ] 7.8 Add recovery tests for service restart, bridge survival beyond the prior Effect runtime, missing cursor, duplicate records, truncated trailing records, renderer failure, and missing native files
 

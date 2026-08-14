@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"550e8400-e29b-41d4-a716-446655440000","model":"claude-sonnet","tools":["Read","Edit","Bash"],"permissionMode":"dontAsk"}
+{"type":"assistant","session_id":"550e8400-e29b-41d4-a716-446655440000","message":{"content":[{"type":"text","text":"Checking the project"},{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"package.json"}},{"type":"thinking","thinking":"private","signature":"encrypted-signature"}],"usage":{"input_tokens":8,"output_tokens":3}}}
+{"type":"user","session_id":"550e8400-e29b-41d4-a716-446655440000","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"permission denied","is_error":true}]}}
+{"type":"assistant","session_id":"550e8400-e29b-41d4-a716-446655440000","message":{"content":[{"type":"text","text":"Handled the tool failure"}],"usage":{"input_tokens":10,"output_tokens":5}}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1200,"session_id":"550e8400-e29b-41d4-a716-446655440000","result":"Handled the tool failure","usage":{"input_tokens":10,"output_tokens":5},"total_cost_usd":0.02}

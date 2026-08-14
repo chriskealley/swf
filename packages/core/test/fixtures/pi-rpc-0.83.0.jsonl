@@ -1,0 +1,22 @@
+{"id":"state-1","type":"response","command":"get_state","success":true,"data":{"sessionId":"session-123","isStreaming":false,"isCompacting":false,"pendingMessageCount":0}}
+{"id":"prompt-1","type":"response","command":"prompt","success":true}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[]}}
+{"type":"message_update","message":{"role":"assistant","content":[{"type":"text","text":"Repeated accumulated partial"},{"type":"thinking","thinking":"private","thinkingSignature":"signature-value"}]},"assistantMessageEvent":{"type":"text_delta","delta":"partial"}}
+{"type":"tool_execution_start","toolCallId":"tool-1","toolName":"read","args":{"path":"proposal.md"}}
+{"type":"tool_execution_update","toolCallId":"tool-1","toolName":"read","args":{"path":"proposal.md"},"partialResult":{"content":"long output"}}
+{"type":"tool_execution_end","toolCallId":"tool-1","toolName":"read","result":{"content":"done"},"isError":false}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Read the proposal"},{"type":"thinking","thinking":"private","thinkingSignature":"signature-value"}],"usage":{"input":11,"output":4,"cost":{"total":0.002}}}}
+{"type":"extension_ui_request","id":"notify-1","method":"notify","message":"FYI","notifyType":"info"}
+{"type":"extension_ui_request","id":"question-1","method":"confirm","title":"Continue?","message":"Apply changes?"}
+{"type":"queue_update","steering":[],"followUp":["continue after retry"]}
+{"type":"agent_end","messages":[],"willRetry":true}
+{"type":"compaction_start","reason":"overflow"}
+{"type":"compaction_end","reason":"overflow","aborted":false,"willRetry":true}
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":100,"errorMessage":"rate limited"}
+{"type":"auto_retry_end","success":true,"attempt":1}
+{"type":"summarization_retry_scheduled","attempt":1,"maxAttempts":2,"delayMs":50,"errorMessage":"temporary"}
+{"type":"summarization_retry_attempt_start","source":"compaction","reason":"overflow"}
+{"type":"summarization_retry_finished"}
+{"type":"agent_settled"}

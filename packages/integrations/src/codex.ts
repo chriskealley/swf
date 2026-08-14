@@ -3,6 +3,7 @@ import {
   type AdapterInvocation,
   type AdapterLaunchRequest,
   type AdapterResult,
+  CodexJsonlCodec,
   type HerdrClient,
 } from "@swf/core";
 import {
@@ -29,6 +30,30 @@ export class CodexHarnessAdapter extends CliHarnessAdapter {
     super(herdr);
   }
 
+  protected override bridgeCodec(): CodexJsonlCodec {
+    return new CodexJsonlCodec();
+  }
+
+  protected override bridgeLaunchArguments(
+    request: AdapterLaunchRequest,
+  ): string[] {
+    return [...this.arguments(request), "-"];
+  }
+
+  protected override bridgeResumeArguments(
+    invocation: AdapterInvocation,
+  ): string[] {
+    return [
+      "exec",
+      "resume",
+      "--json",
+      ...(invocation.nativeSessionId
+        ? [invocation.nativeSessionId]
+        : ["--last"]),
+      "-",
+    ];
+  }
+
   protected override async authentication(): Promise<string | undefined> {
     const result = await this.herdr.runner.run(this.executable, [
       "login",
@@ -39,9 +64,8 @@ export class CodexHarnessAdapter extends CliHarnessAdapter {
       : "Codex authentication is unavailable; run codex login";
   }
 
-  protected launchCommand(request: AdapterLaunchRequest): string {
+  private arguments(request: AdapterLaunchRequest): string[] {
     const args = [
-      this.executable,
       "exec",
       "--json",
       "--sandbox",
@@ -52,8 +76,13 @@ export class CodexHarnessAdapter extends CliHarnessAdapter {
       request.cwd,
     ];
     if (request.model) args.push("--model", request.model);
-    args.push(request.prompt);
-    return args.map(shellQuote).join(" ");
+    return args;
+  }
+
+  protected launchCommand(request: AdapterLaunchRequest): string {
+    return [this.executable, ...this.arguments(request), request.prompt]
+      .map(shellQuote)
+      .join(" ");
   }
 
   protected resumeCommand(

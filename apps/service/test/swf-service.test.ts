@@ -13,6 +13,7 @@ import {
   defaultTemplateFiles,
   HerdrClient,
   NodeCommandRunner,
+  normalizedEvent,
   RunEventStore,
   produceDefaultPlanningArtifacts,
   type AdapterInvocation,
@@ -1357,6 +1358,66 @@ describe("user-scoped SWF service", () => {
       response: "Continue",
     });
     expect(submitted).toEqual(["Continue"]);
+    await service.shutdown();
+  });
+
+  it("publishes ordered harness milestones while coalescing noisy updates", async () => {
+    const { service } = await setup();
+    const subscription = service.subscribe();
+    const iterator = subscription[Symbol.asyncIterator]();
+    // Consume service startup and project registration.
+    await iterator.next();
+    await iterator.next();
+    const invocation: AdapterInvocation = {
+      invocationId: "progress-invocation",
+      runId,
+      phaseId: "planning",
+      workUnitId: "agent",
+      paneId: "pane",
+      status: "running",
+      startedAt: "2026-08-14T00:00:00.000Z",
+    };
+    const progressEvent = (
+      type: "ready" | "toolProgress" | "messageSummary",
+      sequence: number,
+    ) =>
+      normalizedEvent({
+        projectId,
+        runId,
+        phaseId: "planning",
+        workUnitId: "agent",
+        invocationId: invocation.invocationId,
+        harness: "pi",
+        sourceCursor: String(sequence),
+        timestamp: "2026-08-14T00:00:00.000Z",
+        type,
+        required: false,
+        sequence,
+        data: { sequence },
+      });
+    service.reportHarnessProgress(projectId, invocation, {
+      status: "running",
+      structuredEvents: [
+        progressEvent("ready", 1),
+        progressEvent("toolProgress", 2),
+        progressEvent("messageSummary", 3),
+        progressEvent("messageSummary", 4),
+      ],
+    });
+    const ready = await iterator.next();
+    const summary = await iterator.next();
+    expect(ready.value).toMatchObject({
+      type: "harness.progress",
+      projectId,
+      runId,
+      data: { event: { type: "ready", sequence: 1 } },
+    });
+    expect(summary.value).toMatchObject({
+      id: ready.value!.id + 1,
+      type: "harness.progress",
+      data: { event: { type: "messageSummary", sequence: 4 } },
+    });
+    subscription.close();
     await service.shutdown();
   });
 
