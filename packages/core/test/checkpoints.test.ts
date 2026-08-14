@@ -201,11 +201,34 @@ describe("portable OpenSpec dossier", () => {
       runId,
       artifacts,
       finalReport: "Change complete; token=super-secret",
+      invocations: [
+        {
+          invocationId: "invocation-1",
+          phaseId: "building",
+          harness: "pi",
+          model: "test-model",
+          status: "completed",
+          cost: { amountUsd: 0.25, quality: "estimated" },
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        },
+      ],
     });
     expect(path).toBe(join(change, "evidence", "dossier.json"));
     expect(dossier).toMatchObject({
       rawHistory: "unavailable-in-portable-dossier",
       finalReport: "Change complete; token=[REDACTED]",
+      invocationRoutes: [
+        expect.objectContaining({
+          status: "completed",
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
+            costUsd: 0.25,
+            quality: "estimated",
+          },
+        }),
+      ],
     });
     await expect(validateChangeDossier(change)).resolves.toMatchObject({
       runId,

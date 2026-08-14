@@ -74,6 +74,14 @@ describe("project initialization", () => {
     expect(
       await validateProjectConfiguration((await findProjectRoot(root))!),
     ).toEqual([]);
+    const generatedConfig = await readFile(
+      join(root, ".swf", "config.yaml"),
+      "utf8",
+    );
+    expect(generatedConfig).toContain("harnessPresentation:");
+    expect(generatedConfig).toContain("level: normal");
+    expect(generatedConfig).toContain("nativeProtocol: preview-confirm");
+    expect(generatedConfig).toContain("preserveNormalized: true");
   });
 
   it("does not overwrite existing project-owned configuration", async () => {

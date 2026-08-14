@@ -26,6 +26,9 @@ import {
   GitCommandError,
   HarnessWorkExecutor,
   HarnessEventSchema,
+  HarnessLifecycleSupervisor,
+  HarnessNormalizedStreamConsumer,
+  HarnessProtocolStore,
   HerdrClient,
   NodeCommandRunner,
   PiHarnessAdapter,
@@ -465,6 +468,8 @@ export interface ServiceQuery {
     | "configuration"
     | "delivery"
     | "output"
+    | "native-output"
+    | "invocation-diagnostics"
     | "budgets"
     | "operations"
     | "blocked-inputs"
@@ -478,6 +483,10 @@ export interface ServiceQuery {
   projectId?: string;
   runId?: string;
   ref?: string;
+  invocationId?: string;
+  cursor?: number;
+  limit?: number;
+  maxBytes?: number;
   raw?: boolean;
   phaseId?: string;
 }
@@ -652,6 +661,7 @@ export class SwfService {
   private readonly redactor: Redactor;
   private readonly audit: AuditLog;
   private readonly blockedAgents = new BlockedAgentRouter();
+  private readonly harnessSupervisor = new HarnessLifecycleSupervisor();
   private readonly activeWork = new Map<string, WorkRegistration>();
   private readonly pendingPruning = new Map<string, PendingPruning>();
   private readonly deliveryMonitors = new Map<string, AbortController>();
@@ -857,6 +867,10 @@ export class SwfService {
 
   blockedInputs() {
     return this.blockedAgents.list();
+  }
+
+  supervisedHarnessInvocations(): number {
+    return this.harnessSupervisor.size();
   }
 
   async submitBlockedInput(
@@ -1276,6 +1290,152 @@ export class SwfService {
     }
   }
 
+  private async inspectNativeOutput(
+    project: RegisteredProject,
+    runId: string,
+    invocationId: string,
+    input: { cursor?: number; limit?: number; maxBytes?: number },
+  ): Promise<unknown> {
+    for (const [name, value] of Object.entries(input))
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
+        throw new Error(`${name} must be a non-negative integer`);
+    const run = await new RunEventStore(project.stateDirectory, {
+      redaction: this.redactor,
+    }).load(runId);
+    const ownership = await new RuntimeOwnershipStore(
+      project.stateDirectory,
+    ).load(runId);
+    const protocolResource = ownership?.resources.find(
+      (resource) =>
+        resource.kind === "protocol" && resource.parentId === invocationId,
+    );
+    if (!run.state.invocations[invocationId] && !protocolResource)
+      throw new Error(
+        `Invocation ${invocationId} is not recorded as owned by run ${runId}`,
+      );
+    const store = new HarnessProtocolStore(
+      project.stateDirectory,
+      runId,
+      invocationId,
+      this.redactor,
+    );
+    if (
+      protocolResource &&
+      (await realpath(protocolResource.resourceId)) !==
+        (await realpath(store.directory))
+    )
+      throw new Error("Owned protocol resource does not match the invocation");
+    const cursor = Math.max(0, input.cursor ?? 0);
+    try {
+      const [metadata, inspected] = await Promise.all([
+        store.metadata(),
+        store.inspectNative({
+          start: cursor,
+          limit: input.limit,
+          maxBytes: input.maxBytes,
+        }),
+      ]);
+      return {
+        invocationId,
+        cursor,
+        nextCursor: cursor + inspected.records.length,
+        records: inspected.records,
+        truncated: inspected.truncated,
+        metadata: {
+          harness: metadata.harness,
+          codecVersion: metadata.codecVersion,
+          captureHealth: metadata.captureHealth,
+          createdAt: metadata.createdAt,
+        },
+      };
+    } catch (error) {
+      if (isNotFound(error))
+        return {
+          invocationId,
+          cursor,
+          records: [],
+          available: false,
+          reason: "Native protocol output was pruned or is unavailable",
+        };
+      throw error;
+    }
+  }
+
+  private async harnessInvocationDiagnostics(
+    project: RegisteredProject,
+    runId: string,
+    invocationId: string,
+  ): Promise<unknown> {
+    const run = await new RunEventStore(project.stateDirectory, {
+      redaction: this.redactor,
+    }).load(runId);
+    const invocation = run.state.invocations[invocationId];
+    const ownership = await new RuntimeOwnershipStore(
+      project.stateDirectory,
+    ).load(runId);
+    const protocolResource = ownership?.resources.find(
+      (resource) =>
+        resource.kind === "protocol" && resource.parentId === invocationId,
+    );
+    if (!invocation && !protocolResource)
+      throw new Error(`Unknown invocation ${invocationId} for run ${runId}`);
+    const store = new HarnessProtocolStore(
+      project.stateDirectory,
+      runId,
+      invocationId,
+      this.redactor,
+    );
+    if (
+      protocolResource &&
+      (await realpath(protocolResource.resourceId)) !==
+        (await realpath(store.directory))
+    )
+      throw new Error("Owned protocol resource does not match the invocation");
+    try {
+      const [metadata, cursor, serviceCursor] = await Promise.all([
+        store.metadata(),
+        store.readCursor(),
+        new HarnessNormalizedStreamConsumer(store).load(),
+      ]);
+      return {
+        invocationId,
+        phaseId: invocation?.phaseId ?? metadata.phaseId,
+        status: serviceCursor.state.status,
+        presentationLevel: metadata.presentationLevel,
+        codecVersion: metadata.codecVersion,
+        captureHealth: metadata.captureHealth,
+        cursor: {
+          nativeOffset: cursor.nativeOffset,
+          normalizedOffset: cursor.normalizedOffset,
+          consumedNormalizedOffset: serviceCursor.offset,
+          lastEventId: cursor.lastEventId,
+          updatedAt: serviceCursor.updatedAt,
+        },
+        degradation: {
+          presentation: metadata.presentationDegraded === true,
+          diagnostics: serviceCursor.state.diagnostics,
+        },
+        nativeAvailable: metadata.nativeAvailable !== false,
+        nativePrunedAt: metadata.nativePrunedAt,
+      };
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      return {
+        invocationId,
+        phaseId: invocation?.phaseId,
+        status: invocation?.status ?? "unknown",
+        available: false,
+        captureHealth: "unavailable",
+        degradation: {
+          presentation: false,
+          diagnostics: [
+            "Harness protocol metadata or normalized cursor is unavailable",
+          ],
+        },
+      };
+    }
+  }
+
   async query(query: ServiceQuery): Promise<unknown> {
     return this.redactor.value(await this.queryUnredacted(query));
   }
@@ -1388,6 +1548,29 @@ export class SwfService {
       if (!query.ref) throw new Error("ref is required for output");
       return this.readOutput(project, query.runId, query.ref, query.raw);
     }
+    if (query.resource === "native-output") {
+      if (!query.invocationId)
+        throw new Error("invocationId is required for native-output");
+      return this.inspectNativeOutput(
+        project,
+        query.runId,
+        query.invocationId,
+        {
+          cursor: query.cursor,
+          limit: query.limit,
+          maxBytes: query.maxBytes,
+        },
+      );
+    }
+    if (query.resource === "invocation-diagnostics") {
+      if (!query.invocationId)
+        throw new Error("invocationId is required for invocation-diagnostics");
+      return this.harnessInvocationDiagnostics(
+        project,
+        query.runId,
+        query.invocationId,
+      );
+    }
     const loaded = await store.load(query.runId);
     if (query.resource === "operator-projection")
       return this.operatorProjection(query.projectId, query.runId);
@@ -1445,8 +1628,36 @@ export class SwfService {
                 modelTier: phase.modelTier ?? profile.modelTier,
               }).route
             : undefined;
+        const ownership = await new RuntimeOwnershipStore(
+          project.stateDirectory,
+        ).load(query.runId);
+        const diagnosticInvocationIds = [
+          ...new Set([
+            ...Object.values(loaded.state.invocations).map(
+              ({ invocationId }) => invocationId,
+            ),
+            ...(ownership?.resources ?? [])
+              .filter(({ kind, parentId }) => kind === "protocol" && parentId)
+              .map(({ parentId }) => parentId!),
+          ]),
+        ];
+        const harnessDiagnostics = (
+          await Promise.all(
+            diagnosticInvocationIds.map((invocationId) =>
+              this.harnessInvocationDiagnostics(
+                project,
+                query.runId!,
+                invocationId,
+              ),
+            ),
+          )
+        ).filter(
+          (diagnostic) =>
+            (diagnostic as { phaseId?: string }).phaseId === query.phaseId,
+        );
         return {
           phase: loaded.state.phases[query.phaseId],
+          harnessDiagnostics,
           explanation: explainPhaseContract({
             phaseId: query.phaseId,
             contract: profile?.contract ?? phaseContractFor(query.phaseId),
@@ -1567,6 +1778,15 @@ export class SwfService {
         const ref = `${prefix}/${entry.name}`;
         if (entry.isDirectory()) await walk(runId, path, ref);
         else if (entry.isFile()) {
+          if (
+            [
+              "normalized.jsonl",
+              "metadata.json",
+              "cursor.json",
+              "service-cursor.json",
+            ].includes(entry.name)
+          )
+            continue;
           const info = await stat(path);
           files.push({
             runId,
@@ -1710,6 +1930,19 @@ export class SwfService {
       if (candidate && removed) {
         const project = await this.project(projectId);
         const prunedAt = new Date().toISOString();
+        const invocationMatch = candidate.ref.match(
+          /^raw\/invocations\/([^/]+)\/native\.jsonl$/,
+        );
+        if (invocationMatch?.[1])
+          await new HarnessProtocolStore(
+            project.stateDirectory,
+            candidate.runId,
+            invocationMatch[1],
+            this.redactor,
+          ).updateMetadata({
+            nativeAvailable: false,
+            nativePrunedAt: prunedAt,
+          });
         await new ArtifactStore(
           project.stateDirectory,
           candidate.runId,
@@ -2488,6 +2721,14 @@ export class SwfService {
                 metadata: { retained: "true" },
               });
             active = { adapter: launchedAdapter, invocation };
+            await this.harnessSupervisor.supervise({
+              invocationId: invocation.invocationId,
+              run: async (signal) =>
+                new Promise<void>((_, reject) =>
+                  signal.addEventListener("abort", () => reject(signal.reason)),
+                ),
+              interrupt: async () => launchedAdapter.cancel(invocation),
+            });
           },
           onObservation: async (observedAdapter, invocation, observation) => {
             this.reportHarnessProgress(
@@ -2535,6 +2776,7 @@ export class SwfService {
                 },
               },
             });
+            await this.harnessSupervisor.complete(invocation.invocationId);
           },
         },
         fallback,
@@ -2550,7 +2792,12 @@ export class SwfService {
       projectId: project.projectId,
       safeBoundary,
       interrupt: async () => {
-        if (active) await active.adapter.cancel(active.invocation);
+        if (!active) return;
+        if (this.harnessSupervisor.has(active.invocation.invocationId))
+          await this.harnessSupervisor.interrupt(
+            active.invocation.invocationId,
+          );
+        else await active.adapter.cancel(active.invocation);
       },
     });
     const reusableLatePlanningOutput =
@@ -2587,6 +2834,7 @@ export class SwfService {
               model: route.concreteModel,
               modelTier: route.requestedTier,
               modelRoute: modelRouteExplanation(route),
+              presentationLevel: settings.config.harnessPresentation.level,
               timeoutMs: settings.policy.timeoutMinutes
                 ? settings.policy.timeoutMinutes * 60_000
                 : undefined,
@@ -4770,8 +5018,13 @@ export class SwfService {
     const work = [...this.activeWork.values()];
     for (const controller of this.deliveryMonitors.values()) controller.abort();
     this.deliveryMonitors.clear();
-    if (force) await Promise.all(work.map((item) => item.interrupt()));
-    else await Promise.all(work.map((item) => item.safeBoundary));
+    if (force) {
+      await Promise.all(work.map((item) => item.interrupt()));
+      await this.harnessSupervisor.close(true);
+    } else {
+      await Promise.all(work.map((item) => item.safeBoundary));
+      await this.harnessSupervisor.close(false);
+    }
 
     for (const project of await this.registry.reconcile()) {
       if (project.availability !== "available") continue;
@@ -4856,6 +5109,133 @@ export class SwfService {
     };
   }
 
+  private async recoverHarnessSupervision(
+    project: RegisteredProject,
+    state: RunState,
+  ): Promise<number> {
+    const ownership = await new RuntimeOwnershipStore(
+      project.stateDirectory,
+    ).load(state.run.runId);
+    if (!ownership) return 0;
+    let recovered = 0;
+    for (const resource of ownership.resources.filter(
+      ({ kind }) => kind === "protocol",
+    )) {
+      const invocationId = resource.parentId;
+      if (!invocationId || this.harnessSupervisor.has(invocationId)) continue;
+      const store = new HarnessProtocolStore(
+        project.stateDirectory,
+        state.run.runId,
+        invocationId,
+        this.redactor,
+      );
+      const metadata = await store.metadata();
+      const adapter = this.harnessAdapters.find(
+        ({ id }) => id === metadata.harness,
+      );
+      if (!adapter?.adopt) continue;
+      const ownedProcess = ownership.resources.find(
+        (candidate) =>
+          candidate.kind === "process" &&
+          candidate.metadata?.invocationId === invocationId,
+      );
+      const paneId =
+        ownedProcess?.parentId ??
+        ownership.resources.find(({ kind }) => kind === "pane")?.resourceId;
+      if (!paneId) continue;
+      const invocation: AdapterInvocation = {
+        invocationId,
+        runId: state.run.runId,
+        phaseId: metadata.phaseId,
+        workUnitId: metadata.workUnitId,
+        paneId,
+        workspaceId: ownership.resources.find(
+          ({ kind }) => kind === "workspace",
+        )?.resourceId,
+        processId: ownedProcess?.resourceId,
+        ownedProcessIds: ownership.resources
+          .filter(
+            (candidate) =>
+              candidate.kind === "process" &&
+              candidate.metadata?.invocationId === invocationId,
+          )
+          .map(({ resourceId }) => resourceId),
+        protocolDirectory: resource.resourceId,
+        status: "unknown",
+        startedAt: metadata.createdAt,
+        nativeSessionId: metadata.nativeSessionId,
+      };
+      await adapter.adopt({
+        stateDirectory: project.stateDirectory,
+        invocation,
+      });
+      const observe = async (): Promise<"continue" | "done"> => {
+        const observation = await adapter.observe(invocation);
+        this.reportHarnessProgress(project.projectId, invocation, observation);
+        this.reportBlockedAgent(adapter, invocation, observation);
+        return ["completed", "failed", "cancelled"].includes(observation.status)
+          ? "done"
+          : "continue";
+      };
+      const first = await observe();
+      if (first === "done") continue;
+      const paneStatus = await this.herdr.reconcilePane(paneId);
+      if (paneStatus === "missing") {
+        this.broker.publish({
+          type: "harness.recovery-error",
+          projectId: project.projectId,
+          runId: state.run.runId,
+          data: {
+            invocationId,
+            reason: "owned bridge pane is missing before terminal settlement",
+          },
+        });
+        continue;
+      }
+      await this.harnessSupervisor.supervisePolling({
+        invocationId,
+        intervalMs: 250,
+        poll: async () => {
+          try {
+            return await observe();
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            this.broker.publish({
+              type: "harness.supervision-error",
+              projectId: project.projectId,
+              runId: state.run.runId,
+              data: { invocationId, message },
+            });
+            throw error;
+          }
+        },
+        interrupt: async () => adapter.cancel(invocation),
+        finalize: async () => {
+          this.broker.publish({
+            type: "harness.supervision-ended",
+            projectId: project.projectId,
+            runId: state.run.runId,
+            data: { invocationId },
+          });
+        },
+      });
+      recovered += 1;
+      this.broker.publish({
+        type: "harness.supervision-recovered",
+        projectId: project.projectId,
+        runId: state.run.runId,
+        data: {
+          invocationId,
+          bridgePid: metadata.bridgePid,
+          nativePid: metadata.nativePid,
+          cursor: (await store.readCursor()).normalizedOffset,
+        },
+      });
+    }
+    return recovered;
+  }
+
   async recover(reconcile?: RecoveryReconciler): Promise<void> {
     this.requireRunning();
     const projects = await this.registry.reconcile();
@@ -4894,6 +5274,7 @@ export class SwfService {
         }
         if (!["running", "blocked", "paused"].includes(state.run.status))
           continue;
+        await this.recoverHarnessSupervision(project, state);
         const action = reconcile
           ? await reconcile(project, state)
           : await this.reconcileRecoveredRun(project, state);

@@ -27,6 +27,7 @@ export * from "./release.js";
 export * from "./operator-actions.js";
 export * from "./operator-projection.js";
 export * from "./harness-events.js";
+export * from "./harness-lifecycle.js";
 export * from "./harness-codecs.js";
 export * from "./harness-presentation.js";
 export * from "./harness-protocol.js";

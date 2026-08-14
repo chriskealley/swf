@@ -33,13 +33,21 @@ swf prune --project <project-id> --budget 1073741824
 swf prune --project <project-id> --confirm <confirmation-id>
 ```
 
-Confirmed pruning removes only eligible files below a run's `raw/` directory. It preserves events, invocation metadata, token/cost records, summaries, artifact manifests, approvals, checkpoints, delivery records, and the committed OpenSpec dossier. Every removed reference is retained with `rawOutputAvailable: false`, a pruning timestamp, and reason `retention-policy`; `retention.jsonl` and the service audit log record the operation.
+Confirmed pruning removes only eligible native protocol, control, and legacy raw-output files below a run's `raw/` directory. It preserves normalized invocation events, cursor-safe terminal state, invocation metadata, token/cost records, summaries, artifact manifests, approvals, checkpoints, delivery records, and the committed OpenSpec dossier. Metadata records when native protocol output became unavailable; `retention.jsonl` and the service audit log record every removed reference.
 
 Export a run before pruning when full transcripts must be archived:
 
 ```sh
 swf transfer export --project <project-id> --run <run-id> ./run.swf-export.json
 ```
+
+## Harness output and diagnostics
+
+Generated projects use `harnessPresentation.level: normal`, which shows compact readiness, work, attention, failure, and settlement milestones. Use `quiet` for unattended panes and `verbose` for bounded redacted message and tool detail. Reserve `protocol` for audited diagnosis: it displays redacted machine records and can still contain sensitive operational context. A presentation change applies to newly launched invocations.
+
+Routine investigation starts with `swf status <change>` and the phase/invocation views. Invocation diagnostics expose the effective presentation level, codec version, capture health, durable native and normalized cursors, consumed cursor, and renderer degradation without returning native payloads. Use authenticated `native-output` inspection only when normalized diagnostics are insufficient; always request a bounded cursor, record limit, and byte limit.
+
+After service restart, SWF re-adopts owned surviving bridge processes and resumes after the durable service cursor. Already-consumed milestones are not replayed. If native output was pruned, normalized terminal state and diagnostics remain available. Missing or incompatible required normalized capture fails closed; retain the invocation directory and run export before attempting manual repair.
 
 ## Cost and token budgets
 

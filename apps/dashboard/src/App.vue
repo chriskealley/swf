@@ -8,6 +8,7 @@ import {
   bytes,
   formatAggregateCosts,
   formatInvocationCost,
+  normalizedHarnessProgress,
 } from "./model.js";
 import type {
   AdapterDiagnostic,
@@ -42,6 +43,7 @@ const error = ref("");
 const liveState = ref<
   "offline" | "connecting" | "live" | "reconnecting" | "closed"
 >("offline");
+const recentHarnessProgress = ref<string[]>([]);
 let unsubscribe: (() => void) | undefined;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -117,7 +119,18 @@ async function connect() {
   message.value = "Connected to the local SWF service.";
   unsubscribe?.();
   unsubscribe = api.value.subscribe(
-    () => {
+    (event) => {
+      if (
+        event.projectId === project.value?.projectId &&
+        event.runId === detail.value?.state.run.runId
+      ) {
+        const progress = normalizedHarnessProgress(event);
+        if (progress && recentHarnessProgress.value.at(-1) !== progress)
+          recentHarnessProgress.value = [
+            ...recentHarnessProgress.value.slice(-7),
+            progress,
+          ];
+      }
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => void refreshCurrent(), 100);
     },
@@ -160,6 +173,7 @@ async function openProject(projectId: string, clearRun = true) {
 
 async function openRun(runId: string, clearOutput = true) {
   if (!project.value) return;
+  if (clearOutput) recentHarnessProgress.value = [];
   const loaded = await busy(() =>
     Promise.all([
       api.value!.query<RunDetail>("run", {
@@ -763,6 +777,19 @@ onUnmounted(() => {
             Cancel
           </button>
         </div>
+
+        <section
+          v-if="recentHarnessProgress.length"
+          aria-labelledby="harness-progress-title"
+          aria-live="polite"
+        >
+          <h2 id="harness-progress-title">Live harness progress</h2>
+          <ul class="compact-list">
+            <li v-for="(progress, index) in recentHarnessProgress" :key="index">
+              <span>{{ progress }}</span>
+            </li>
+          </ul>
+        </section>
 
         <section aria-labelledby="timeline-title">
           <h2 id="timeline-title">Phase timeline</h2>

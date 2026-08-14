@@ -252,12 +252,24 @@ describe("CLI progress and interaction", () => {
             event: { context: { phaseId: "building" }, data: {} },
           },
         };
-        yield { id: 3, type: "delivery.recorded", data: {} };
+        yield {
+          id: 3,
+          type: "harness.progress",
+          data: {
+            event: {
+              type: "blocked",
+              harness: "pi",
+              context: { phaseId: "building" },
+            },
+          },
+        };
+        yield { id: 4, type: "delivery.recorded", data: {} };
       },
       { attempts: 1 },
     );
     expect(lines).toEqual([
       "work-unit.transitioned building",
+      "harness.blocked building pi",
       "delivery.recorded",
     ]);
   });

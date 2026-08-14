@@ -65,7 +65,9 @@ class HarnessRunner implements CommandRunner {
       if (launched.includes("harness-bridge-cli")) {
         const descriptorPath = [...launched.matchAll(/'([^']+)'/g)].at(-1)?.[1];
         if (!descriptorPath) throw new Error("Missing bridge descriptor path");
-        const descriptor = JSON.parse(await readFile(descriptorPath, "utf8")) as {
+        const descriptor = JSON.parse(
+          await readFile(descriptorPath, "utf8"),
+        ) as {
           stateDirectory: string;
           command: string;
           args: string[];
@@ -78,7 +80,9 @@ class HarnessRunner implements CommandRunner {
             harness: string;
           };
         };
-        this.calls.push(`native ${descriptor.command} ${descriptor.args.join(" ")}`);
+        this.calls.push(
+          `native ${descriptor.command} ${descriptor.args.join(" ")}`,
+        );
         const store = new HarnessProtocolStore(
           descriptor.stateDirectory,
           descriptor.context.runId,
@@ -91,13 +95,37 @@ class HarnessRunner implements CommandRunner {
         const records =
           descriptor.command === "claude"
             ? [
-                { type: "system", subtype: "init", session_id: "550e8400-e29b-41d4-a716-446655440000", model: "test-model", tools: ["Read", "Edit"] },
-                { type: "assistant", session_id: "550e8400-e29b-41d4-a716-446655440000", message: { content: [{ type: "text", text: "done" }], usage: { input_tokens: 8, output_tokens: 3 } } },
-                { type: "result", session_id: "550e8400-e29b-41d4-a716-446655440000", usage: { input_tokens: 8, output_tokens: 3 }, total_cost_usd: 0.02 },
+                {
+                  type: "system",
+                  subtype: "init",
+                  session_id: "550e8400-e29b-41d4-a716-446655440000",
+                  model: "test-model",
+                  tools: ["Read", "Edit"],
+                },
+                {
+                  type: "assistant",
+                  session_id: "550e8400-e29b-41d4-a716-446655440000",
+                  message: {
+                    content: [{ type: "text", text: "done" }],
+                    usage: { input_tokens: 8, output_tokens: 3 },
+                  },
+                },
+                {
+                  type: "result",
+                  session_id: "550e8400-e29b-41d4-a716-446655440000",
+                  usage: { input_tokens: 8, output_tokens: 3 },
+                  total_cost_usd: 0.02,
+                },
               ]
             : [
-                { type: "thread.started", thread_id: "0199a213-81c0-7800-8aa1-bbab2a035a53" },
-                { type: "turn.completed", usage: { input_tokens: 10, output_tokens: 4 } },
+                {
+                  type: "thread.started",
+                  thread_id: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+                },
+                {
+                  type: "turn.completed",
+                  usage: { input_tokens: 10, output_tokens: 4 },
+                },
               ];
         const start = (await store.events()).reduce(
           (maximum, event) => Math.max(maximum, event.sequence),
@@ -107,7 +135,11 @@ class HarnessRunner implements CommandRunner {
           const cursor = String(start + index + 1);
           const native = codec.parse(JSON.stringify(value), cursor);
           await store.appendNative({ cursor, value });
-          for (const event of normalizeNativeRecord(codec, native, descriptor.context))
+          for (const event of normalizeNativeRecord(
+            codec,
+            native,
+            descriptor.context,
+          ))
             await store.appendNormalized(event);
         }
         this.transcript = "compact bridge output\n";
@@ -201,7 +233,9 @@ describe("additional harness adapters", () => {
       "usage",
       "settled",
     ]);
-    expect(events.find(({ type }) => type === "toolCompleted")?.data).toMatchObject({
+    expect(
+      events.find(({ type }) => type === "toolCompleted")?.data,
+    ).toMatchObject({
       toolCallId: "tool-1",
       failed: true,
     });
@@ -251,8 +285,12 @@ describe("additional harness adapters", () => {
       output: "all tests passed",
       failed: false,
     });
-    expect(events.filter(({ type }) => type === "messageSummary")).toHaveLength(1);
-    expect(events.some(({ data }) => data.summary === "private reasoning")).toBe(false);
+    expect(events.filter(({ type }) => type === "messageSummary")).toHaveLength(
+      1,
+    );
+    expect(
+      events.some(({ data }) => data.summary === "private reasoning"),
+    ).toBe(false);
     expect(events.at(-3)?.type).toBe("completed");
     expect(events.at(-2)).toMatchObject({
       type: "usage",
@@ -333,9 +371,7 @@ describe("additional harness adapters", () => {
       "native claude --print --output-format stream-json",
     );
     expect(runner.calls.join("\n")).toContain("--allowedTools Read Edit");
-    expect(runner.calls.join("\n")).toContain(
-      "--disallowedTools Bash(rm *)",
-    );
+    expect(runner.calls.join("\n")).toContain("--disallowedTools Bash(rm *)");
     expect(runner.calls.join("\n")).toContain(
       "--resume 550e8400-e29b-41d4-a716-446655440000",
     );
@@ -450,12 +486,12 @@ describe("additional harness adapters", () => {
     const launches = runner.calls.filter((call) =>
       call.startsWith("herdr pane run"),
     );
-    expect(runner.calls.some((call) => call.includes("native codex exec"))).toBe(
-      true,
-    );
-    expect(runner.calls.some((call) => call.includes("native claude --print"))).toBe(
-      true,
-    );
+    expect(
+      runner.calls.some((call) => call.includes("native codex exec")),
+    ).toBe(true);
+    expect(
+      runner.calls.some((call) => call.includes("native claude --print")),
+    ).toBe(true);
     expect(launches.some((call) => call.includes("'copilot' '--prompt'"))).toBe(
       true,
     );

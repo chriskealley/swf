@@ -11,6 +11,8 @@ Investigated 2026-08-09 against the installed CLIs and current vendor documentat
 
 All adapters launch in an SWF-owned Herdr pane and run in the shared run worktree. Cancellation sends the Herdr interrupt only to the owned pane. Follow-up submission uses the harness's native resume command when a session identifier was observed and its documented “continue most recent” behavior otherwise.
 
+Structured adapters run through the private harness bridge. Their native records are captured with restrictive permissions, structurally redacted, and normalized before the service consumes them. Pane text is presentation only. Copilot remains a legacy transcript adapter until it offers a compatible machine-readable event stream, so it cannot provide the same settlement and usage guarantees as Pi, Codex, and Claude.
+
 ## Codex CLI
 
 SWF uses `codex exec --json` with the `workspace-write` sandbox and non-interactive approval policy. The JSONL stream includes `thread.started`, turn events, item events, errors, and `turn.completed.usage`. The `thread_id` is retained as the native session identifier. `--output-schema` is available for final structured results, but is not required for the general event adapter. Codex supports explicit model selection and native non-interactive resume. It does not expose stable per-tool allow/deny flags comparable to Pi, Claude, or Copilot, so SWF advertises `toolSelection: false` and rejects workflows requiring that capability.
@@ -43,6 +45,14 @@ Sources:
 ## Capability validation
 
 A workflow that requests a capability an adapter does not advertise fails before a Herdr pane is created. Availability also checks the harness executable and corresponding Herdr agent-status integration. Authentication is checked directly when the CLI exposes a non-interactive status command (Codex and Claude); Copilot authentication failures are surfaced by launch because its documented command interface does not expose an equivalent status operation.
+
+## Requirements for future codecs
+
+A new structured harness adapter must provide incremental framing, a versioned codec, stable native-record identities, and explicit required-versus-optional native event handling. It must normalize readiness, observed work, messages, tools, blocked input, usage quality, cancellation, failure, completion, and final settlement where the harness supports them. A prompt acknowledgement or an idle pane is not settlement.
+
+The adapter must also declare capability gaps rather than synthesize evidence: resume identity, model selection, tool policy, usage/cost quality, blocked-input response, and terminal semantics are independently advertised. Required unknown events fail closed with bounded retained diagnostics; optional unknown events may be skipped. Cancellation must target only recorded resources, recovery must be able to adopt the durable protocol directory and native session, and tests must cover partial records, duplicate replay, malformed terminal data, interruption, restart, and renderer failure.
+
+Presentation is a separate codec consumer. Future adapters emit normalized semantics and may add bounded harness-aware summaries, but they must not make scheduler or reducer behavior depend on rendered text.
 
 # Harness adapters
 

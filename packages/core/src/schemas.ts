@@ -214,6 +214,19 @@ export const ProjectConfigSchema = z.object({
   paths: z.object({
     state: z.literal(".swf-state"),
   }),
+  harnessPresentation: z
+    .object({
+      level: z.enum(["quiet", "normal", "verbose", "protocol"]),
+      maxTextLength: z.number().int().positive().max(16_384).default(512),
+      maxToolLength: z.number().int().positive().max(16_384).default(240),
+    })
+    .default({ level: "normal", maxTextLength: 512, maxToolLength: 240 }),
+  rawRetention: z
+    .object({
+      nativeProtocol: z.literal("preview-confirm").default("preview-confirm"),
+      preserveNormalized: z.literal(true).default(true),
+    })
+    .default({ nativeProtocol: "preview-confirm", preserveNormalized: true }),
   budgets: z
     .object({
       invocation: BudgetLimitSchema.optional(),

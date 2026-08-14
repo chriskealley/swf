@@ -169,6 +169,31 @@ describe("normalized harness events", () => {
       "Normalized capture is incompatible at byte 0 for invocation malformed",
     );
   });
+
+  it("recovers terminal normalized state when retained native output is unavailable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "swf-consumer-pruned-native-"));
+    const store = new HarnessProtocolStore(root, "run", "pruned-native");
+    await store.initialize({
+      ...context,
+      invocationId: "pruned-native",
+      schemaVersion: 1,
+      codecVersion: "test-v1",
+      presentationLevel: "normal",
+      createdAt: new Date().toISOString(),
+      captureHealth: "healthy",
+    });
+    await store.appendNormalized(event("settled", 1));
+    expect(
+      (await new HarnessNormalizedStreamConsumer(store).poll()).state.status,
+    ).toBe("settled");
+    await store.pruneNative();
+    const restarted = await new HarnessNormalizedStreamConsumer(store).poll();
+    expect(restarted.events).toEqual([]);
+    expect(restarted.state.status).toBe("settled");
+    await expect(store.inspectNative()).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
   it("suppresses replay duplicates and rejects out-of-order events", () => {
     const started = event("workStarted", 1);
     const settled = event("settled", 2);
@@ -433,6 +458,90 @@ describe("normalized harness events", () => {
       (await store.events()).find(({ type }) => type === "usage")?.usage
         ?.totalTokens,
     ).toBe(3);
+  });
+
+  it.each([
+    {
+      harness: "pi",
+      codecVersion: "pi-rpc-v1",
+      codec: () => new PiRpcCodec(),
+      records: [
+        { type: "agent_start" },
+        { type: "agent_settled", usage: { input_tokens: 2, output_tokens: 1 } },
+      ],
+    },
+    {
+      harness: "claude",
+      codecVersion: "claude-stream-json-v1",
+      codec: () => new ClaudeStreamJsonCodec(),
+      records: [
+        { type: "system", subtype: "init", session_id: "claude-session" },
+        {
+          type: "result",
+          subtype: "success",
+          session_id: "claude-session",
+          usage: { input_tokens: 2, output_tokens: 1 },
+        },
+      ],
+    },
+    {
+      harness: "codex",
+      codecVersion: "codex-jsonl-v1",
+      codec: () => new CodexJsonlCodec(),
+      records: [
+        { type: "thread.started", thread_id: "codex-thread" },
+        { type: "turn.completed", usage: { total_tokens: 3 } },
+      ],
+    },
+  ])(
+    "captures complete private $harness protocol while rendering compact milestones",
+    async ({ harness, codecVersion, codec, records }) => {
+      const root = await mkdtemp(join(tmpdir(), `swf-${harness}-acceptance-`));
+      const store = new HarnessProtocolStore(root, "run", harness);
+      const rendered: string[] = [];
+      const native = `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
+      const handle = await new EffectHarnessBridge().start({
+        command: process.execPath,
+        args: ["-e", `process.stdout.write(${JSON.stringify(native)})`],
+        cwd: root,
+        context: { ...context, invocationId: harness, harness },
+        codec: codec(),
+        store,
+        metadata: {
+          ...context,
+          invocationId: harness,
+          harness,
+          codecVersion,
+          presentationLevel: "normal",
+        },
+        renderer: new HarnessPaneRenderer({ level: "normal" }),
+        onPresentation: (line) => rendered.push(line),
+      });
+      await expect(handle.settled).resolves.toMatchObject({ code: 0 });
+      expect(await store.nativeRecordCount()).toBe(records.length);
+      expect(reduceHarnessEvents(await store.events()).status).toBe("settled");
+      expect(rendered.length).toBeGreaterThan(0);
+      expect(rendered.join("\n")).not.toContain('{"type"');
+    },
+  );
+
+  it("keeps every presentation level ANSI-free and independent of TTY parsing", () => {
+    const settled = event("settled", 50);
+    for (const tty of [true, false]) {
+      for (const level of ["quiet", "normal", "verbose", "protocol"] as const) {
+        const output = new HarnessPaneRenderer({ level }).render(settled, {
+          type: "agent_settled",
+          token: "private-token",
+        });
+        expect(output, `${level} tty=${tty}`).not.toContain(
+          String.fromCharCode(27),
+        );
+        if (level === "protocol") {
+          expect(output).toContain("protocol mode");
+          expect(output).not.toContain("private-token");
+        } else expect(output).not.toContain('{"type"');
+      }
+    }
   });
 
   it("runs the pane bridge executable and relays private Pi control without raw pane JSON", async () => {

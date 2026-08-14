@@ -3,6 +3,7 @@ import {
   aggregateCosts,
   formatAggregateCosts,
   formatInvocationCost,
+  normalizedHarnessProgress,
 } from "../src/model.js";
 import type { Invocation } from "../src/types.js";
 
@@ -40,5 +41,33 @@ describe("dashboard cost provenance", () => {
       "1 unknown",
     ]);
     expect(formatInvocationCost(calls[2]!)).toBe("Unknown");
+  });
+});
+
+describe("dashboard harness progress", () => {
+  it("renders normalized milestones without native payloads", () => {
+    expect(
+      normalizedHarnessProgress({
+        id: 1,
+        timestamp: "now",
+        type: "harness.progress",
+        data: {
+          event: {
+            type: "blocked",
+            phaseId: "building",
+            harness: "pi",
+            data: { prompt: "private question" },
+          },
+        },
+      }),
+    ).toBe("blocked · building · pi");
+    expect(
+      normalizedHarnessProgress({
+        id: 2,
+        timestamp: "now",
+        type: "service.started",
+        data: {},
+      }),
+    ).toBeUndefined();
   });
 });

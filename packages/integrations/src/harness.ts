@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type AdapterCapabilities,
+  type AdapterAdoptionRequest,
   type AdapterInvocation,
   type AdapterLaunchRequest,
   type AdapterObservation,
@@ -122,6 +123,22 @@ export abstract class CliHarnessAdapter implements HarnessAdapter {
 
   protected bridgeCodec(): HarnessCodec | undefined {
     return undefined;
+  }
+
+  async adopt(request: AdapterAdoptionRequest): Promise<void> {
+    if (!this.bridgeCodec())
+      throw new Error(`${this.id} does not support structured bridge adoption`);
+    const store = new HarnessProtocolStore(
+      request.stateDirectory,
+      request.invocation.runId,
+      request.invocation.invocationId,
+    );
+    await store.metadata();
+    this.bridgeStores.set(request.invocation.invocationId, store);
+    this.bridgeConsumers.set(
+      request.invocation.invocationId,
+      new HarnessNormalizedStreamConsumer(store),
+    );
   }
 
   protected bridgeLaunchArguments(

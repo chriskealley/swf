@@ -52,5 +52,21 @@ openspec/changes/    planning and portable evidence dossier
 
 Execution defaults are resolved by the service before runtime creation. Phase contracts, model-route provenance, bounded evidence references, task audits, release preflight, and cleanup ownership are durable projections; clients query these projections rather than reimplementing routing or release policy.
 
+## Harness output pipeline
+
+Harness output has four deliberately separate representations:
+
+```text
+harness native protocol
+          ↓ private bridge capture + codec
+versioned normalized events
+          ↓ durable service cursor + reducer
+service run/phase/invocation state
+          ↓ bounded renderer
+human pane, CLI, and dashboard presentation
+```
+
+The native protocol is private diagnostic evidence and is never workflow authority. Codecs convert it into stable, correlated events; the service consumes those events exactly once and derives status, blocked input, evidence, usage, and settlement. Human presentation is disposable: renderer degradation, pane truncation, or unrelated pane text cannot change service state. Effect scopes owned by the service supervise live and recovered bridge invocations, while the Promise boundary keeps Effect out of clients and unrelated integrations.
+
 - **Vitest**: unit, integration, and e2e test runner
 - **ESLint + Prettier + TypeScript**: static analysis and formatting

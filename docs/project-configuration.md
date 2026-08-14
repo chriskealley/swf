@@ -17,6 +17,20 @@ Run `swf init --trust` inside a Git worktree to create project-owned defaults. T
 
 The default workflow is ordered Planning, Building, Reviewing, Verifying, and Releasing. Projects own every generated file and can extend or replace it; upgrades never silently restore defaults.
 
+Generated `config.yaml` selects compact harness output and explicit raw retention:
+
+```yaml
+harnessPresentation:
+  level: normal # quiet | normal | verbose | protocol
+  maxTextLength: 512
+  maxToolLength: 240
+rawRetention:
+  nativeProtocol: preview-confirm
+  preserveNormalized: true
+```
+
+`normal` is the safe default. Invocation settings override phase settings, which override the project value. `protocol` is an audited diagnostic mode; it is not recommended for routine execution. Native protocol pruning always requires a bounded preview and confirmation, while normalized milestones, metadata, usage, and terminal state are preserved.
+
 ## Resolution order
 
 SWF resolves settings from lowest to highest precedence:

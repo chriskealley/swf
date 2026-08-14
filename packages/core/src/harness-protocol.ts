@@ -31,6 +31,8 @@ export interface HarnessInvocationMetadata extends HarnessCorrelation {
   captureHealth: "healthy" | "degraded" | "failed";
   presentationDegraded?: boolean;
   protocolModeAudited?: boolean;
+  nativeAvailable?: boolean;
+  nativePrunedAt?: string;
 }
 export interface HarnessCursor {
   schemaVersion: 1;
@@ -89,8 +91,8 @@ export class HarnessProtocolStore {
     ]);
     const recorded =
       metadata.presentationLevel === "protocol"
-        ? { ...metadata, protocolModeAudited: true }
-        : metadata;
+        ? { ...metadata, protocolModeAudited: true, nativeAvailable: true }
+        : { ...metadata, nativeAvailable: true };
     await atomicWrite(
       this.metadataPath,
       `${JSON.stringify(this.redactor.value(recorded), null, 2)}\n`,

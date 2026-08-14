@@ -17,9 +17,9 @@
 - [x] 2.7 Isolate renderer failure from capture and normalization failure and publish explicit presentation-degraded diagnostics
 - [x] 2.8 Add bridge tests for framing, backpressure, partial records, process exit, signals, stderr, permissions, redaction, and renderer degradation
 - [x] 2.9 Define Promise-based bridge and lifecycle boundaries for existing scheduler, service, and adapter callers so Effect remains isolated from unrelated packages during migration
-- [ ] 2.10 Supervise bridge invocations in service- or run-owned Effect scopes so blocked invocations remain addressable after a scheduler response and close only on settlement, cancellation, cleanup, or shutdown
-- [ ] 2.11 Replace manual bridge timeout, polling, retry, and cancellation coordination with Effect schedules, interruption, and exactly-once scoped finalizers
-- [ ] 2.12 Add virtual-time lifecycle tests proving normal settlement, blocked-input continuation, timeout cancellation, graceful safe-boundary drain, forced interruption and join, exactly-once finalization, and no late writes after shutdown reconciliation begins
+- [x] 2.10 Supervise bridge invocations in service- or run-owned Effect scopes so blocked invocations remain addressable after a scheduler response and close only on settlement, cancellation, cleanup, or shutdown
+- [x] 2.11 Replace manual bridge timeout, polling, retry, and cancellation coordination with Effect schedules, interruption, and exactly-once scoped finalizers
+- [x] 2.12 Add virtual-time lifecycle tests proving normal settlement, blocked-input continuation, timeout cancellation, graceful safe-boundary drain, forced interruption and join, exactly-once finalization, and no late writes after shutdown reconciliation begins
 
 ## 3. Pi RPC Codec and Migration
 
@@ -63,34 +63,34 @@
 - [x] 7.1 Add incremental normalized-stream consumption with durable cursors and bounded polling or private transport
 - [x] 7.2 Publish significant normalized milestones through authenticated ordered service events while coalescing high-frequency updates
 - [x] 7.3 Build invocation status, usage, evidence summaries, blocked input, and settlement from normalized events rather than pane content
-- [ ] 7.4 Reconcile active bridge and harness processes after service restart from durable ownership records, recreate service/run Effect supervision, and resume from the last durable cursor without duplicate milestones
+- [x] 7.4 Reconcile active bridge and harness processes after service restart from durable ownership records, recreate service/run Effect supervision, and resume from the last durable cursor without duplicate milestones
 - [x] 7.5 Rebuild missing cursor metadata from framed retained records and durable normalized identities
 - [x] 7.6 Fail closed with actionable compatibility evidence when required capture or normalization semantics cannot be recovered
-- [ ] 7.7 Integrate normalized progress with CLI and dashboard event consumers when `improve-cli-operator-experience` is available
-- [ ] 7.8 Add recovery tests for service restart, bridge survival beyond the prior Effect runtime, missing cursor, duplicate records, truncated trailing records, renderer failure, and missing native files
+- [x] 7.7 Integrate normalized progress with CLI and dashboard event consumers when `improve-cli-operator-experience` is available
+- [x] 7.8 Add recovery tests for service restart, bridge survival beyond the prior Effect runtime, missing cursor, duplicate records, truncated trailing records, renderer failure, and missing native files
 
 ## 8. Inspection, Retention, and Security
 
-- [ ] 8.1 Add authenticated bounded native-record inspection by invocation and cursor or range with redaction and truncation
-- [ ] 8.2 Keep routine status, approval, progress, artifacts, and dossiers on normalized summaries rather than native payloads
-- [ ] 8.3 Integrate native and normalized invocation files with preview-and-confirm raw retention and preserve audit markers after pruning
-- [ ] 8.4 Ensure portable dossiers exclude native messages, partials, signatures, raw prompts, and tool outputs while retaining conclusions and usage provenance
-- [ ] 8.5 Ensure cleanup removes only recorded bridge, pipe, pane, tab, workspace, and ephemeral file resources and retains failed-invocation diagnostics according to policy
-- [ ] 8.6 Add security tests for permissions, traversal, symlinks, secret redaction, cross-invocation access, unowned resources, protocol mode auditing, and pruning
+- [x] 8.1 Add authenticated bounded native-record inspection by invocation and cursor or range with redaction and truncation
+- [x] 8.2 Keep routine status, approval, progress, artifacts, and dossiers on normalized summaries rather than native payloads
+- [x] 8.3 Integrate native and normalized invocation files with preview-and-confirm raw retention and preserve audit markers after pruning
+- [x] 8.4 Ensure portable dossiers exclude native messages, partials, signatures, raw prompts, and tool outputs while retaining conclusions and usage provenance
+- [x] 8.5 Ensure cleanup removes only recorded bridge, pipe, pane, tab, workspace, and ephemeral file resources and retains failed-invocation diagnostics according to policy
+- [x] 8.6 Add security tests for permissions, traversal, symlinks, secret redaction, cross-invocation access, unowned resources, protocol mode auditing, and pruning
 
 ## 9. Configuration and Documentation
 
-- [ ] 9.1 Add generated project defaults and documentation for harness presentation levels and raw retention behavior
-- [ ] 9.2 Expose effective presentation level, codec version, capture health, cursor, and degradation status through phase and invocation diagnostics
-- [ ] 9.3 Update architecture and harness adapter documentation to distinguish native protocol, normalized events, service state, and human presentation
-- [ ] 9.4 Update operations and troubleshooting documentation with compact output, verbose inspection, protocol diagnostics, retention, and recovery procedures
-- [ ] 9.5 Document adapter requirements for future harness codecs and explicit capability differences
+- [x] 9.1 Add generated project defaults and documentation for harness presentation levels and raw retention behavior
+- [x] 9.2 Expose effective presentation level, codec version, capture health, cursor, and degradation status through phase and invocation diagnostics
+- [x] 9.3 Update architecture and harness adapter documentation to distinguish native protocol, normalized events, service state, and human presentation
+- [x] 9.4 Update operations and troubleshooting documentation with compact output, verbose inspection, protocol diagnostics, retention, and recovery procedures
+- [x] 9.5 Document adapter requirements for future harness codecs and explicit capability differences
 
 ## 10. Acceptance and Release Verification
 
-- [ ] 10.1 Add end-to-end simulated runs proving compact readable panes and complete private capture for Pi, Claude, and Codex
-- [ ] 10.2 Verify pane truncation and unrelated pane text cannot alter parsing, settlement, evidence, or usage
-- [ ] 10.3 Verify quiet, normal, verbose, and protocol output behavior in TTY and non-TTY Herdr contexts
-- [ ] 10.4 Verify blocked input, cancellation, retry, resume, settlement, malformed protocols, service restart, graceful and forced shutdown joining, retention, and cleanup across supported capabilities
-- [ ] 10.5 Run formatting, lint, type checking, unit, integration, E2E, OpenSpec validation, and Git whitespace verification
+- [x] 10.1 Add end-to-end simulated runs proving compact readable panes and complete private capture for Pi, Claude, and Codex
+- [x] 10.2 Verify pane truncation and unrelated pane text cannot alter parsing, settlement, evidence, or usage
+- [x] 10.3 Verify quiet, normal, verbose, and protocol output behavior in TTY and non-TTY Herdr contexts
+- [x] 10.4 Verify blocked input, cancellation, retry, resume, settlement, malformed protocols, service restart, graceful and forced shutdown joining, retention, and cleanup across supported capabilities
+- [x] 10.5 Run formatting, lint, type checking, unit, integration, E2E, OpenSpec validation, and Git whitespace verification
 - [ ] 10.6 Perform opt-in live Pi, Claude, and Codex smoke tests where installed and authenticated, retaining compact-output screenshots or text evidence and private protocol verification without committing raw transcripts

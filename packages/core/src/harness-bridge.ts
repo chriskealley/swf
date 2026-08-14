@@ -82,7 +82,9 @@ export async function consumeHarnessBridgeDescriptor(
   ) as HarnessBridgeDescriptor;
   await unlink(path);
   if (descriptor.schemaVersion !== 1)
-    throw new Error(`Unsupported harness bridge descriptor: ${descriptor.schemaVersion}`);
+    throw new Error(
+      `Unsupported harness bridge descriptor: ${descriptor.schemaVersion}`,
+    );
   return descriptor;
 }
 
@@ -93,7 +95,9 @@ export function harnessBridgeCommand(descriptorPath: string): string {
 }
 
 export function harnessBridgeArguments(descriptorPath: string): string[] {
-  const cli = fileURLToPath(new URL("./harness-bridge-cli.ts", import.meta.url));
+  const cli = fileURLToPath(
+    new URL("./harness-bridge-cli.ts", import.meta.url),
+  );
   const tsxLoader = createRequire(import.meta.url).resolve("tsx");
   return ["--import", tsxLoader, cli, descriptorPath];
 }
@@ -248,16 +252,16 @@ export class EffectHarnessBridge {
           child.stdout.on("data", (chunk: Buffer) => {
             processing = processing.then(() => consume(chunk));
           });
-        child.stderr.on("data", (chunk: Buffer) => {
-          processing = processing.then(() =>
-            request.store
-              .appendNative({
-                stream: "stderr",
-                value: chunk.toString("utf8").slice(0, 4096),
-              })
-              .then(() => undefined),
-          );
-        });
+          child.stderr.on("data", (chunk: Buffer) => {
+            processing = processing.then(() =>
+              request.store
+                .appendNative({
+                  stream: "stderr",
+                  value: chunk.toString("utf8").slice(0, 4096),
+                })
+                .then(() => undefined),
+            );
+          });
           const settled = new Promise<{
             code: number | null;
             signal: NodeJS.Signals | null;
@@ -267,50 +271,50 @@ export class EffectHarnessBridge {
             child.once("close", (code, signal) => {
               void (async () => {
                 await processing;
-                  if (!finalized) {
-                    finalized = true;
-                    await consume(Buffer.alloc(0), true);
-                  }
-                  if (
-                    !events.some(({ type }) =>
-                      ["settled", "failed", "cancelled"].includes(type),
-                    )
+                if (!finalized) {
+                  finalized = true;
+                  await consume(Buffer.alloc(0), true);
+                }
+                if (
+                  !events.some(({ type }) =>
+                    ["settled", "failed", "cancelled"].includes(type),
                   )
-                    await publishSynthetic("failed", {
-                      code:
-                        code === 0
-                          ? "missing-terminal-event"
-                          : "native-process-exit",
-                      exitCode: code,
-                      signal,
-                    });
-                  resolve({ code, signal, events });
+                )
+                  await publishSynthetic("failed", {
+                    code:
+                      code === 0
+                        ? "missing-terminal-event"
+                        : "native-process-exit",
+                    exitCode: code,
+                    signal,
+                  });
+                resolve({ code, signal, events });
               })().catch(reject);
             });
           });
           return {
             pid: child.pid!,
             settled,
-          async send(value: unknown): Promise<void> {
-            const line = `${JSON.stringify(value)}\n`;
-            if (!child.stdin.write(line)) await waitForDrain(child);
-          },
-          async sendRaw(value: string): Promise<void> {
-            if (!child.stdin.write(value)) await waitForDrain(child);
-          },
-          async closeInput(): Promise<void> {
-            if (!child.stdin.destroyed) child.stdin.end();
-          },
-          async cancel(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
-            if (finalized) return;
-            if (!cancelRequested) {
-              cancelRequested = true;
-              await publishSynthetic("cancelled", {
-                code: "bridge-cancelled",
-                signal,
-              });
-            }
-            child.kill(signal);
+            async send(value: unknown): Promise<void> {
+              const line = `${JSON.stringify(value)}\n`;
+              if (!child.stdin.write(line)) await waitForDrain(child);
+            },
+            async sendRaw(value: string): Promise<void> {
+              if (!child.stdin.write(value)) await waitForDrain(child);
+            },
+            async closeInput(): Promise<void> {
+              if (!child.stdin.destroyed) child.stdin.end();
+            },
+            async cancel(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
+              if (finalized) return;
+              if (!cancelRequested) {
+                cancelRequested = true;
+                await publishSynthetic("cancelled", {
+                  code: "bridge-cancelled",
+                  signal,
+                });
+              }
+              child.kill(signal);
               await settled;
             },
           };
@@ -321,29 +325,6 @@ export class EffectHarnessBridge {
     });
     return Effect.runPromise(
       Effect.provide(program, HarnessProcessControlLive),
-    );
-  }
-}
-
-export class HarnessLifecycleSupervisor {
-  private readonly handles = new Map<string, HarnessBridgeHandle>();
-  register(invocationId: string, handle: HarnessBridgeHandle): void {
-    this.handles.set(invocationId, handle);
-    void handle.settled.finally(() => this.handles.delete(invocationId));
-  }
-  get(invocationId: string): HarnessBridgeHandle | undefined {
-    return this.handles.get(invocationId);
-  }
-  async interruptAndJoin(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
-    await Promise.all(
-      [...this.handles.values()].map((handle) => handle.cancel(signal)),
-    );
-  }
-  async join(): Promise<void> {
-    await Promise.all(
-      [...this.handles.values()].map((handle) =>
-        handle.settled.then(() => undefined),
-      ),
     );
   }
 }

@@ -2,6 +2,8 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import {
   BlockedAgentRouter,
   HerdrClient,
@@ -17,6 +19,7 @@ import {
   evaluatePhaseEligibility,
   normalizePlanningInput,
   normalizedEvent,
+  observeHarnessInvocationEffect,
   previewPhaseRerun,
   produceDefaultPlanningArtifacts,
   validatePlanningArtifacts,
@@ -204,6 +207,71 @@ class FakeAdapter implements HarnessAdapter {
 }
 
 describe("workflow scheduling and adapters", () => {
+  it("uses virtual time for polling settlement and timeout cancellation", async () => {
+    const invocation: AdapterInvocation = {
+      invocationId: "virtual-time",
+      runId: "run",
+      phaseId: "planning",
+      workUnitId: "agent",
+      paneId: "pane",
+      status: "running",
+      startedAt: "2026-08-14T00:00:00.000Z",
+    };
+    const settling = new FakeAdapter();
+    let polls = 0;
+    settling.observe = async () => ({
+      status: ++polls === 1 ? "running" : "completed",
+      structuredEvents: [],
+    });
+    const settled = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          observeHarnessInvocationEffect({
+            adapter: settling,
+            invocation,
+            pollIntervalMs: 100,
+            timeoutMs: 1_000,
+          }),
+        );
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(100);
+        return yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+    expect(settled.status).toBe("completed");
+    expect(polls).toBe(2);
+
+    const timingOut = new FakeAdapter();
+    let cancellations = 0;
+    timingOut.observe = async () => ({
+      status: "running",
+      structuredEvents: [],
+    });
+    timingOut.cancel = async () => {
+      cancellations += 1;
+    };
+    const timedOut = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          observeHarnessInvocationEffect({
+            adapter: timingOut,
+            invocation,
+            pollIntervalMs: 100,
+            timeoutMs: 500,
+          }),
+        );
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(500);
+        return yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+    expect(timedOut).toMatchObject({
+      status: "failed",
+      message: "Harness invocation timed out",
+    });
+    expect(cancellations).toBe(1);
+  });
+
   it("executes typed work units in declared sequential order with resolved phase configuration", async () => {
     const calls: string[] = [];
     const scheduler = new WorkflowScheduler(workflow, {
@@ -350,6 +418,10 @@ describe("workflow scheduling and adapters", () => {
       status: "blocked",
       blockedPrompt: "Apply changes?",
     });
+    await expect(adapter.observe(invocation)).resolves.toMatchObject({
+      status: "blocked",
+      blockedPrompt: "Apply changes?",
+    });
     await adapter.submit(invocation, "yes");
     expect((await protocol.readControl()).commands.at(-1)).toEqual({
       action: "send",
@@ -440,6 +512,7 @@ describe("workflow scheduling and adapters", () => {
       ],
     });
     expect(runner.calls.join("\n")).not.toContain("Plan the change");
+    expect(runner.calls).not.toContain(expect.stringContaining("pane read"));
     expect(runner.calls).toEqual(
       expect.arrayContaining([
         expect.stringContaining(

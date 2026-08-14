@@ -1,4 +1,12 @@
-import { mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -211,6 +219,23 @@ describe("Herdr runtime", () => {
       command: "pi",
       timeoutMs: 10,
     });
+    const protocolDirectory = join(
+      root,
+      ".swf-state",
+      "runs",
+      "run-1",
+      "raw",
+      "invocations",
+      "invocation-1",
+    );
+    await mkdir(protocolDirectory, { recursive: true });
+    const retainedDiagnostic = join(protocolDirectory, "normalized.jsonl");
+    await writeFile(retainedDiagnostic, '{"type":"failure"}\n');
+    await ownership.addResource("run-1", {
+      kind: "protocol",
+      resourceId: protocolDirectory,
+      parentId: "invocation-1",
+    });
     const recorded = await ownership.load("run-1");
     expect(recorded?.resources.map((resource) => resource.resourceId)).toEqual(
       expect.arrayContaining(["w1", "wt1", "t1", "p1", "term1", "proc1"]),
@@ -255,6 +280,9 @@ describe("Herdr runtime", () => {
     expect(
       runner.calls.some((call) => call.args.includes("unowned-pane")),
     ).toBe(false);
+    await expect(readFile(retainedDiagnostic, "utf8")).resolves.toContain(
+      '"failure"',
+    );
     await expect(stat(prepared.worktree.path)).rejects.toMatchObject({
       code: "ENOENT",
     });

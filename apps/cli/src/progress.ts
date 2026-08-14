@@ -38,6 +38,21 @@ export function progressMilestone(event: ProgressEvent): string | undefined {
           ? durable.data.phaseId
           : undefined;
   const phase = phaseId ? ` ${phaseId}` : "";
+  if (event.type === "harness.progress") {
+    const normalizedType =
+      durable &&
+      "type" in durable &&
+      typeof (durable as { type?: unknown }).type === "string"
+        ? (durable as { type: string }).type
+        : undefined;
+    const harness =
+      durable &&
+      "harness" in durable &&
+      typeof (durable as { harness?: unknown }).harness === "string"
+        ? ` ${(durable as { harness: string }).harness}`
+        : "";
+    if (normalizedType) return `harness.${normalizedType}${phase}${harness}`;
+  }
   return `${event.type}${phase}`;
 }
 

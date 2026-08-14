@@ -103,7 +103,7 @@ export class HarnessPaneRenderer {
     const { level, maxTextLength, maxToolLength } = this.config;
     if (event.usage) this.latestUsage = event.usage;
     if (level === "protocol")
-      return `⚠ protocol mode: redacted machine output may be sensitive\n${bounded(nativeRecord ?? event.data, maxTextLength, this.redactor)}`;
+      return `⚠ protocol mode: redacted machine output may be sensitive\n${bounded(this.redactor.value(nativeRecord ?? event.data), maxTextLength, this.redactor)}`;
     if (event.type === "processStarted")
       return [event.phaseId, event.harness, event.data.model, event.runId]
         .filter(Boolean)

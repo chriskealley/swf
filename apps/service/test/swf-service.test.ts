@@ -11,10 +11,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   defaultTemplateFiles,
+  HarnessNormalizedStreamConsumer,
+  HarnessProtocolStore,
   HerdrClient,
   NodeCommandRunner,
   normalizedEvent,
   RunEventStore,
+  RuntimeOwnershipStore,
   produceDefaultPlanningArtifacts,
   type AdapterInvocation,
   type AdapterLaunchRequest,
@@ -397,6 +400,7 @@ describe("user-scoped SWF service", () => {
     ) as Record<
       (typeof phases)[number],
       {
+        harnessDiagnostics: unknown[];
         explanation: {
           contract: { objective: string; responsibilities: string[] };
           prohibitedActions: string[];
@@ -405,6 +409,9 @@ describe("user-scoped SWF service", () => {
         };
       }
     >;
+
+    for (const phaseId of phases)
+      expect(byPhase[phaseId].harnessDiagnostics).toEqual([]);
 
     expect(
       new Set(
@@ -991,6 +998,42 @@ describe("user-scoped SWF service", () => {
     );
     await mkdir(rawDirectory, { recursive: true });
     await writeFile(join(rawDirectory, "test.log"), "retained output");
+    const protocol = new HarnessProtocolStore(
+      join(projectRoot, ".swf-state"),
+      runId,
+      invocationId,
+    );
+    await protocol.initialize({
+      schemaVersion: 1,
+      projectId,
+      runId,
+      phaseId: "planning",
+      workUnitId: "agent",
+      invocationId,
+      harness: "pi",
+      codecVersion: "pi-rpc-v1",
+      presentationLevel: "normal",
+      createdAt: "2026-08-14T00:00:00.000Z",
+      captureHealth: "healthy",
+    });
+    await protocol.appendNative({ cursor: "1", message: "retained native" });
+    await protocol.appendNormalized(
+      normalizedEvent({
+        projectId,
+        runId,
+        phaseId: "planning",
+        workUnitId: "agent",
+        invocationId,
+        harness: "pi",
+        sourceCursor: "1",
+        timestamp: "2026-08-14T00:00:00.000Z",
+        type: "settled",
+        required: true,
+        sequence: 1,
+        data: {},
+      }),
+    );
+    const nativeBytes = (await stat(protocol.nativePath)).size;
 
     await expect(
       service.query({ resource: "overview" }),
@@ -1027,16 +1070,32 @@ describe("user-scoped SWF service", () => {
     ).rejects.toThrow("inside the selected run");
 
     const preview = await service.previewPruning(projectId, { runId });
-    expect(preview).toMatchObject({
-      totalBytes: 15,
-      candidates: [{ runId, ref: "raw/invocations/test.log" }],
-    });
+    expect(preview.totalBytes).toBe(15 + nativeBytes);
+    expect(preview.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId,
+          ref: "raw/invocations/test.log",
+          bytes: 15,
+        }),
+        expect.objectContaining({
+          runId,
+          ref: `raw/invocations/${invocationId}/native.jsonl`,
+          bytes: nativeBytes,
+        }),
+      ]),
+    );
     await expect(
       service.confirmPruning(projectId, "wrong-token"),
     ).rejects.toThrow("fresh preview");
     await expect(
       service.confirmPruning(projectId, preview.confirmationId),
-    ).resolves.toEqual({ pruned: 1, bytes: 15 });
+    ).resolves.toEqual({ pruned: 3, bytes: 15 + nativeBytes });
+    await expect(stat(protocol.normalizedPath)).resolves.toBeDefined();
+    await expect(protocol.metadata()).resolves.toMatchObject({
+      nativeAvailable: false,
+      nativePrunedAt: expect.any(String),
+    });
     await expect(
       service.query({
         resource: "output",
@@ -1523,5 +1582,173 @@ describe("user-scoped SWF service", () => {
         .state.run.status,
     ).toBe("blocked");
     await recovered.shutdown();
+  });
+
+  it("re-adopts a surviving harness from durable ownership without replaying consumed milestones", async () => {
+    const { service, projectRoot } = await setup();
+    await createRun(projectRoot);
+    await service.command({ type: "start", projectId, runId });
+    await service.shutdown({ force: true });
+    const stateDirectory = join(projectRoot, ".swf-state");
+    const invocationId = "recovered-invocation";
+    const protocol = new HarnessProtocolStore(
+      stateDirectory,
+      runId,
+      invocationId,
+    );
+    await protocol.initialize({
+      schemaVersion: 1,
+      projectId,
+      runId,
+      phaseId: "planning",
+      workUnitId: "agent",
+      invocationId,
+      harness: "pi",
+      codecVersion: "pi-rpc-v1",
+      presentationLevel: "normal",
+      createdAt: "2026-08-14T00:00:00.000Z",
+      bridgePid: process.pid,
+      nativePid: process.pid,
+      captureHealth: "healthy",
+    });
+    const event = (type: "ready" | "blocked", sequence: number) =>
+      normalizedEvent({
+        projectId,
+        runId,
+        phaseId: "planning",
+        workUnitId: "agent",
+        invocationId,
+        harness: "pi",
+        sourceCursor: String(sequence),
+        timestamp: "2026-08-14T00:00:00.000Z",
+        type,
+        required: false,
+        sequence,
+        data:
+          type === "blocked"
+            ? {
+                requestId: "question-1",
+                method: "confirm",
+                prompt: "Continue?",
+              }
+            : {},
+      });
+    await protocol.appendNormalized(event("ready", 0));
+    await protocol.appendNative({
+      cursor: "1",
+      message: "token=private-native-token",
+    });
+    await protocol.appendNative({ cursor: "2", message: "second record" });
+    await new HarnessNormalizedStreamConsumer(protocol).poll();
+    await protocol.appendNormalized(event("blocked", 1));
+    const ownership = new RuntimeOwnershipStore(stateDirectory);
+    await ownership.save({
+      schemaVersion: 1,
+      runId,
+      projectRoot,
+      branch: `swf/${runId}`,
+      worktreePath: projectRoot,
+      resources: [
+        {
+          kind: "workspace",
+          resourceId: "workspace-1",
+          createdAt: "2026-08-14T00:00:00.000Z",
+        },
+        {
+          kind: "pane",
+          resourceId: "pane-1",
+          createdAt: "2026-08-14T00:00:00.000Z",
+        },
+        {
+          kind: "process",
+          resourceId: String(process.pid),
+          parentId: "pane-1",
+          metadata: { invocationId },
+          createdAt: "2026-08-14T00:00:00.000Z",
+        },
+        {
+          kind: "protocol",
+          resourceId: protocol.directory,
+          parentId: invocationId,
+          metadata: { retained: "true" },
+          createdAt: "2026-08-14T00:00:00.000Z",
+        },
+      ],
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:00:00.000Z",
+    });
+
+    const recovered = new SwfService({
+      serviceHome: service.serviceHome,
+      projectTrust: async () => true,
+      herdrClient: new HerdrClient(new SimulatedHerdrRunner()),
+    });
+    await recovered.start();
+    await expect(
+      recovered.query({
+        resource: "native-output",
+        projectId,
+        runId,
+        invocationId,
+        cursor: 0,
+        limit: 1,
+        maxBytes: 256,
+      }),
+    ).resolves.toMatchObject({
+      invocationId,
+      cursor: 0,
+      nextCursor: 1,
+      records: [{ cursor: "1", message: "[REDACTED]" }],
+      metadata: { harness: "pi", codecVersion: "pi-rpc-v1" },
+    });
+    await expect(
+      recovered.query({
+        resource: "invocation-diagnostics",
+        projectId,
+        runId,
+        invocationId,
+      }),
+    ).resolves.toMatchObject({
+      invocationId,
+      phaseId: "planning",
+      status: "blocked",
+      presentationLevel: "normal",
+      codecVersion: "pi-rpc-v1",
+      captureHealth: "healthy",
+      cursor: { consumedNormalizedOffset: expect.any(Number) },
+      degradation: { presentation: false, diagnostics: [] },
+      nativeAvailable: true,
+    });
+    await expect(
+      recovered.query({
+        resource: "native-output",
+        projectId,
+        runId,
+        invocationId: "unowned-invocation",
+      }),
+    ).rejects.toThrow("is not recorded as owned");
+    expect(await recovered.query({ resource: "blocked-inputs" })).toMatchObject(
+      [{ invocationId, prompt: "Continue?" }],
+    );
+    const subscription = recovered.subscribe();
+    const iterator = subscription[Symbol.asyncIterator]();
+    const replayed = [];
+    for (let index = 0; index < 5; index += 1)
+      replayed.push((await iterator.next()).value);
+    const progress = replayed
+      .filter(({ type }) => type === "harness.progress")
+      .map(({ data }) => (data.event as { type: string }).type);
+    expect(progress).toContain("blocked");
+    expect(progress).not.toContain("ready");
+    expect(replayed.map(({ type }) => type)).not.toContain(
+      "harness.supervision-ended",
+    );
+    expect(recovered.supervisedHarnessInvocations()).toBe(1);
+    subscription.close();
+    await recovered.shutdown({ force: true });
+    expect((await protocol.readControl()).commands).toContainEqual({
+      action: "cancel",
+      value: { type: "abort", id: expect.any(String) },
+    });
   });
 });

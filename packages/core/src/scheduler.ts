@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Effect } from "effect";
 import { access, mkdir, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -22,6 +23,7 @@ import {
   writeHarnessBridgeDescriptor,
 } from "./harness-bridge.js";
 import {
+  HarnessPresentationLevelSchema,
   harnessPaneLabel,
   type HarnessPresentationLevel,
 } from "./harness-presentation.js";
@@ -101,6 +103,11 @@ export interface AdapterResult {
   };
 }
 
+export interface AdapterAdoptionRequest {
+  stateDirectory: string;
+  invocation: AdapterInvocation;
+}
+
 export interface HarnessAdapter {
   readonly id: string;
   readonly capabilities: AdapterCapabilities;
@@ -110,6 +117,7 @@ export interface HarnessAdapter {
     requiredCapabilities?: string[],
   ): Promise<AdapterValidation>;
   launch(request: AdapterLaunchRequest): Promise<AdapterInvocation>;
+  adopt?(request: AdapterAdoptionRequest): Promise<void>;
   submit(invocation: AdapterInvocation, prompt: string): Promise<void>;
   observe(invocation: AdapterInvocation): Promise<AdapterObservation>;
   cancel(invocation: AdapterInvocation): Promise<void>;
@@ -305,6 +313,20 @@ export class PiHarnessAdapter implements HarnessAdapter {
     });
     await this.submit(invocation, request.prompt);
     return invocation;
+  }
+
+  async adopt(request: AdapterAdoptionRequest): Promise<void> {
+    const store = new HarnessProtocolStore(
+      request.stateDirectory,
+      request.invocation.runId,
+      request.invocation.invocationId,
+    );
+    await store.metadata();
+    this.stores.set(request.invocation.invocationId, store);
+    this.consumers.set(
+      request.invocation.invocationId,
+      new HarnessNormalizedStreamConsumer(store),
+    );
   }
 
   async submit(invocation: AdapterInvocation, prompt: string): Promise<void> {
@@ -539,6 +561,57 @@ export interface WorkExecutor {
   ): Promise<{ status: "completed" | "blocked" | "failed"; output?: string }>;
 }
 
+export function observeHarnessInvocationEffect(input: {
+  adapter: HarnessAdapter;
+  invocation: AdapterInvocation;
+  pollIntervalMs: number;
+  timeoutMs: number;
+  onObservation?: (
+    adapter: HarnessAdapter,
+    invocation: AdapterInvocation,
+    observation: AdapterObservation,
+  ) => Promise<void> | void;
+}): Effect.Effect<AdapterObservation, Error> {
+  const poll = (): Effect.Effect<AdapterObservation, Error> =>
+    Effect.tryPromise({
+      try: async () => {
+        const observation = await input.adapter.observe(input.invocation);
+        await input.onObservation?.(
+          input.adapter,
+          input.invocation,
+          observation,
+        );
+        return observation;
+      },
+      catch: (cause) =>
+        cause instanceof Error ? cause : new Error(String(cause)),
+    }).pipe(
+      Effect.flatMap((observation) =>
+        observation.status === "running"
+          ? Effect.sleep(input.pollIntervalMs).pipe(
+              Effect.andThen(Effect.suspend(poll)),
+            )
+          : Effect.succeed(observation),
+      ),
+    );
+  return poll().pipe(
+    Effect.timeoutOrElse({
+      duration: input.timeoutMs,
+      orElse: () =>
+        Effect.promise(() => input.adapter.cancel(input.invocation)).pipe(
+          Effect.as({
+            status: "failed" as const,
+            message: "Harness invocation timed out",
+            structuredEvents: [],
+          }),
+        ),
+    }),
+    Effect.onInterrupt(() =>
+      Effect.promise(() => input.adapter.cancel(input.invocation)),
+    ),
+  );
+}
+
 export class HarnessWorkExecutor implements WorkExecutor {
   constructor(
     readonly adapters: AdapterRegistry,
@@ -629,28 +702,35 @@ export class HarnessWorkExecutor implements WorkExecutor {
         invocationId,
         allowNested: context.resolved.allowNestedOrchestration === true,
       }),
+      presentationLevel:
+        typeof context.resolved.presentationLevel === "string"
+          ? HarnessPresentationLevelSchema.parse(
+              context.resolved.presentationLevel,
+            )
+          : undefined,
     };
     await this.context.beforeLaunch?.(request);
     const invocation = await adapter.launch(request);
     await this.context.afterLaunch?.(adapter, invocation);
-    const deadline = Date.now() + (request.timeoutMs ?? 30 * 60_000);
-    while (true) {
-      const observation = await adapter.observe(invocation);
-      await this.context.onObservation?.(adapter, invocation, observation);
-      if (observation.status === "blocked")
-        return {
-          status: "blocked",
-          output: observation.blockedPrompt ?? observation.message,
-        };
-      if (observation.status !== "running") break;
-      if (Date.now() >= deadline) {
-        await adapter.cancel(invocation);
-        return { status: "failed", output: "Harness invocation timed out" };
-      }
-      await new Promise((resolve) =>
-        setTimeout(resolve, this.context.pollIntervalMs ?? 250),
-      );
-    }
+    const observed = await Effect.runPromise(
+      observeHarnessInvocationEffect({
+        adapter,
+        invocation,
+        pollIntervalMs: this.context.pollIntervalMs ?? 250,
+        timeoutMs: request.timeoutMs ?? 30 * 60_000,
+        onObservation: this.context.onObservation,
+      }),
+    );
+    if (observed.status === "blocked")
+      return {
+        status: "blocked",
+        output: observed.blockedPrompt ?? observed.message,
+      };
+    if (
+      observed.status === "failed" &&
+      observed.message === "Harness invocation timed out"
+    )
+      return { status: "failed", output: observed.message };
     const result = await adapter.collect(invocation);
     await this.context.afterCollect?.(invocation, result);
     return {

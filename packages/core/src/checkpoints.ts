@@ -209,6 +209,14 @@ export interface ChangeDossier {
     modelRoute?: Record<string, unknown>;
     contractFingerprint?: string;
     promptInputFingerprint?: string;
+    status: string;
+    usage: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+      costUsd?: number;
+      quality: "exact" | "estimated" | "unknown";
+    };
   }>;
   explorationFoundation?: {
     explorationId: string;
@@ -239,6 +247,16 @@ export async function persistChangeDossier(input: {
     modelRoute?: Record<string, unknown>;
     contractFingerprint?: string;
     promptInputFingerprint?: string;
+    status: string;
+    cost: {
+      amountUsd?: number;
+      quality: "exact" | "estimated" | "unknown";
+    };
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
   }>;
   explorationFoundation?: ChangeDossier["explorationFoundation"];
   releasePreflight?: ReleasePreflight;
@@ -280,6 +298,9 @@ export async function persistChangeDossier(input: {
         modelRoute,
         contractFingerprint,
         promptInputFingerprint,
+        status,
+        cost,
+        usage,
       }) => ({
         invocationId,
         phaseId,
@@ -289,6 +310,12 @@ export async function persistChangeDossier(input: {
         modelRoute,
         contractFingerprint,
         promptInputFingerprint,
+        status,
+        usage: {
+          ...usage,
+          costUsd: cost.amountUsd,
+          quality: cost.quality,
+        },
       }),
     ),
     explorationFoundation: input.explorationFoundation,

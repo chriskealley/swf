@@ -218,6 +218,15 @@ function defaultProjectConfig(): DocumentValue<"projectConfig"> {
     defaultWorkflow: "default",
     git: { remote: "origin", targetBranch: "main" },
     paths: { state: SWF_STATE_DIRECTORY },
+    harnessPresentation: {
+      level: "normal",
+      maxTextLength: 512,
+      maxToolLength: 240,
+    },
+    rawRetention: {
+      nativeProtocol: "preview-confirm",
+      preserveNormalized: true,
+    },
   };
 }
 

@@ -17,6 +17,8 @@ const resources = new Set<ServiceQuery["resource"]>([
   "configuration",
   "delivery",
   "output",
+  "native-output",
+  "invocation-diagnostics",
   "budgets",
   "operations",
   "blocked-inputs",
@@ -57,6 +59,13 @@ export default defineEventHandler(async (event) => {
         typeof query.projectId === "string" ? query.projectId : undefined,
       runId: typeof query.runId === "string" ? query.runId : undefined,
       ref: typeof query.ref === "string" ? query.ref : undefined,
+      invocationId:
+        typeof query.invocationId === "string" ? query.invocationId : undefined,
+      cursor:
+        typeof query.cursor === "string" ? Number(query.cursor) : undefined,
+      limit: typeof query.limit === "string" ? Number(query.limit) : undefined,
+      maxBytes:
+        typeof query.maxBytes === "string" ? Number(query.maxBytes) : undefined,
       raw: query.raw === "true",
       phaseId: typeof query.phaseId === "string" ? query.phaseId : undefined,
     });

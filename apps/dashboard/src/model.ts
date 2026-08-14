@@ -1,4 +1,29 @@
-import type { CostSummary, Invocation, OperatorProjection } from "./types.js";
+import type {
+  CostSummary,
+  Invocation,
+  OperatorProjection,
+  ServiceEvent,
+} from "./types.js";
+
+export function normalizedHarnessProgress(
+  event: ServiceEvent,
+): string | undefined {
+  if (event.type !== "harness.progress") return undefined;
+  const normalized =
+    event.data.event && typeof event.data.event === "object"
+      ? (event.data.event as {
+          type?: unknown;
+          harness?: unknown;
+          phaseId?: unknown;
+        })
+      : undefined;
+  if (!normalized || typeof normalized.type !== "string") return undefined;
+  const phase =
+    typeof normalized.phaseId === "string" ? ` · ${normalized.phaseId}` : "";
+  const harness =
+    typeof normalized.harness === "string" ? ` · ${normalized.harness}` : "";
+  return `${normalized.type}${phase}${harness}`;
+}
 
 export function dashboardGuidanceIdentity(projection: OperatorProjection) {
   return {

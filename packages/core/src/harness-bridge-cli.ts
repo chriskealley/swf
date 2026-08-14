@@ -24,7 +24,8 @@ async function delay(milliseconds: number): Promise<void> {
 
 async function main(): Promise<void> {
   const descriptorPath = process.argv[2];
-  if (!descriptorPath) throw new Error("Harness bridge requires a descriptor path");
+  if (!descriptorPath)
+    throw new Error("Harness bridge requires a descriptor path");
   const descriptor = await consumeHarnessBridgeDescriptor(descriptorPath);
   const store = new HarnessProtocolStore(
     descriptor.stateDirectory,
@@ -90,6 +91,8 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+  process.stderr.write(
+    `${error instanceof Error ? error.stack : String(error)}\n`,
+  );
   process.exitCode = 1;
 });

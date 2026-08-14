@@ -7,6 +7,7 @@ import {
   AdapterRegistry,
   GitClient,
   HarnessWorkExecutor,
+  HarnessProtocolStore,
   HerdrClient,
   NodeCommandRunner,
   PiHarnessAdapter,
@@ -17,6 +18,7 @@ import {
   WorkflowScheduler,
   exportRun,
   importRun,
+  normalizedEvent,
   type AdapterInvocation,
   type AdapterLaunchRequest,
   type AdapterObservation,
@@ -167,6 +169,57 @@ class AcceptancePlanningAdapter implements HarnessAdapter {
       transcript: "acceptance planning completed",
       usage: { quality: "unknown" },
     };
+  }
+}
+
+class SimulatedPiBridgeAdapter extends PiHarnessAdapter {
+  override async launch(
+    request: AdapterLaunchRequest,
+  ): Promise<AdapterInvocation> {
+    const invocation = await super.launch(request);
+    const store = new HarnessProtocolStore(
+      request.stateDirectory!,
+      request.runId,
+      invocation.invocationId,
+    );
+    const correlation = {
+      projectId: request.projectId!,
+      runId: request.runId,
+      phaseId: request.phaseId,
+      workUnitId: request.workUnitId,
+      invocationId: invocation.invocationId,
+      harness: "pi",
+    };
+    await store.appendNormalized(
+      normalizedEvent({
+        ...correlation,
+        sourceCursor: "1",
+        timestamp: new Date().toISOString(),
+        type: "usage",
+        required: false,
+        sequence: 1,
+        data: {},
+        usage: {
+          inputTokens: 20,
+          outputTokens: 5,
+          totalTokens: 25,
+          costUsd: 0.01,
+          quality: "exact",
+        },
+      }),
+    );
+    await store.appendNormalized(
+      normalizedEvent({
+        ...correlation,
+        sourceCursor: "2",
+        timestamp: new Date().toISOString(),
+        type: "settled",
+        required: true,
+        sequence: 2,
+        data: {},
+      }),
+    );
+    return invocation;
   }
 }
 
@@ -515,7 +568,9 @@ describe("disposable operational acceptance", () => {
     );
     const prepared = await runtime.prepare({ runId, stateDirectory });
     const registry = new AdapterRegistry();
-    registry.register(new PiHarnessAdapter(new HerdrClient(herdrRunner)));
+    registry.register(
+      new SimulatedPiBridgeAdapter(new HerdrClient(herdrRunner)),
+    );
     const fallback: WorkExecutor = {
       execute: async (unit) => {
         await writeFile(
@@ -555,6 +610,8 @@ describe("disposable operational acceptance", () => {
       new HarnessWorkExecutor(
         registry,
         {
+          projectId,
+          stateDirectory,
           runId,
           workspaceId: prepared.workspaceId,
           cwd: prepared.worktree.path,
