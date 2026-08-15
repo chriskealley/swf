@@ -139,3 +139,9 @@ For unattended operation, pass `--no-interactive` explicitly. TTY approval menus
 ## Autonomous-policy implications
 
 Autonomous execution and automatic merge are separate authorizations. Automatic gates require recorded delegated human authorization, and automatic pull-request merging requires delivery authorization and repository support. Sensitive-path, secret-finding, destructive-operation, elevated-risk, and budget rules can force manual intervention. Direct merge is disabled unless both the workflow selects it and resolved policy has `allowDirectMerge: true`.
+
+### Sensitive-path rule matching
+
+Sensitive-path rules are globs evaluated against repository-relative, forward-slash paths. `**` matches zero or more path segments, a single `*` matches within one segment, and segments beginning with a dot are matched, so `.github/**` covers `.github/workflows/ci.yml`. A rule that is empty or has unbalanced `[]`, `{}`, or `()` delimiters cannot be evaluated and is treated as matching every changed path, forcing manual approval rather than silently becoming a rule that never fires. When a rule matches, the recorded reason names both the matched path and the rule.
+
+**Behavior change:** sensitive-path rules previously did not match as documented — `**` could not span path separators, so rules such as `.github/**`, `infra/**`, and `**/security/**` failed to match nested paths and the gate did not fire. Projects running autonomously with `sensitive-path` in `policy.riskOverrides` will now correctly stop for manual approval on changes that previously auto-approved.

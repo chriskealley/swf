@@ -1,4 +1,3 @@
-import { Ajv2020 } from "ajv/dist/2020.js";
 import { z } from "zod";
 
 export const CURRENT_SCHEMA_VERSION = 1;
@@ -717,6 +716,13 @@ export type DocumentValue<T extends DocumentName> = z.infer<
   (typeof documents)[T]
 >;
 
+/**
+ * JSON Schema export for external consumers, derived from the Zod documents
+ * above. Not authoritative: Zod is the sole runtime validation authority, and
+ * `unrepresentable: "any"` widens anything JSON Schema cannot express, so these
+ * schemas may accept values `parseDocument` rejects. Validate with
+ * `parseDocument`, not with these.
+ */
 export const jsonSchemas = Object.fromEntries(
   Object.entries(documents).map(([name, schema]) => [
     name,
@@ -729,13 +735,4 @@ export function parseDocument<T extends DocumentName>(
   value: unknown,
 ): DocumentValue<T> {
   return documents[name].parse(value) as DocumentValue<T>;
-}
-
-export function validateJsonDocument<T extends DocumentName>(
-  name: T,
-  value: unknown,
-) {
-  const ajv = new Ajv2020({ allErrors: true, strict: false });
-  const valid = ajv.validate(jsonSchemas[name], value);
-  return { valid: Boolean(valid), errors: ajv.errors ?? [] };
 }

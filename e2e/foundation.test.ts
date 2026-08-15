@@ -4,7 +4,7 @@ import {
   createRunState,
   createSetupPlan,
   evaluatePhaseEligibility,
-  validateJsonDocument,
+  parseDocument,
   type Workflow,
 } from "../packages/core/src/index.ts";
 
@@ -14,14 +14,14 @@ describe("foundation workflow", () => {
     expect(plan.actions).toHaveLength(1);
 
     expect(
-      validateJsonDocument("policy", {
+      parseDocument("policy", {
         schemaVersion: 1,
         id: "manual",
         approvalMode: "manual",
         maxAttempts: 1,
         riskOverrides: [],
-      }).valid,
-    ).toBe(true);
+      }),
+    ).toMatchObject({ id: "manual", approvalMode: "manual" });
   });
 
   it("runs one Pi agent unit and one command unit sequentially in the shared run worktree", async () => {

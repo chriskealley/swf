@@ -43,8 +43,7 @@ openspec/changes/    planning and portable evidence dossier
 
 - **Nitro**: local HTTP service and Server-Sent Events
 - **Vite + Vue**: dashboard
-- **Zod**: ergonomic TypeScript-facing validation
-- **Ajv**: JSON Schema validation at persisted/interoperability boundaries
+- **Zod**: the single authoritative validator for every configuration and state document, including at persisted boundaries. JSON Schemas are derived from these schemas for interoperability and are not a second runtime validation path.
 - **Citty**: CLI command definitions
 - **nypm**: setup package-manager integration
 - **Consola**: structured service and CLI logging
