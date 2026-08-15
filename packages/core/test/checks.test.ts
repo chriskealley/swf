@@ -246,7 +246,7 @@ describe("gates and approvals", () => {
       budgetThresholdUsd: 10,
     };
     expect(assessRiskOverride(risk)).toEqual([
-      "sensitive path changed",
+      "sensitive path changed: infra/prod.tf matches infra/**",
       "destructive operation",
       "secret finding",
       "elevated risk",
@@ -254,7 +254,9 @@ describe("gates and approvals", () => {
     ]);
     const resolved = resolveApprovalMode({ configured: "automatic", risk });
     expect(resolved.mode).toBe("manual");
-    expect(resolved.reasons).toContain("sensitive path changed");
+    expect(resolved.reasons).toContain(
+      "sensitive path changed: infra/prod.tf matches infra/**",
+    );
     expect(
       retryDecision({
         policy: { maxAttempts: 2 },
@@ -279,5 +281,95 @@ describe("gates and approvals", () => {
         spendUsd: 5,
       }).reason,
     ).toBe("spend limit reached");
+  });
+});
+
+/** The four patterns hard-coded in apps/service/src/server/swf-service.ts. */
+const shippedSensitivePatterns = [
+  ".github/**",
+  "**/security/**",
+  "**/auth/**",
+  "infra/**",
+];
+
+function sensitive(changedFiles: string[], sensitivePathPatterns: string[]) {
+  return assessRiskOverride({ changedFiles, sensitivePathPatterns }).some(
+    (reason) => reason.startsWith("sensitive path changed"),
+  );
+}
+
+describe("sensitive path glob matching", () => {
+  it("matches a nested path under a prefix rule", () => {
+    expect(sensitive(["infra/prod.tf"], ["infra/**"])).toBe(true);
+    expect(sensitive(["infra/aws/prod/main.tf"], ["infra/**"])).toBe(true);
+  });
+
+  it("matches a dotted configuration directory", () => {
+    expect(sensitive([".github/workflows/ci.yml"], [".github/**"])).toBe(true);
+  });
+
+  it("matches a leading wildcard at any depth", () => {
+    expect(sensitive(["src/security/token.ts"], ["**/security/**"])).toBe(true);
+    expect(sensitive(["app/api/security/token.ts"], ["**/security/**"])).toBe(
+      true,
+    );
+  });
+
+  it("matches a leading wildcard spanning zero segments", () => {
+    expect(sensitive(["security/token.ts"], ["**/security/**"])).toBe(true);
+  });
+
+  it("does not let a single wildcard span path separators", () => {
+    expect(sensitive(["infra/aws/prod/main.tf"], ["infra/*"])).toBe(false);
+    expect(sensitive(["infra/prod.tf"], ["infra/*"])).toBe(true);
+  });
+
+  it("does not match unrelated paths", () => {
+    expect(sensitive(["src/app.ts"], shippedSensitivePatterns)).toBe(false);
+    expect(sensitive(["docs/readme.md"], shippedSensitivePatterns)).toBe(false);
+    expect(sensitive(["insecurity/token.ts"], ["**/security/**"])).toBe(false);
+  });
+
+  it("normalizes leading ./ and trailing slashes before matching", () => {
+    expect(sensitive(["./infra/aws/main.tf"], ["infra/**"])).toBe(true);
+    expect(sensitive(["infra/aws/"], ["infra/**"])).toBe(true);
+  });
+
+  it("fails closed when a pattern cannot be evaluated", () => {
+    expect(sensitive(["src/app.ts"], ["[unterminated"])).toBe(true);
+    expect(sensitive(["src/app.ts"], ["{unclosed"])).toBe(true);
+    expect(sensitive(["src/app.ts"], ["infra/(a|b"])).toBe(true);
+    expect(sensitive(["src/app.ts"], [""])).toBe(true);
+  });
+
+  it("still evaluates well-formed patterns containing delimiters", () => {
+    expect(sensitive(["infra/prod.tf"], ["infra/*.{tf,tfvars}"])).toBe(true);
+    expect(sensitive(["infra/prod.json"], ["infra/*.{tf,tfvars}"])).toBe(false);
+    expect(sensitive(["src/a1.ts"], ["src/[a-z][0-9].ts"])).toBe(true);
+    expect(sensitive(["src/escaped[1].ts"], ["src/escaped\\[1\\].ts"])).toBe(
+      true,
+    );
+  });
+
+  it("names the matched rule and path in the risk reason", () => {
+    expect(
+      assessRiskOverride({
+        changedFiles: ["src/app.ts", ".github/workflows/ci.yml"],
+        sensitivePathPatterns: shippedSensitivePatterns,
+      }),
+    ).toEqual([
+      "sensitive path changed: .github/workflows/ci.yml matches .github/**",
+    ]);
+  });
+
+  it("matches every shipped default pattern against realistic paths", () => {
+    for (const file of [
+      ".github/workflows/ci.yml",
+      "app/api/security/token.ts",
+      "security/token.ts",
+      "packages/core/src/auth/session.ts",
+      "infra/aws/prod/main.tf",
+    ])
+      expect(sensitive([file], shippedSensitivePatterns)).toBe(true);
   });
 });

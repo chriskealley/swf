@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import picomatch from "picomatch";
 import { z } from "zod";
 import { type Artifact } from "./domain.js";
 import { type ArtifactStore } from "./artifacts.js";
@@ -341,24 +342,81 @@ export interface RiskAssessmentInput {
   budgetThresholdUsd?: number;
 }
 
-function matchesPattern(path: string, pattern: string): boolean {
-  const expression = `^${pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replaceAll("**", ".*")
-    .replaceAll("*", "[^/]*")}$`;
-  return new RegExp(expression).test(path);
+/** Repository-relative, forward-slash form so globs match what git reports. */
+function normalizeChangedPath(path: string): string {
+  return path.replace(/^\.\//, "").replace(/\/+$/, "");
+}
+
+/**
+ * Detects unbalanced glob delimiters. picomatch never rejects a malformed
+ * pattern: it recovers by escaping the text to a literal, so `[unterminated`
+ * silently becomes a rule that matches only that exact filename. For a
+ * fail-closed gate that recovery is indistinguishable from a rule nobody
+ * notices is dead, so treat unbalanced delimiters as unevaluable instead.
+ */
+function hasBalancedGlobDelimiters(pattern: string): boolean {
+  const closers = new Map([
+    ["[", "]"],
+    ["{", "}"],
+    ["(", ")"],
+  ]);
+  const closing = new Set(closers.values());
+  const stack: string[] = [];
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern.charAt(index);
+    if (character === "\\") {
+      index += 1;
+      continue;
+    }
+    const closer = closers.get(character);
+    if (closer) stack.push(closer);
+    else if (closing.has(character) && stack.pop() !== character) return false;
+  }
+  return stack.length === 0;
+}
+
+/**
+ * Compiles each sensitive-path rule once for reuse across every changed file.
+ * `dot: true` is required: `.github/**` is a shipped default, and picomatch
+ * otherwise skips segments beginning with a dot. A rule that cannot be
+ * evaluated matches everything so this fail-closed gate never silently
+ * skips it.
+ */
+function compileSensitivePathMatchers(
+  patterns: string[],
+): Array<(path: string) => boolean> {
+  return patterns.map((pattern) => {
+    if (!hasBalancedGlobDelimiters(pattern)) return () => true;
+    try {
+      return picomatch(pattern, { dot: true });
+    } catch {
+      return () => true;
+    }
+  });
+}
+
+/** Names the rule and path so an approval stop explains itself. */
+function firstSensitivePathMatch(
+  input: RiskAssessmentInput,
+): { path: string; pattern: string } | undefined {
+  const patterns = input.sensitivePathPatterns ?? [];
+  const matchers = compileSensitivePathMatchers(patterns);
+  if (!matchers.length) return undefined;
+  for (const file of input.changedFiles ?? []) {
+    const path = normalizeChangedPath(file);
+    const index = matchers.findIndex((matches) => matches(path));
+    if (index !== -1) return { path, pattern: patterns[index] ?? "" };
+  }
+  return undefined;
 }
 
 export function assessRiskOverride(input: RiskAssessmentInput): string[] {
   const reasons: string[] = [];
-  if (
-    input.changedFiles?.some((file) =>
-      input.sensitivePathPatterns?.some((pattern) =>
-        matchesPattern(file, pattern),
-      ),
-    )
-  )
-    reasons.push("sensitive path changed");
+  const sensitiveMatch = firstSensitivePathMatch(input);
+  if (sensitiveMatch)
+    reasons.push(
+      `sensitive path changed: ${sensitiveMatch.path} matches ${sensitiveMatch.pattern}`,
+    );
   if (input.destructiveOperation) reasons.push("destructive operation");
   if (input.secretsFound) reasons.push("secret finding");
   if (input.elevatedRisk) reasons.push("elevated risk");
