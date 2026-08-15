@@ -674,7 +674,9 @@ describe("disposable operational acceptance", () => {
 
 const live = process.env.SWF_LIVE_HARNESS_SMOKE === "1";
 describe.skipIf(!live)("selected live harness smoke", () => {
-  it("checks the explicitly selected authenticated adapter and Herdr integration", async () => {
+  it("runs the selected authenticated harness through compact private bridge capture", async () => {
+    const root = await initializeRepository();
+    const stateDirectory = join(root, ".swf-state");
     const herdr = new HerdrClient();
     const adapters = {
       pi: new PiHarnessAdapter(herdr),
@@ -684,9 +686,142 @@ describe.skipIf(!live)("selected live harness smoke", () => {
     };
     const selected = process.env.SWF_LIVE_HARNESS as keyof typeof adapters;
     expect(selected).toMatch(/^(pi|codex|claude|copilot)$/);
-    await expect(adapters[selected].availability()).resolves.toMatchObject({
+    const adapter = adapters[selected];
+    await expect(adapter.availability()).resolves.toMatchObject({
       valid: true,
       errors: [],
     });
-  });
+    const workspace = await herdr.createWorkspace({
+      cwd: root,
+      label: `swf-live-${selected}-${Date.now()}`,
+    });
+    const liveRunId = `live-${selected}-${crypto.randomUUID()}`;
+    let invocation: AdapterInvocation | undefined;
+    try {
+      invocation = await adapter.launch({
+        projectId,
+        stateDirectory,
+        runId: liveRunId,
+        phaseId: "smoke",
+        workUnitId: `${selected}-live-smoke`,
+        workspaceId: workspace.workspaceId!,
+        cwd: root,
+        prompt:
+          "Respond with exactly SWF_HARNESS_SMOKE_OK. Do not use tools and do not modify files.",
+        presentationLevel: "normal",
+        timeoutMs: 120_000,
+      });
+      if (selected === "copilot") {
+        const result = await adapter.collect(invocation);
+        const paneText = await herdr.transcript(invocation.paneId, 120);
+        expect(adapter.capabilities.structuredEvents).toBe(false);
+        expect(invocation.protocolDirectory).toBeUndefined();
+        expect(result).toMatchObject({
+          status: "completed",
+          usage: { quality: "unknown" },
+        });
+        expect(paneText).toContain("SWF_HARNESS_SMOKE_OK");
+        const evidence = {
+          schemaVersion: 1,
+          harness: selected,
+          result: result.status,
+          paneId: invocation.paneId,
+          transport: "legacy-transcript",
+          structuredEvents: false,
+          privateProtocolCapture: false,
+          usageQuality: result.usage.quality,
+          markerObserved: true,
+          capabilityGap:
+            "No documented machine-readable JSONL protocol is available",
+        };
+        const evidencePath = process.env.SWF_LIVE_EVIDENCE_PATH;
+        if (evidencePath)
+          await writeFile(
+            evidencePath,
+            `${JSON.stringify(evidence, null, 2)}\n`,
+            { mode: 0o600 },
+          );
+        else console.log(JSON.stringify(evidence));
+        return;
+      }
+      const deadline = Date.now() + 180_000;
+      let observation: AdapterObservation = await adapter.observe(invocation);
+      while (
+        !["completed", "failed", "cancelled"].includes(observation.status)
+      ) {
+        if (Date.now() >= deadline)
+          throw new Error(`${selected} live bridge did not settle in time`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        observation = await adapter.observe(invocation);
+      }
+
+      const result = await adapter.collect(invocation);
+      expect(result.status).toBe("completed");
+      const store = new HarnessProtocolStore(
+        stateDirectory,
+        liveRunId,
+        invocation.invocationId,
+      );
+      const [metadata, cursor, events, nativeInfo, paneText] =
+        await Promise.all([
+          store.metadata(),
+          store.readCursor(),
+          store.events(),
+          stat(store.nativePath),
+          herdr.transcript(invocation.paneId, 120),
+        ]);
+      expect(metadata).toMatchObject({
+        harness: selected,
+        presentationLevel: "normal",
+        captureHealth: "healthy",
+      });
+      expect(nativeInfo.mode & 0o777).toBe(0o600);
+      expect(await store.nativeRecordCount()).toBeGreaterThan(0);
+      expect(cursor.nativeOffset).toBeGreaterThan(0);
+      expect(cursor.normalizedOffset).toBeGreaterThan(0);
+      expect(events.some(({ type }) => type === "settled")).toBe(true);
+      expect(paneText).not.toContain('{"type"');
+      const compactLines = paneText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) =>
+          /^(?:Ready|Working|✓ Completed|✗ Failed|! Input required|[•↻])/.test(
+            line,
+          ),
+        )
+        .slice(-12);
+      expect(compactLines).toContainEqual(
+        expect.stringMatching(/^✓ Completed/),
+      );
+      const evidence = {
+        schemaVersion: 1,
+        harness: selected,
+        result: result.status,
+        paneId: invocation.paneId,
+        presentationLevel: metadata.presentationLevel,
+        codecVersion: metadata.codecVersion,
+        captureHealth: metadata.captureHealth,
+        nativeRecords: await store.nativeRecordCount(),
+        nativePermissions: (nativeInfo.mode & 0o777).toString(8),
+        nativeOffset: cursor.nativeOffset,
+        normalizedOffset: cursor.normalizedOffset,
+        normalizedEventTypes: [...new Set(events.map(({ type }) => type))],
+        compactLines,
+      };
+      const evidencePath = process.env.SWF_LIVE_EVIDENCE_PATH;
+      if (evidencePath)
+        await writeFile(
+          evidencePath,
+          `${JSON.stringify(evidence, null, 2)}\n`,
+          {
+            mode: 0o600,
+          },
+        );
+      else console.log(JSON.stringify(evidence));
+    } finally {
+      if (invocation)
+        await herdr.closePane(invocation.paneId).catch(() => undefined);
+      await herdr.closeWorkspace(workspace.workspaceId!).catch(() => undefined);
+    }
+  }, 240_000);
 });

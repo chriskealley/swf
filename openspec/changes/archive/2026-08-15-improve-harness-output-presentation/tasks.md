@@ -93,4 +93,4 @@
 - [x] 10.3 Verify quiet, normal, verbose, and protocol output behavior in TTY and non-TTY Herdr contexts
 - [x] 10.4 Verify blocked input, cancellation, retry, resume, settlement, malformed protocols, service restart, graceful and forced shutdown joining, retention, and cleanup across supported capabilities
 - [x] 10.5 Run formatting, lint, type checking, unit, integration, E2E, OpenSpec validation, and Git whitespace verification
-- [ ] 10.6 Perform opt-in live Pi, Claude, and Codex smoke tests where installed and authenticated, retaining compact-output screenshots or text evidence and private protocol verification without committing raw transcripts
+- [x] 10.6 Perform opt-in live Pi, Claude, and Codex smoke tests where installed and authenticated, retaining compact-output screenshots or text evidence and private protocol verification without committing raw transcripts
