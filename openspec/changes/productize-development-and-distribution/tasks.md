@@ -43,13 +43,13 @@
 
 ## 5. Production-Like Local Preview
 
-- [ ] 5.1 Add a preview command that builds and stages the exact product layout in an isolated development instance
-- [ ] 5.2 Launch only the staged compiled CLI, production Nitro service, and packaged dashboard in preview mode
-- [ ] 5.3 Reject preview artifacts that resolve to TypeScript source, `tsx`, workspace filters, Nitro dev, Vite dev, or source-repository assets
-- [ ] 5.4 Report preview artifact version, source commit, checksum manifest, endpoint, state, logs, and exact executable
-- [ ] 5.5 Add temporary committed Git/OpenSpec fixture generation with local-branch delivery and optional retention
-- [ ] 5.6 Keep live harness and hosted delivery execution explicit opt-ins in preview and fixture workflows
-- [ ] 5.7 Add end-to-end preview tests from a clean checkout and isolated fixture
+- [x] 5.1 Add a preview command that builds and stages the exact product layout in an isolated development instance
+- [x] 5.2 Launch only the staged compiled CLI, production Nitro service, and packaged dashboard in preview mode
+- [x] 5.3 Reject preview artifacts that resolve to TypeScript source, `tsx`, workspace filters, Nitro dev, Vite dev, or source-repository assets
+- [x] 5.4 Report preview artifact version, source commit, checksum manifest, endpoint, state, logs, and exact executable
+- [x] 5.5 Add temporary committed Git/OpenSpec fixture generation with local-branch delivery and optional retention
+- [x] 5.6 Keep live harness and hosted delivery execution explicit opt-ins in preview and fixture workflows
+- [x] 5.7 Add end-to-end preview tests from a clean checkout and isolated fixture
 
 ## 6. Exact Packaged Artifact Verification
 

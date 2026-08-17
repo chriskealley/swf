@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { cp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  assertPreviewArtifact,
+  createGitFixture,
   createInstance,
+  fixtureCapabilitySummary,
+  fixtureEnvironment,
+  inspectPreviewCommand,
+  removeGitFixture,
+  renderPreviewSummary,
   instanceEnvironment,
   instanceStatus,
   listInstances,
@@ -15,6 +23,8 @@ import {
   type DevelopmentInstance,
 } from "../packages/dev/src/index.js";
 import { repositoryRoot } from "./product-layout.js";
+import { buildProduct } from "./build-product.js";
+import { verifyProduct } from "./verify-product.js";
 
 /**
  * Checkout-local development CLI. Invoked as `pnpm dev <command>` from the
@@ -27,7 +37,9 @@ function usage(): string {
     "Usage: pnpm dev <command> [options]",
     "",
     "Commands:",
-    "  start [--instance <name>] [--project <path>]  Start an isolated service",
+    "  start [--instance <name>]                     Start an isolated source service",
+    "  preview [--instance <name>]                   Build, stage, and run the artifact",
+    "  fixture [--retain] [--change <name>]          Create a throwaway Git/OpenSpec repo",
     "  list                                          List instances",
     "  status [--instance <name>]                    Show health and endpoint",
     "  logs [--instance <name>] [--lines <n>]        Print a bounded log tail",
@@ -62,14 +74,17 @@ async function sourceCommit(): Promise<string> {
   });
 }
 
-async function ensureInstance(name: string): Promise<DevelopmentInstance> {
+async function ensureInstance(
+  name: string,
+  mode: DevelopmentInstance["mode"] = "fast",
+): Promise<DevelopmentInstance> {
   try {
     return await readInstance(repositoryRoot, name);
   } catch {
     return createInstance({
       checkoutRoot: repositoryRoot,
       name,
-      mode: "fast",
+      mode,
       sourceCommit: await sourceCommit(),
     });
   }
@@ -116,6 +131,124 @@ async function start(name: string): Promise<void> {
   );
 }
 
+/**
+ * Builds the release artifact, stages it inside the instance, installs only its
+ * declared dependencies, and runs the compiled entries. Preview is the local
+ * bridge to release verification, so it refuses anything that still resolves to
+ * the source checkout.
+ */
+async function preview(name: string): Promise<void> {
+  const instance = await ensureInstance(name, "preview");
+  process.stdout.write("Assembling the product artifact...\n");
+  const { staging, metadata } = await buildProduct({ channel: "development" });
+  const verification = await verifyProduct(staging);
+  if (verification.violations.length) {
+    for (const violation of verification.violations)
+      process.stderr.write(`  x ${violation}\n`);
+    throw new Error("Refusing to preview an artifact that failed verification");
+  }
+
+  await rm(instance.packageDirectory, { recursive: true, force: true });
+  await mkdir(instance.packageDirectory, { recursive: true, mode: 0o700 });
+  await cp(staging, instance.packageDirectory, { recursive: true });
+
+  process.stdout.write("Installing declared dependencies...\n");
+  await runToCompletion(
+    "npm",
+    ["install", "--omit=dev", "--no-audit", "--no-fund", "--silent"],
+    instance.packageDirectory,
+  );
+
+  await assertPreviewArtifact(instance.packageDirectory, repositoryRoot);
+
+  const serviceEntry = join(
+    instance.packageDirectory,
+    "service",
+    "server",
+    "index.mjs",
+  );
+  const executable = join(instance.packageDirectory, "bin", "swf.mjs");
+  const commandViolations = inspectPreviewCommand(process.execPath, [
+    serviceEntry,
+  ]);
+  if (commandViolations.length)
+    throw new Error(commandViolations.map(({ detail }) => detail).join("\n"));
+
+  const { instance: started, logPath } = await startInstance(
+    repositoryRoot,
+    name,
+    {
+      command: process.execPath,
+      args: [serviceEntry],
+      cwd: instance.packageDirectory,
+    },
+  );
+
+  process.stdout.write(
+    `${renderPreviewSummary({
+      instance: started.name,
+      mode: started.mode,
+      productVersion: metadata.build.productVersion,
+      channel: metadata.build.channel,
+      sourceCommit: metadata.build.sourceCommit,
+      sourceDirty: metadata.build.sourceDirty,
+      publishable: metadata.build.publishable,
+      endpoint: started.endpoint,
+      executable,
+      serviceEntry,
+      serviceHome: started.serviceHome,
+      logsDirectory: started.logsDirectory,
+      fileCount: verification.entries.length,
+      totalBytes: verification.totalBytes,
+    })}\nlog         ${logPath}\n`,
+  );
+}
+
+async function runToCompletion(
+  command: string,
+  args: string[],
+  cwd: string,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, { cwd, stdio: "inherit" });
+    child.once("error", reject);
+    child.once("close", (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(`${command} exited with ${code}`)),
+    );
+  });
+}
+
+async function fixture(): Promise<void> {
+  const created = await createGitFixture({
+    changeName: option("change", "fixture-change"),
+    retain: flag("retain"),
+    capabilities: {
+      liveHarness: flag("live-harness"),
+      hostedDelivery: flag("hosted-delivery"),
+    },
+  });
+  process.stdout.write(
+    [
+      `root       ${created.root}`,
+      `branch     ${created.branch}`,
+      `commit     ${created.headCommit.slice(0, 12)}`,
+      `change     ${created.changeName}`,
+      ...fixtureCapabilitySummary(created).map((note) => `           ${note}`),
+      ...Object.entries(fixtureEnvironment(created)).map(
+        ([key, value]) => `${key}=${value}`,
+      ),
+    ].join("\n") + "\n",
+  );
+  if (created.retain)
+    process.stdout.write("\nRetained. Remove it yourself when finished.\n");
+  else {
+    await removeGitFixture(created);
+    process.stdout.write("\nRemoved. Pass --retain to keep it.\n");
+  }
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   const name = option("instance", "default") ?? "default";
@@ -123,6 +256,12 @@ async function main(): Promise<void> {
   switch (command) {
     case "start":
       await start(name);
+      return;
+    case "preview":
+      await preview(name);
+      return;
+    case "fixture":
+      await fixture();
       return;
     case "list": {
       const instances = await listInstances(repositoryRoot);
