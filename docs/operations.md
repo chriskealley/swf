@@ -145,3 +145,46 @@ Autonomous execution and automatic merge are separate authorizations. Automatic 
 Sensitive-path rules are globs evaluated against repository-relative, forward-slash paths. `**` matches zero or more path segments, a single `*` matches within one segment, and segments beginning with a dot are matched, so `.github/**` covers `.github/workflows/ci.yml`. A rule that is empty or has unbalanced `[]`, `{}`, or `()` delimiters cannot be evaluated and is treated as matching every changed path, forcing manual approval rather than silently becoming a rule that never fires. When a rule matches, the recorded reason names both the matched path and the rule.
 
 **Behavior change:** sensitive-path rules previously did not match as documented — `**` could not span path separators, so rules such as `.github/**`, `infra/**`, and `**/security/**` failed to match nested paths and the gate did not fire. Projects running autonomously with `sensitive-path` in `policy.riskOverrides` will now correctly stop for manual approval on changes that previously auto-approved.
+
+## Managed user service
+
+SWF can install a user-scoped background service on macOS (a launchd agent) and Linux (a systemd user unit). Installing the package never registers, enables, or starts one — every step is previewed and separately confirmed.
+
+```
+swf service install                    # preview only; changes nothing
+swf service install --apply --yes      # write the definition
+swf service install --apply --yes --at-login   # also start at login
+swf service check                      # diagnose the installed definition
+swf service uninstall                  # preview removal
+swf service uninstall --apply --yes    # remove the definition
+```
+
+`swf service install` prints the destination, executable, arguments, working directory, log paths, environment, and the exact enable command before anything is written. Applying writes the definition with `0600` permissions and then **stops**: enabling and starting are left to you, so a package installation can never launch a background process.
+
+| Platform | Definition                                     |
+| -------- | ---------------------------------------------- |
+| macOS    | `~/Library/LaunchAgents/dev.swf.service.plist` |
+| Linux    | `~/.config/systemd/user/swf.service`           |
+
+Both definitions pin the service to `127.0.0.1`, set an explicit service home, and disable automatic restart. Neither starts at login unless `--at-login` is passed.
+
+### Diagnosing a stale definition
+
+Node version managers relocate binaries and package upgrades move product paths, so a definition can end up referencing an executable that no longer exists — failing at login with no explanation. `swf service check` reports the specific stale path:
+
+```
+stale-package: configured service entry is missing: /usr/local/lib/node_modules/@chriskealley/swf/service/server/index.mjs
+  The product was moved or reinstalled. Run swf service install --repair.
+```
+
+`swf service install --repair` previews a replacement definition; `--repair --apply --yes` rewrites it.
+
+SWF only ever modifies definitions it owns. A file at the same path that SWF did not write is reported as `not-owned` and is never edited or removed.
+
+### Uninstall preserves state
+
+Removing the managed service removes only the definition. The service home, credentials, registries, logs, audit history, and every project's `.swf/` and `.swf-state/` are preserved. Service uninstall is not state uninstall — see the destructive cleanup commands for that.
+
+### Where managed services are unsupported
+
+On other platforms, run the service directly. `swf service start` detaches it and writes private rotating logs, `swf service stop` ends it, and `swf service logs` shows a bounded redacted tail.

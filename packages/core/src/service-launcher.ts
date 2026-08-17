@@ -47,6 +47,29 @@ export async function resolvePackagedServiceEntry(
   return undefined;
 }
 
+/**
+ * The path the packaged entry would occupy, whether or not it currently exists.
+ * Diagnostics need this: a definition referencing a moved or deleted product
+ * must still be describable, and `resolvePackagedServiceEntry` returns nothing
+ * once the file is gone.
+ */
+export async function expectedPackagedServiceEntry(
+  fromDirectory = dirname(fileURLToPath(import.meta.url)),
+): Promise<string | undefined> {
+  const resolved = await resolvePackagedServiceEntry(fromDirectory);
+  if (resolved) return resolved;
+  let directory = fromDirectory;
+  for (let depth = 0; depth < ENTRY_SEARCH_DEPTH; depth += 1) {
+    // The product root is the directory holding the packaged manifest.
+    if (await exists(join(directory, "package.json")))
+      return join(directory, PACKAGED_SERVICE_ENTRY);
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return undefined;
+}
+
 export interface ServiceLaunchPlan {
   /** Always the current Node binary; never a shell or package manager. */
   executable: string;

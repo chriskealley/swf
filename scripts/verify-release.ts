@@ -135,11 +135,14 @@ async function main(): Promise<void> {
   // Retain the first build's content so a difference can be explained, not
   // merely detected.
   const firstSnapshot = new Map<string, string>();
-  for (const { path } of firstDigests)
-    firstSnapshot.set(
-      path,
-      await readFile(join(stagingRoot, path), "utf8").catch(() => ""),
+  for (const { path } of firstDigests) {
+    // Leave unreadable files absent rather than storing an empty string, so a
+    // later comparison can report that it could not compare them.
+    const contents = await readFile(join(stagingRoot, path), "utf8").catch(
+      () => undefined,
     );
+    if (contents !== undefined) firstSnapshot.set(path, contents);
+  }
   const { metadata: second } = await buildProduct({
     channel,
     version: metadata.build.productVersion,
@@ -171,17 +174,32 @@ async function main(): Promise<void> {
   // nondeterminism. Anything else is a real build difference and fails.
   const unexplained: string[] = [];
   for (const differing of reproducibility.differingFiles) {
-    const classification = differing.includes("(missing in")
-      ? "content"
-      : classifyDifference(
-          firstSnapshot.get(differing) ?? "",
-          await readFile(join(stagingRoot, differing), "utf8").catch(() => ""),
-        );
-    if (classification === "timestamps-only")
+    if (differing.includes("(missing in")) {
+      unexplained.push(differing);
+      continue;
+    }
+    const before = firstSnapshot.get(differing);
+    const after = await readFile(join(stagingRoot, differing), "utf8").catch(
+      () => undefined,
+    );
+    // Distinguish "content genuinely differs" from "could not be compared".
+    // Treating an unreadable file as an empty string would report a confusing
+    // content difference instead of the real problem.
+    if (before === undefined || after === undefined) {
+      unexplained.push(
+        `${differing} (could not be compared: ${
+          before === undefined
+            ? "no first-build snapshot"
+            : "unreadable after rebuild"
+        })`,
+      );
+      continue;
+    }
+    if (classifyDifference(before, after) === "timestamps-only")
       process.stdout.write(
         `  note ${differing} differs only in embedded timestamps\n`,
       );
-    else unexplained.push(differing);
+    else unexplained.push(`${differing} (content differs)`);
   }
   for (const differing of unexplained)
     process.stderr.write(`  FAIL differing: ${differing}\n`);

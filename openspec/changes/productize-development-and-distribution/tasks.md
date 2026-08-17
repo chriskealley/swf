@@ -75,13 +75,13 @@
 
 ## 8. Managed User Service
 
-- [ ] 8.1 Define preview plans for macOS launchd user agents and Linux systemd user units with destinations, paths, arguments, environment, logs, enablement, and startup actions
-- [ ] 8.2 Implement explicitly confirmed service installation without package-install hooks or implicit startup
-- [ ] 8.3 Validate installed service definitions and report stale Node, package, executable, or environment paths
-- [ ] 8.4 Implement previewed repair or reinstall of owned managed-service definitions after supported package path changes
-- [ ] 8.5 Implement previewed service uninstall that stops and disables only owned user services and preserves all state
-- [ ] 8.6 Add launchd fixture/validation tests on macOS and systemd user-unit fixture/validation tests on Linux
-- [ ] 8.7 Document manual foreground or detached fallback where managed services are unsupported
+- [x] 8.1 Define preview plans for macOS launchd user agents and Linux systemd user units with destinations, paths, arguments, environment, logs, enablement, and startup actions
+- [x] 8.2 Implement explicitly confirmed service installation without package-install hooks or implicit startup
+- [x] 8.3 Validate installed service definitions and report stale Node, package, executable, or environment paths
+- [x] 8.4 Implement previewed repair or reinstall of owned managed-service definitions after supported package path changes
+- [x] 8.5 Implement previewed service uninstall that stops and disables only owned user services and preserves all state
+- [x] 8.6 Add launchd fixture/validation tests on macOS and systemd user-unit fixture/validation tests on Linux
+- [x] 8.7 Document manual foreground or detached fallback where managed services are unsupported
 
 ## 9. Upgrade, Migration, and Downgrade Safety
 

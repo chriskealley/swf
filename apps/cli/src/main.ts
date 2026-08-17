@@ -15,8 +15,17 @@ import {
   readLocalServiceMetadata,
   readProjectConfig,
   runDoctor,
+  UnsupportedManagedServiceError,
+  applyManagedServicePlan,
+  createManagedServicePlan,
   createServiceLaunchPlan,
   developmentProductMetadata,
+  expectedPackagedServiceEntry,
+  diagnoseManagedService,
+  manualFallbackGuidance,
+  previewManagedServiceRepair,
+  renderManagedServicePlan,
+  uninstallManagedService,
   listServiceLogs,
   readServiceLogTail,
   resolvePackagedServiceEntry,
@@ -512,6 +521,163 @@ const serviceDiagnostic = defineCommand({
     }
   },
 });
+/**
+ * Builds a managed-service plan. Diagnostics must work even when the packaged
+ * entry is missing, so `forDiagnosis` falls back to the path the entry would
+ * occupy rather than refusing outright.
+ */
+async function managedPlanForCurrentProduct(
+  runAtLoad: boolean,
+  forDiagnosis = false,
+) {
+  const serviceHome =
+    process.env.SWF_SERVICE_HOME ??
+    process.env.SWF_CONFIG_HOME ??
+    join(process.env.HOME ?? process.cwd(), ".config", "swf");
+  const entry = forDiagnosis
+    ? await expectedPackagedServiceEntry()
+    : await resolvePackagedServiceEntry();
+  if (!entry)
+    throw new Error(
+      "Managed services require an installed product. A source checkout has no packaged service entry.",
+    );
+  return createManagedServicePlan({
+    launch: createServiceLaunchPlan({
+      serviceEntry: entry,
+      serviceHome,
+      port: 34671,
+    }),
+    runAtLoad,
+  });
+}
+
+const serviceInstall = defineCommand({
+  meta: {
+    name: "install",
+    description: "Preview or install the user-scoped managed service",
+  },
+  args: {
+    json: { type: "boolean" },
+    apply: { type: "boolean", description: "Write the definition" },
+    yes: { type: "boolean", description: "Confirm the previewed plan" },
+    repair: { type: "boolean", description: "Rewrite a stale definition" },
+    "at-login": {
+      type: "boolean",
+      description: "Start automatically at login",
+    },
+  },
+  async run({ args }) {
+    try {
+      const plan = await managedPlanForCurrentProduct(
+        Boolean(args["at-login"]),
+      );
+      if (args.repair) {
+        const preview = await previewManagedServiceRepair(plan);
+        if (!args.apply) return output(preview, args.json);
+        if (!args.yes)
+          throw new Error(
+            "Refusing to repair without --yes. Review the preview first.",
+          );
+      } else if (!args.apply) {
+        if (args.json) return output(plan, true);
+        consola.log(renderManagedServicePlan(plan));
+        consola.info(
+          "Nothing has been changed. Re-run with --apply --yes to install.",
+        );
+        return;
+      } else if (!args.yes)
+        throw new Error(
+          "Refusing to install without --yes. Review the preview first.",
+        );
+
+      const result = await applyManagedServicePlan(plan, { confirmed: true });
+      if (args.json) return output(result, true);
+      consola.success(`Wrote ${result.definitionPath}`);
+      consola.info("Enable it yourself when ready:");
+      for (const command of result.pendingCommands)
+        consola.log(`  ${command.join(" ")}`);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+
+const serviceUninstall = defineCommand({
+  meta: {
+    name: "uninstall",
+    description: "Preview or remove the user-scoped managed service",
+  },
+  args: {
+    json: { type: "boolean" },
+    apply: { type: "boolean" },
+    yes: { type: "boolean" },
+  },
+  async run({ args }) {
+    try {
+      const plan = await managedPlanForCurrentProduct(false, true);
+      if (!args.apply) {
+        const diagnostics = await diagnoseManagedService(plan);
+        if (args.json)
+          return output(
+            {
+              definitionPath: plan.definitionPath,
+              diagnostics,
+              preserved: [plan.environment.SWF_SERVICE_HOME],
+            },
+            true,
+          );
+        consola.log(`Would remove ${plan.definitionPath}`);
+        consola.info(
+          `Preserved: ${plan.environment.SWF_SERVICE_HOME} and all project state`,
+        );
+        consola.info("Re-run with --apply --yes to remove it.");
+        return;
+      }
+      if (!args.yes)
+        throw new Error(
+          "Refusing to remove without --yes. Review the preview first.",
+        );
+      const result = await uninstallManagedService(plan, { confirmed: true });
+      if (args.json) return output(result, true);
+      consola.success(
+        result.removed
+          ? `Removed ${result.definitionPath}`
+          : `No definition at ${result.definitionPath}`,
+      );
+      for (const command of result.pendingCommands)
+        consola.log(`  ${command.join(" ")}`);
+      consola.info(`Preserved: ${result.preservedPaths.join(", ")}`);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+
+const serviceDoctorManaged = defineCommand({
+  meta: {
+    name: "check",
+    description: "Diagnose the installed managed service definition",
+  },
+  args: { json: { type: "boolean" } },
+  async run({ args }) {
+    try {
+      const plan = await managedPlanForCurrentProduct(false, true);
+      const diagnostics = await diagnoseManagedService(plan);
+      if (args.json) return output({ diagnostics }, true);
+      for (const finding of diagnostics) {
+        consola.log(`${finding.id}: ${finding.detail}`);
+        if (finding.remediation) consola.info(`  ${finding.remediation}`);
+      }
+    } catch (error) {
+      if (error instanceof UnsupportedManagedServiceError) {
+        for (const line of manualFallbackGuidance()) consola.info(line);
+        return;
+      }
+      fail(error, args.json);
+    }
+  },
+});
+
 const service = defineCommand({
   meta: {
     name: "service",
@@ -522,6 +688,9 @@ const service = defineCommand({
     status: serviceStatus,
     stop: serviceStop,
     logs: serviceLogs,
+    install: serviceInstall,
+    uninstall: serviceUninstall,
+    check: serviceDoctorManaged,
     diagnostic: serviceDiagnostic,
   },
 });
