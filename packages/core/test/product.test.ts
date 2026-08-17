@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   PRODUCT_COMPATIBILITY,
@@ -8,6 +11,7 @@ import {
   developmentProductMetadata,
   evaluateCompatibility,
   parseProductMetadata,
+  readProductMetadata,
   refusesWriterStartup,
 } from "../src/product.js";
 
@@ -272,5 +276,52 @@ describe("build metadata generation", () => {
     const metadata = createProductMetadata({ ...clean, channel: "stable" });
     expect(parseProductMetadata(metadata)).toEqual(metadata);
     expect(metadata.compatibility.minimumNodeVersion).toBe("24.0.0");
+  });
+});
+
+describe("packaged metadata resolution", () => {
+  async function stage(relativeEntry: string): Promise<string> {
+    const root = await mkdtemp(join(tmpdir(), "swf product "));
+    const metadata = createProductMetadata({
+      productVersion: "0.2.0",
+      sourceCommit: "c".repeat(40),
+      sourceDirty: false,
+      channel: "stable",
+      builtAt: "2026-08-17T00:00:00.000Z",
+    });
+    await writeFile(
+      join(root, "product.json"),
+      JSON.stringify(metadata, null, 2),
+    );
+    const entry = join(root, relativeEntry);
+    await mkdir(entry, { recursive: true });
+    return entry;
+  }
+
+  it("finds metadata beside a shallow entry", async () => {
+    const metadata = await readProductMetadata(await stage("bin"));
+    expect(metadata.build.productVersion).toBe("0.2.0");
+  });
+
+  it("finds metadata above a deeply nested bundler entry", async () => {
+    const metadata = await readProductMetadata(
+      await stage(join("service", "server", "chunks", "nitro")),
+    );
+    expect(metadata.build.channel).toBe("stable");
+  });
+
+  it("resolves from a path containing spaces", async () => {
+    const entry = await stage(join("service", "server"));
+    expect(entry).toContain(" ");
+    await expect(readProductMetadata(entry)).resolves.toMatchObject({
+      build: { publishable: true },
+    });
+  });
+
+  it("reports a clear error when no metadata exists", async () => {
+    const empty = await mkdtemp(join(tmpdir(), "swf-empty-"));
+    await expect(readProductMetadata(empty)).rejects.toThrow(
+      "No product.json was found",
+    );
   });
 });

@@ -16,6 +16,7 @@ import {
   readProjectConfig,
   runDoctor,
   developmentProductMetadata,
+  evaluateCompatibility,
   readProductMetadata,
   type ProductMetadata,
   type CheckStatus,
@@ -1296,6 +1297,94 @@ const explore = defineCommand({
 
 const productMetadata = await resolveProductMetadata();
 
+/**
+ * Opens the dashboard served by the packaged loopback service. The bearer
+ * credential is never placed on the command line or in the URL query, where it
+ * would reach shell history and server logs.
+ */
+const dashboard = defineCommand({
+  meta: {
+    name: "dashboard",
+    description: "Open or print the local dashboard URL",
+  },
+  subCommands: {
+    open: defineCommand({
+      meta: { name: "open", description: "Open the packaged dashboard" },
+      args: {
+        json: { type: "boolean" },
+        "no-open": { type: "boolean" },
+      },
+      async run({ args }) {
+        try {
+          const metadata = await readLocalServiceMetadata();
+          const url = `${metadata.endpoint.replace(/\/$/, "")}/dashboard/`;
+          const compatibility = await dashboardCompatibility(metadata.endpoint);
+          if (args.json) return output({ url, compatibility }, true);
+          consola.log(url);
+          if (compatibility?.length)
+            for (const warning of compatibility) consola.warn(warning);
+          if (!args["no-open"]) await openInBrowser(url);
+        } catch (error) {
+          fail(error, args.json);
+        }
+      },
+    }),
+  },
+});
+
+/**
+ * Compares the running service against this CLI before pointing a browser at
+ * it, so an incompatible pair is reported rather than silently misbehaving.
+ */
+async function dashboardCompatibility(
+  endpoint: string,
+): Promise<string[] | undefined> {
+  try {
+    const response = await fetch(`${endpoint.replace(/\/$/, "")}/api/health`);
+    if (!response.ok) return undefined;
+    const health = (await response.json()) as {
+      compatibility?: Parameters<typeof evaluateCompatibility>[0];
+    };
+    if (!health.compatibility) return undefined;
+    const report = evaluateCompatibility(health.compatibility, {
+      clientVersion: productMetadata.build.productVersion,
+      clientApiProtocolVersion:
+        productMetadata.compatibility.apiProtocolVersion,
+    });
+    return report.compatible
+      ? undefined
+      : report.findings
+          .filter(({ status }) => status === "incompatible")
+          .map(({ detail, remediation }) =>
+            remediation ? `${detail}. ${remediation}` : detail,
+          );
+  } catch {
+    return undefined;
+  }
+}
+
+async function openInBrowser(url: string): Promise<void> {
+  const command =
+    process.platform === "darwin"
+      ? "open"
+      : process.platform === "win32"
+        ? "cmd"
+        : "xdg-open";
+  const commandArgs =
+    process.platform === "win32" ? ["/c", "start", url] : [url];
+  await new Promise<void>((resolve) => {
+    const child = spawn(command, commandArgs, {
+      stdio: "ignore",
+      detached: true,
+    });
+    child.once("error", () => resolve());
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
 const main = defineCommand({
   meta: {
     name: "swf",
@@ -1337,6 +1426,7 @@ const main = defineCommand({
     model,
     defaults,
     archive,
+    dashboard,
   },
 });
 await runMain(main);

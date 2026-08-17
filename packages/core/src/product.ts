@@ -193,18 +193,40 @@ export function parseProductMetadata(value: unknown): ProductMetadata {
   return ProductMetadataSchema.parse(value);
 }
 
+/** How far to search upward for packaged metadata before giving up. */
+const METADATA_SEARCH_DEPTH = 6;
+
 /**
- * Resolves packaged metadata relative to this module rather than the current
- * working directory, so an installed product reports correctly from any cwd.
+ * Resolves packaged metadata relative to the calling module rather than the
+ * current working directory, so an installed product reports correctly from any
+ * cwd — including paths containing spaces.
+ *
+ * The search walks upward because bundlers place entries at different depths:
+ * the CLI bundle sits at `bin/swf.mjs`, while Nitro emits
+ * `service/server/chunks/nitro/nitro.mjs`. Anchoring to a single relative path
+ * would silently fall back to development metadata for one of them.
  */
 export async function readProductMetadata(
   fromDirectory = dirname(fileURLToPath(import.meta.url)),
 ): Promise<ProductMetadata> {
-  const contents = await readFile(
-    join(fromDirectory, PRODUCT_METADATA_FILE),
-    "utf8",
+  let directory = fromDirectory;
+  for (let depth = 0; depth < METADATA_SEARCH_DEPTH; depth += 1) {
+    try {
+      return parseProductMetadata(
+        JSON.parse(
+          await readFile(join(directory, PRODUCT_METADATA_FILE), "utf8"),
+        ),
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  }
+  throw new Error(
+    `No ${PRODUCT_METADATA_FILE} was found at or above ${fromDirectory}`,
   );
-  return parseProductMetadata(JSON.parse(contents));
 }
 
 export interface BuildMetadataInput {

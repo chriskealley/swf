@@ -23,12 +23,14 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "build:product": "tsx scripts/build-product.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.2",
     "@vitejs/plugin-vue": "^6.0.8",
+    "esbuild": "^0.28.2",
     "eslint": "^10.8.0",
     "globals": "^17.9.0",
     "prettier": "^3.9.6",

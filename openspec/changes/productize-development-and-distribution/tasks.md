@@ -9,13 +9,13 @@
 
 ## 2. Compiled Product Entries
 
-- [ ] 2.1 Add a production TypeScript build or bundling configuration for the CLI with a Node executable entry and no `tsx` dependency
-- [ ] 2.2 Bundle or otherwise package core and integration runtime code without resolving private workspace packages in consumer installations
-- [ ] 2.3 Configure Nitro production output for the packaged Node service and remove workspace and development-server assumptions
-- [ ] 2.4 Build dashboard production assets and integrate them into authenticated loopback service delivery
-- [ ] 2.5 Add packaged runtime asset resolution for templates, schemas, migrations, dashboard files, license, notices, and build metadata
-- [ ] 2.6 Add `swf dashboard open` behavior that starts or locates a compatible service and opens or prints the packaged dashboard URL
-- [ ] 2.7 Add production-entry tests from paths containing spaces and arbitrary current working directories
+- [x] 2.1 Add a production TypeScript build or bundling configuration for the CLI with a Node executable entry and no `tsx` dependency
+- [x] 2.2 Bundle or otherwise package core and integration runtime code without resolving private workspace packages in consumer installations
+- [x] 2.3 Configure Nitro production output for the packaged Node service and remove workspace and development-server assumptions
+- [x] 2.4 Build dashboard production assets and integrate them into authenticated loopback service delivery
+- [x] 2.5 Add packaged runtime asset resolution for templates, schemas, migrations, dashboard files, license, notices, and build metadata
+- [x] 2.6 Add `swf dashboard open` behavior that starts or locates a compatible service and opens or prints the packaged dashboard URL
+- [x] 2.7 Add production-entry tests from paths containing spaces and arbitrary current working directories
 
 ## 3. Product Package and Pi Extension Layout
 
