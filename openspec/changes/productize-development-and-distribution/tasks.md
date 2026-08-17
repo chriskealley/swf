@@ -32,14 +32,14 @@
 
 ## 4. Isolated Development Instances
 
-- [ ] 4.1 Define named development-instance metadata for mode, checkout, commit, endpoint, service home, credential, registry, logs, package path, and process identity
-- [ ] 4.2 Add a checkout-local CLI command or executable that requires no global link or shell function and preserves target project cwd semantics
-- [ ] 4.3 Allocate isolated loopback endpoints and create private `.swf-dev/<instance>/` homes without reading or modifying installed SWF state
-- [ ] 4.4 Add development instance start, list, status, logs, stop, restart, and confirmed cleanup commands
+- [x] 4.1 Define named development-instance metadata for mode, checkout, commit, endpoint, service home, credential, registry, logs, package path, and process identity
+- [x] 4.2 Add a checkout-local CLI command or executable that requires no global link or shell function and preserves target project cwd semantics
+- [x] 4.3 Allocate isolated loopback endpoints and create private `.swf-dev/<instance>/` homes without reading or modifying installed SWF state
+- [x] 4.4 Add development instance start, list, status, logs, stop, restart, and confirmed cleanup commands
 - [ ] 4.5 Implement fast source development with source maps and safe service/dashboard watch behavior
-- [ ] 4.6 Detect unsafe HMR ownership replacement and perform or recommend a controlled isolated-service restart
-- [ ] 4.7 Support multiple concurrent named development instances without shared credentials, registries, ports, or logs
-- [ ] 4.8 Add tests proving installed stable service and user metadata remain untouched by development instances
+- [x] 4.6 Detect unsafe HMR ownership replacement and perform or recommend a controlled isolated-service restart
+- [x] 4.7 Support multiple concurrent named development instances without shared credentials, registries, ports, or logs
+- [x] 4.8 Add tests proving installed stable service and user metadata remain untouched by development instances
 
 ## 5. Production-Like Local Preview
 

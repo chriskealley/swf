@@ -15,9 +15,14 @@
   },
   "scripts": {
     "build": "tsc -b && pnpm --filter @swf/service build && pnpm --filter @swf/dashboard build",
+    "build:product": "tsx scripts/build-product.ts",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck",
+    "dev": "tsx scripts/swf-dev.ts",
+    "dev:clean": "tsx scripts/swf-dev.ts clean",
     "dev:dashboard": "pnpm --filter @swf/dashboard dev",
+    "dev:list": "tsx scripts/swf-dev.ts list",
     "dev:service": "pnpm --filter @swf/service dev",
+    "dev:stop": "tsx scripts/swf-dev.ts stop",
     "e2e": "vitest run --config vitest.e2e.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -29,7 +34,6 @@
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false",
-    "build:product": "tsx scripts/build-product.ts",
     "verify:product": "tsx scripts/verify-product.ts"
   },
   "devDependencies": {

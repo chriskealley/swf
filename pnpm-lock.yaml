@@ -142,6 +142,15 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
 
+  packages/dev:
+    dependencies:
+      '@swf/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
   packages/integrations:
     dependencies:
       '@swf/core':

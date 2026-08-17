@@ -8,6 +8,9 @@
       "path": "./packages/integrations"
     },
     {
+      "path": "./packages/dev"
+    },
+    {
       "path": "./extensions/pi"
     },
     {

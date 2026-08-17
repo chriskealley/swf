@@ -1,0 +1,14 @@
+{
+  "name": "@swf/dev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Contributor tooling for isolated development instances. Never published.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@swf/core": "workspace:*",
+    "zod": "^4.4.3"
+  }
+}
