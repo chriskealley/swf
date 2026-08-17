@@ -85,13 +85,13 @@
 
 ## 9. Upgrade, Migration, and Downgrade Safety
 
-- [ ] 9.1 Add upgrade preflight comparing installed CLI, running service, API protocol, state schema, build identity, managed unit, and project compatibility
-- [ ] 9.2 Render an ordered preview for restart-only, migration-required, incompatible, and downgrade cases without mutation
-- [ ] 9.3 Integrate existing migration preview, backup, apply, verification, and rollback into packaged upgrade sequencing
-- [ ] 9.4 Ensure package-manager installation hooks never restart services, migrate state, or change committed project configuration
-- [ ] 9.5 Implement controlled service upgrade with drain, explicit force option, new-entry validation, health handshake, and failure diagnostics
-- [ ] 9.6 Refuse writer startup when an older service encounters an unsupported future state schema
-- [ ] 9.7 Add compatibility and acceptance tests for patch upgrade, API skew, state migration, migration failure, failed replacement health, downgrade refusal, and backup restoration
+- [x] 9.1 Add upgrade preflight comparing installed CLI, running service, API protocol, state schema, build identity, managed unit, and project compatibility
+- [x] 9.2 Render an ordered preview for restart-only, migration-required, incompatible, and downgrade cases without mutation
+- [x] 9.3 Integrate existing migration preview, backup, apply, verification, and rollback into packaged upgrade sequencing
+- [x] 9.4 Ensure package-manager installation hooks never restart services, migrate state, or change committed project configuration
+- [x] 9.5 Implement controlled service upgrade with drain, explicit force option, new-entry validation, health handshake, and failure diagnostics
+- [x] 9.6 Refuse writer startup when an older service encounters an unsupported future state schema
+- [x] 9.7 Add compatibility and acceptance tests for patch upgrade, API skew, state migration, migration failure, failed replacement health, downgrade refusal, and backup restoration
 
 ## 10. State-Preserving Uninstall and Cleanup
 

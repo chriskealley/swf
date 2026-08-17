@@ -22,6 +22,8 @@ import {
   developmentProductMetadata,
   expectedPackagedServiceEntry,
   diagnoseManagedService,
+  evaluateUpgradePreflight,
+  renderUpgradePreflight,
   manualFallbackGuidance,
   previewManagedServiceRepair,
   renderManagedServicePlan,
@@ -1637,6 +1639,90 @@ async function openInBrowser(url: string): Promise<void> {
   });
 }
 
+const upgrade = defineCommand({
+  meta: {
+    name: "upgrade",
+    description:
+      "Preview what an installed product upgrade requires. Changes nothing.",
+  },
+  args: {
+    json: { type: "boolean" },
+    project: { type: "string" },
+    cwd: { type: "string" },
+  },
+  async run({ args }) {
+    try {
+      // The running service is optional: a package manager can replace product
+      // files while the old service is still running, which is exactly the
+      // skew this preview exists to explain.
+      const running = await (async () => {
+        try {
+          const metadata = await readLocalServiceMetadata();
+          const response = await fetch(`${metadata.endpoint}/api/health`, {
+            signal: AbortSignal.timeout(3_000),
+          });
+          if (!response.ok) return undefined;
+          const health = (await response.json()) as {
+            product?: { productVersion?: string; sourceCommit?: string };
+            compatibility?: {
+              apiProtocolVersion?: number;
+              stateSchemaVersion?: number;
+            };
+          };
+          return {
+            productVersion: health.product?.productVersion,
+            sourceCommit: health.product?.sourceCommit,
+            apiProtocolVersion: health.compatibility?.apiProtocolVersion,
+            stateSchemaVersion: health.compatibility?.stateSchemaVersion,
+          };
+        } catch {
+          return undefined;
+        }
+      })();
+
+      const managed = await (async () => {
+        try {
+          return await diagnoseManagedService(
+            await managedPlanForCurrentProduct(false, true),
+          );
+        } catch {
+          return undefined;
+        }
+      })();
+
+      // Reuse the existing migration machinery rather than re-deriving a plan:
+      // the service owns backups, verification, and rollback.
+      const migrationPlan = await (async () => {
+        if (!args.project) return undefined;
+        try {
+          const result = (await (
+            await client()
+          ).command({
+            type: "migrate",
+            projectId: args.project,
+            dryRun: true,
+          })) as { plan?: { from: number; to: number; migrations: [] } };
+          return result.plan;
+        } catch {
+          return undefined;
+        }
+      })();
+
+      const preflight = evaluateUpgradePreflight({
+        installed: productMetadata,
+        runningService: running,
+        managedService: managed,
+        migrationPlan,
+      });
+      if (args.json) return output(preflight, true);
+      consola.log(renderUpgradePreflight(preflight));
+      if (preflight.blocked) process.exitCode = 1;
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+
 const main = defineCommand({
   meta: {
     name: "swf",
@@ -1679,6 +1765,7 @@ const main = defineCommand({
     defaults,
     archive,
     dashboard,
+    upgrade,
   },
 });
 await runMain(main);

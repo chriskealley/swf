@@ -146,6 +146,31 @@ Sensitive-path rules are globs evaluated against repository-relative, forward-sl
 
 **Behavior change:** sensitive-path rules previously did not match as documented — `**` could not span path separators, so rules such as `.github/**`, `infra/**`, and `**/security/**` failed to match nested paths and the gate did not fire. Projects running autonomously with `sensitive-path` in `policy.riskOverrides` will now correctly stop for manual approval on changes that previously auto-approved.
 
+## Upgrades
+
+Replacing product files does not restart the service or migrate state. A package manager installs files and nothing else — SWF declares no install, postinstall, or prepare hooks, and package verification fails if one ever appears. The two can therefore disagree until you act.
+
+```sh
+swf upgrade                       # preview only; changes nothing
+swf upgrade --project <id>        # include a state migration plan
+```
+
+The preview compares the installed CLI, the running service, API protocol, state schema, build identity, and the managed service definition, then prints an ordered plan. Five outcomes:
+
+| Outcome              | Meaning                                                                    |
+| -------------------- | -------------------------------------------------------------------------- |
+| `current`            | The running service matches the installed product.                         |
+| `restart-only`       | Newer product files are installed; restart to adopt them.                  |
+| `migration-required` | Preview, back up, and apply migrations before restarting.                  |
+| `incompatible`       | The CLI cannot safely mutate through the running service.                  |
+| `downgrade-refused`  | State was written by a newer product; this one will not become the writer. |
+
+Migration always precedes the restart in the ordered plan, and it reuses the existing preview, checksummed backup, apply, verification, and rollback described under State migrations. Committed project `.swf/` configuration is project-owned and is never rewritten by an upgrade.
+
+A downgrade fails closed. An older service that finds a newer state schema refuses to become the writer and reports the minimum compatible product or the backup restoration path, rather than partially reading state it cannot represent.
+
+Service replacement drains active work first. Interrupting work in progress requires an explicit force option, the new service entry is validated _before_ the old service is stopped, and a replacement that never becomes healthy preserves its logs and diagnostics instead of reporting success.
+
 ## Managed user service
 
 SWF can install a user-scoped background service on macOS (a launchd agent) and Linux (a systemd user unit). Installing the package never registers, enables, or starts one — every step is previewed and separately confirmed.

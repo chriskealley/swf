@@ -153,6 +153,26 @@ async function verifyManifest(root: string): Promise<string[]> {
     if (!declared.has(required))
       violations.push(`${required} is used at runtime but not declared`);
 
+  // A package manager must never restart a service, migrate state, or touch
+  // committed project configuration as a side effect of installation, so the
+  // published manifest carries no lifecycle scripts at all.
+  const forbiddenScripts = [
+    "preinstall",
+    "install",
+    "postinstall",
+    "prepare",
+    "prepublish",
+    "preuninstall",
+    "uninstall",
+    "postuninstall",
+  ];
+  const scripts = (manifest as { scripts?: Record<string, string> }).scripts;
+  for (const name of forbiddenScripts)
+    if (scripts && name in scripts)
+      violations.push(
+        `published manifest declares a ${name} lifecycle script; installation must have no side effects`,
+      );
+
   const licensed = await readFile(join(root, productLayout.license), "utf8");
   if (!licensed.includes("MIT License"))
     violations.push("LICENSE does not contain the MIT licence text");

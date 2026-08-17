@@ -207,15 +207,29 @@ const EMBEDDED_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
  * been checked, so this normalizes timestamps and re-compares the content
  * rather than trusting the file's name or path.
  */
+export type DifferenceClass = "timestamps-only" | "reordered" | "content";
+
+/**
+ * Classifies why two builds of one file differ.
+ *
+ * Generators embed build timestamps, and some emit collections in filesystem
+ * iteration order, so an otherwise identical build can produce a byte-different
+ * file. Both are checked rather than assumed: timestamps are normalized, and
+ * "reordered" is only returned when the two files contain exactly the same
+ * lines in a different sequence. Anything else is a real content change.
+ */
 export function classifyDifference(
   first: string,
   second: string,
-): "timestamps-only" | "content" {
+): DifferenceClass {
   if (first === second) return "timestamps-only";
-  return first.replace(EMBEDDED_TIMESTAMP, "") ===
-    second.replace(EMBEDDED_TIMESTAMP, "")
-    ? "timestamps-only"
-    : "content";
+  const left = first.replace(EMBEDDED_TIMESTAMP, "");
+  const right = second.replace(EMBEDDED_TIMESTAMP, "");
+  if (left === right) return "timestamps-only";
+  if (left.length !== right.length) return "content";
+  const sortedLeft = left.split("\n").sort().join("\n");
+  const sortedRight = right.split("\n").sort().join("\n");
+  return sortedLeft === sortedRight ? "reordered" : "content";
 }
 
 export interface ReproducibilityReport {

@@ -206,6 +206,30 @@ describe("difference classification", () => {
     ).toBe("content");
   });
 
+  it("recognises generated entries emitted in a different order", () => {
+    // Nitro lists public assets in filesystem iteration order, so an identical
+    // build can emit the same entries in a different sequence.
+    expect(
+      classifyDifference(
+        '{"a":1}\n{"b":2}\n{"c":3}',
+        '{"b":2}\n{"c":3}\n{"a":1}',
+      ),
+    ).toBe("reordered");
+  });
+
+  it("does not mistake a real change for reordering", () => {
+    expect(
+      classifyDifference(
+        '{"a":1}\n{"b":2}\n{"c":3}',
+        '{"a":1}\n{"b":9}\n{"c":3}',
+      ),
+    ).toBe("content");
+  });
+
+  it("treats a length change as content even when lines overlap", () => {
+    expect(classifyDifference("a\nb", "a\nb\nc")).toBe("content");
+  });
+
   it("does not excuse a difference that merely contains a timestamp", () => {
     expect(
       classifyDifference(

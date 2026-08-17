@@ -195,11 +195,18 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    if (classifyDifference(before, after) === "timestamps-only")
-      process.stdout.write(
-        `  note ${differing} differs only in embedded timestamps\n`,
-      );
-    else unexplained.push(`${differing} (content differs)`);
+    const classification = classifyDifference(before, after);
+    if (classification === "content") {
+      unexplained.push(`${differing} (content differs)`);
+      continue;
+    }
+    process.stdout.write(
+      `  note ${differing} differs only in ${
+        classification === "reordered"
+          ? "generated entry ordering"
+          : "embedded timestamps"
+      }\n`,
+    );
   }
   for (const differing of unexplained)
     process.stderr.write(`  FAIL differing: ${differing}\n`);
