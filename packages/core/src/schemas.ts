@@ -14,6 +14,41 @@ const BudgetLimitSchema = z.object({
 
 export const HarnessSchema = z.enum(["pi", "codex", "claude", "copilot"]);
 export const ModelTierSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
+
+export const ReleaseChannelSchema = z.enum(["stable", "next", "development"]);
+
+/**
+ * Immutable identity of an assembled product build. `publishable` is false for
+ * development or dirty-tree builds so a non-releasable artifact can never be
+ * promoted by mistake.
+ */
+export const ProductBuildSchema = z.object({
+  productVersion: z.string().min(1),
+  sourceCommit: z.string().min(1),
+  sourceDirty: z.boolean().default(false),
+  builtAt: IsoDateTime,
+  channel: ReleaseChannelSchema,
+  publishable: z.boolean(),
+});
+
+/**
+ * Compatibility is stated separately from the product version so CLI, service,
+ * persisted state, and the Pi extension can move independently while still
+ * releasing coherently. Ranges use semver range syntax.
+ */
+export const ProductCompatibilitySchema = z.object({
+  apiProtocolVersion: z.number().int().positive(),
+  stateSchemaVersion: z.number().int().positive(),
+  compatibleClientRange: z.string().min(1),
+  piExtensionRange: z.string().min(1),
+  minimumNodeVersion: z.string().min(1),
+});
+
+export const ProductMetadataSchema = z.object({
+  schemaVersion: SchemaVersion,
+  build: ProductBuildSchema,
+  compatibility: ProductCompatibilitySchema,
+});
 export const ModelMappingSchema = z.object({
   model: z.string().min(1).optional(),
   fallback: z.array(z.string().min(1)).default([]),
@@ -702,6 +737,7 @@ export const documents = {
   checkpoint: CheckpointSchema,
   delivery: DeliverySchema,
   modelRoute: ModelRouteSchema,
+  productMetadata: ProductMetadataSchema,
   releasePreflight: ReleasePreflightSchema,
   cleanupState: CleanupStateSchema,
   reviewFindingResolution: ReviewFindingResolutionSchema,

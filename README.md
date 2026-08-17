@@ -22,7 +22,7 @@ SWF includes:
 
 | Tool              | Minimum version | Purpose                                         |
 | ----------------- | --------------: | ----------------------------------------------- |
-| Node.js           |       `22.19.0` | SWF and TypeScript runtime                      |
+| Node.js           |        `24.0.0` | SWF and TypeScript runtime                      |
 | pnpm              |       `11.20.0` | Workspace package manager                       |
 | Git               |        `2.30.0` | Branches, worktrees, checkpoints, and rollback  |
 | Herdr             |         `0.7.4` | Harness process and terminal supervision        |

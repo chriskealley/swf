@@ -5,6 +5,7 @@ export * from "./herdr.js";
 export * from "./hosting.js";
 export * from "./doctor.js";
 export * from "./requirements.js";
+export * from "./product.js";
 export * from "./runtime.js";
 export * from "./project.js";
 export * from "./schemas.js";

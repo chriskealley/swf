@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "swf": "./src/main.ts"
+    "swf": "./src/bin.ts"
   },
   "scripts": {
     "start": "tsx src/main.ts"

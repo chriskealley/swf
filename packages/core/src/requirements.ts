@@ -8,10 +8,10 @@ export interface Requirement {
 export const requirements = {
   node: {
     command: "node",
-    minimumVersion: "22.19.0",
+    minimumVersion: "24.0.0",
     required: true,
     reason:
-      "SWF, Pi, and the selected TypeScript runtime require Node.js >=22.19.0.",
+      "SWF, Pi, and the selected TypeScript runtime require Node.js >=24.0.0.",
   },
   git: {
     command: "git",

@@ -1,11 +1,11 @@
 ## 1. Product Version and Build Metadata
 
-- [ ] 1.1 Define product, build commit, API protocol, state schema, compatible client, and Pi extension compatibility metadata schemas
-- [ ] 1.2 Raise the supported Node baseline to `>=24.0.0` consistently across root and workspace manifests, `packages/core/src/requirements.ts`, and CI workflows
-- [ ] 1.3 Add a runtime Node version guard to the compiled CLI entry that fails with an actionable message, since `engines` is advisory for npm installs
-- [ ] 1.4 Generate immutable build metadata during development preview and release assembly
-- [ ] 1.5 Expose version/build metadata through `swf --version`, service metadata, health diagnostics, and authenticated compatibility queries
-- [ ] 1.6 Add compatibility range evaluation tests for CLI, service, state, and Pi extension combinations
+- [x] 1.1 Define product, build commit, API protocol, state schema, compatible client, and Pi extension compatibility metadata schemas
+- [x] 1.2 Raise the supported Node baseline to `>=24.0.0` consistently across root and workspace manifests, `packages/core/src/requirements.ts`, and CI workflows
+- [x] 1.3 Add a runtime Node version guard to the compiled CLI entry that fails with an actionable message, since `engines` is advisory for npm installs
+- [x] 1.4 Generate immutable build metadata during development preview and release assembly
+- [x] 1.5 Expose version/build metadata through `swf --version`, service metadata, health diagnostics, and authenticated compatibility queries
+- [x] 1.6 Add compatibility range evaluation tests for CLI, service, state, and Pi extension combinations
 
 ## 2. Compiled Product Entries
 

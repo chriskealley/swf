@@ -114,6 +114,9 @@ import {
   type RedactionOptions,
   type Run,
   type RunState,
+  developmentProductMetadata,
+  readProductMetadata,
+  type ProductMetadata,
 } from "@swf/core";
 import {
   ClaudeHarnessAdapter,
@@ -124,6 +127,19 @@ import {
 
 const SERVICE_SCHEMA_VERSION = 1;
 
+/**
+ * A packaged service reads its assembled build identity; a source checkout has
+ * none and reports a development identity so clients are never told a running
+ * service is a release build.
+ */
+export async function resolveServiceProductMetadata(): Promise<ProductMetadata> {
+  try {
+    return await readProductMetadata();
+  } catch {
+    return developmentProductMetadata();
+  }
+}
+
 export interface ServiceMetadata {
   schemaVersion: 1;
   serviceId: string;
@@ -131,6 +147,8 @@ export interface ServiceMetadata {
   endpoint: string;
   credential: string;
   startedAt: string;
+  /** Build and compatibility identity of the service that wrote this file. */
+  product?: ProductMetadata;
 }
 
 export class ServiceAlreadyRunningError extends Error {
@@ -761,6 +779,7 @@ export class SwfService {
       endpoint: this.endpoint,
       credential: randomBytes(32).toString("base64url"),
       startedAt: new Date().toISOString(),
+      product: await resolveServiceProductMetadata(),
     };
     try {
       await this.lock.writeFile(`${JSON.stringify(metadata)}\n`);

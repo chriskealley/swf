@@ -10,7 +10,7 @@ Ghostty is supported but optional. iTerm2, WezTerm, Kitty, macOS Terminal, GNOME
 
 | Tool              | Minimum                   | Purpose                               |
 | ----------------- | ------------------------- | ------------------------------------- |
-| Node.js           | 22.19.0                   | SWF, Pi, and TypeScript runtime       |
+| Node.js           | 24.0.0                    | SWF, Pi, and TypeScript runtime       |
 | Git               | 2.30.0                    | Worktrees, checkpoints, and rollback  |
 | Herdr             | declared compatible range | Agent terminal/process execution      |
 | Pi                | declared compatible range | Reference harness and SWF extension   |

@@ -12,12 +12,14 @@
     "destr": "^2.0.5",
     "effect": "4.0.0-beta.102",
     "picomatch": "^4.0.5",
+    "semver": "^7.8.5",
     "tsx": "^4.21.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/picomatch": "^4.0.3",
+    "@types/semver": "^7.8.0",
     "ajv": "^8.20.0"
   }
 }

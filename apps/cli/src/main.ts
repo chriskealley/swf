@@ -15,6 +15,9 @@ import {
   readLocalServiceMetadata,
   readProjectConfig,
   runDoctor,
+  developmentProductMetadata,
+  readProductMetadata,
+  type ProductMetadata,
   type CheckStatus,
   type SetupAction,
 } from "@swf/core";
@@ -190,6 +193,27 @@ function publicServiceMetadata<T extends { credential?: string }>(metadata: T) {
   const { credential: _credential, ...safe } = metadata;
   return { ...safe, credentialConfigured: Boolean(_credential) };
 }
+/**
+ * Packaged installations carry assembled build metadata; a source checkout has
+ * none, so fall back to a clearly-labelled development identity rather than
+ * reporting a version the build never produced.
+ */
+async function resolveProductMetadata(): Promise<ProductMetadata> {
+  try {
+    return await readProductMetadata();
+  } catch {
+    return developmentProductMetadata();
+  }
+}
+
+function productVersionLabel(metadata: ProductMetadata): string {
+  const { productVersion, channel, sourceCommit, sourceDirty } = metadata.build;
+  if (channel !== "development") return productVersion;
+  const commit =
+    sourceCommit === "unknown" ? "unknown" : sourceCommit.slice(0, 12);
+  return `${productVersion} (development ${commit}${sourceDirty ? "-dirty" : ""})`;
+}
+
 function icon(status: CheckStatus): string {
   return { pass: "✓", fail: "✗", warn: "!", skip: "-" }[status];
 }
@@ -1270,10 +1294,12 @@ const explore = defineCommand({
   },
 });
 
+const productMetadata = await resolveProductMetadata();
+
 const main = defineCommand({
   meta: {
     name: "swf",
-    version: "0.1.0",
+    version: productVersionLabel(productMetadata),
     description: "Agentic software factory",
   },
   subCommands: {

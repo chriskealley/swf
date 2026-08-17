@@ -29,7 +29,7 @@ SWF is currently a source-only private workspace whose CLI points at TypeScript,
 
 ### Modified Capabilities
 
-None. The repository does not yet contain archived main capability specs for development tooling or packaged distribution.
+- `factory-project-configuration`: raises the supported Node baseline to `>=24.0.0` and requires that baseline to be declared consistently across published `engines` metadata, installation diagnostics, and an executable startup guard. No other existing capability changes; the remaining capabilities in this change are new.
 
 ## Impact
 
