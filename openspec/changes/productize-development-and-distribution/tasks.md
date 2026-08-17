@@ -66,12 +66,12 @@
 
 ## 7. Production Service Lifecycle
 
-- [ ] 7.1 Replace the production default `pnpm --filter ... dev` launcher with direct argument-safe spawning of the packaged Node service entry
-- [ ] 7.2 Add private production stdout/stderr logs, bounded rotation or retention, redaction, and explicit log inspection
-- [ ] 7.3 Wait for service metadata, health, authentication, and compatibility handshake before reporting successful startup
-- [ ] 7.4 Remove stale metadata safely when startup exits and report bounded logs, command identity, and next diagnostic action
-- [ ] 7.5 Preserve graceful drain, stop, force-stop, and owned-work interruption semantics in the packaged launcher
-- [ ] 7.6 Add service lifecycle tests for arbitrary cwd, paths with spaces, stale metadata, existing service, incompatible service, crash, logs, and permissions
+- [x] 7.1 Replace the production default `pnpm --filter ... dev` launcher with direct argument-safe spawning of the packaged Node service entry
+- [x] 7.2 Add private production stdout/stderr logs, bounded rotation or retention, redaction, and explicit log inspection
+- [x] 7.3 Wait for service metadata, health, authentication, and compatibility handshake before reporting successful startup
+- [x] 7.4 Remove stale metadata safely when startup exits and report bounded logs, command identity, and next diagnostic action
+- [x] 7.5 Preserve graceful drain, stop, force-stop, and owned-work interruption semantics in the packaged launcher
+- [x] 7.6 Add service lifecycle tests for arbitrary cwd, paths with spaces, stale metadata, existing service, incompatible service, crash, logs, and permissions
 
 ## 8. Managed User Service
 

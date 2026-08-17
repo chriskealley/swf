@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { defineCommand, runMain } from "citty";
 import consola from "consola";
 import { detectPackageManager } from "nypm";
@@ -15,7 +15,12 @@ import {
   readLocalServiceMetadata,
   readProjectConfig,
   runDoctor,
+  createServiceLaunchPlan,
   developmentProductMetadata,
+  listServiceLogs,
+  readServiceLogTail,
+  resolvePackagedServiceEntry,
+  startPackagedService,
   evaluateCompatibility,
   readProductMetadata,
   type ProductMetadata,
@@ -345,9 +350,11 @@ const serviceStart = defineCommand({
   },
   args: {
     json: { type: "boolean" },
+    port: { type: "string", description: "Loopback port (default 34671)" },
     command: {
       type: "string",
-      description: "Service command (defaults to pnpm service dev)",
+      description:
+        "Override the launch command. Only for source checkouts; an installed product launches its packaged service entry directly.",
     },
   },
   async run({ args }) {
@@ -360,38 +367,113 @@ const serviceStart = defineCommand({
     } catch (error) {
       if (!(error instanceof ServiceUnavailableError)) throw error;
     }
-    const [command, ...commandArgs] = (
-      args.command ?? "pnpm --filter @swf/service dev"
-    ).split(" ");
-    const child = spawn(command!, commandArgs, {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-    let metadata;
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      try {
-        metadata = await readLocalServiceMetadata();
-        break;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const port = Number.parseInt(args.port ?? "34671", 10);
+    const serviceHome =
+      process.env.SWF_SERVICE_HOME ??
+      process.env.SWF_CONFIG_HOME ??
+      join(process.env.HOME ?? process.cwd(), ".config", "swf");
+
+    // An installed product launches its own compiled entry. A source checkout
+    // has no packaged entry, so it falls back to the workspace dev server.
+    const packagedEntry = await resolvePackagedServiceEntry();
+    if (!packagedEntry) {
+      const fallback =
+        args.command ?? "pnpm --filter @swf/service dev --host=127.0.0.1";
+      const [command, ...commandArgs] = fallback.split(" ");
+      const child = spawn(command!, commandArgs, {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+      let metadata;
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        try {
+          metadata = await readLocalServiceMetadata();
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
       }
-    }
-    if (!metadata)
-      throw new ServiceUnavailableError(
-        "SWF service did not publish metadata within 5 seconds",
+      if (!metadata)
+        throw new ServiceUnavailableError(
+          "SWF service did not publish metadata within 5 seconds",
+        );
+      output(
+        {
+          started: true,
+          mode: "source-checkout",
+          pid: child.pid,
+          metadata: publicServiceMetadata(metadata),
+        },
+        args.json,
       );
-    output(
-      {
-        started: true,
-        pid: child.pid,
-        metadata: publicServiceMetadata(metadata),
-      },
-      args.json,
-    );
+      return;
+    }
+
+    const plan = createServiceLaunchPlan({
+      serviceEntry: packagedEntry,
+      serviceHome,
+      port,
+    });
+    try {
+      const started = await startPackagedService(plan, {
+        clientVersion: productMetadata.build.productVersion,
+        clientApiProtocolVersion:
+          productMetadata.compatibility.apiProtocolVersion,
+      });
+      output(
+        {
+          started: true,
+          mode: "packaged",
+          pid: started.pid,
+          endpoint: plan.endpoint,
+          serviceHome: plan.serviceHome,
+          logPath: started.logPath,
+          product: started.health?.product,
+          metadata: publicServiceMetadata(await readLocalServiceMetadata()),
+        },
+        args.json,
+      );
+    } catch (error) {
+      fail(error, args.json);
+    }
   },
 });
+
+const serviceLogs = defineCommand({
+  meta: {
+    name: "logs",
+    description: "Print a bounded redacted tail of the service log",
+  },
+  args: {
+    json: { type: "boolean" },
+    lines: { type: "string", description: "Lines to show (default 40)" },
+  },
+  async run({ args }) {
+    try {
+      const serviceHome =
+        process.env.SWF_SERVICE_HOME ??
+        process.env.SWF_CONFIG_HOME ??
+        join(process.env.HOME ?? process.cwd(), ".config", "swf");
+      const logPath = join(serviceHome, "logs", "service.log");
+      const tail = await readServiceLogTail(
+        logPath,
+        Number.parseInt(args.lines ?? "40", 10),
+      );
+      const retained = await listServiceLogs(serviceHome);
+      if (args.json) return output({ ...tail, retained }, true);
+      consola.log(tail.path);
+      if (tail.truncated) consola.info("(older lines omitted)");
+      consola.log(tail.lines.join("\n") || "(empty)");
+      if (retained.length > 1) consola.info(`retained: ${retained.join(", ")}`);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+
 const serviceStop = defineCommand({
   meta: { name: "stop", description: "Stop the persistent local SWF service" },
   args: { force: { type: "boolean" }, json: { type: "boolean" } },
@@ -439,6 +521,7 @@ const service = defineCommand({
     start: serviceStart,
     status: serviceStatus,
     stop: serviceStop,
+    logs: serviceLogs,
     diagnostic: serviceDiagnostic,
   },
 });
