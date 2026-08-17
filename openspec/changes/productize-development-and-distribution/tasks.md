@@ -1,9 +1,11 @@
 ## 1. Product Version and Build Metadata
 
 - [ ] 1.1 Define product, build commit, API protocol, state schema, compatible client, and Pi extension compatibility metadata schemas
-- [ ] 1.2 Generate immutable build metadata during development preview and release assembly
-- [ ] 1.3 Expose version/build metadata through `swf --version`, service metadata, health diagnostics, and authenticated compatibility queries
-- [ ] 1.4 Add compatibility range evaluation tests for CLI, service, state, and Pi extension combinations
+- [ ] 1.2 Raise the supported Node baseline to `>=24.0.0` consistently across root and workspace manifests, `packages/core/src/requirements.ts`, and CI workflows
+- [ ] 1.3 Add a runtime Node version guard to the compiled CLI entry that fails with an actionable message, since `engines` is advisory for npm installs
+- [ ] 1.4 Generate immutable build metadata during development preview and release assembly
+- [ ] 1.5 Expose version/build metadata through `swf --version`, service metadata, health diagnostics, and authenticated compatibility queries
+- [ ] 1.6 Add compatibility range evaluation tests for CLI, service, state, and Pi extension combinations
 
 ## 2. Compiled Product Entries
 
@@ -17,14 +19,16 @@
 
 ## 3. Product Package and Pi Extension Layout
 
-- [ ] 3.1 Select and reserve the canonical npm-compatible product package name and Pi extension package name
-- [ ] 3.2 Create release package manifests with versions, engines, bin, files, license, repository, dependencies, publish configuration, and provenance metadata
-- [ ] 3.3 Define a strict product content allowlist and assemble release staging from an empty directory
-- [ ] 3.4 Generate a per-file path, size, mode, and SHA-256 manifest and reject unexpected or forbidden content
-- [ ] 3.5 Ensure package contents exclude credentials, `.swf-state`, `.swf-dev`, logs, coverage, arbitrary fixtures, development output, and source-only runtime assumptions
-- [ ] 3.6 Build the Pi extension as compiled separately installable output with lockstep release version and compatible service/API range
-- [ ] 3.7 Verify internal workspace packages remain private and all product runtime imports resolve from the staged package
-- [ ] 3.8 Add package-size budgets and package-content regression tests
+- [ ] 3.1 Reserve the resolved package names `@chriskealley/swf` and `@chriskealley/swf-pi` and configure public access for scoped publication
+- [ ] 3.2 Add the repository `LICENSE` (MIT) and declare a matching licence identifier in every published manifest
+- [ ] 3.3 Verify that no published manifest declares a `workspace:` dependency, an unpublished internal package, or a build-only tool such as `tsx` or `nitropack` as a runtime dependency
+- [ ] 3.4 Create release package manifests with versions, engines, bin, files, license, repository, dependencies, publish configuration, and provenance metadata
+- [ ] 3.5 Define a strict product content allowlist and assemble release staging from an empty directory
+- [ ] 3.6 Generate a per-file path, size, mode, and SHA-256 manifest and reject unexpected or forbidden content
+- [ ] 3.7 Ensure package contents exclude credentials, `.swf-state`, `.swf-dev`, logs, coverage, arbitrary fixtures, development output, and source-only runtime assumptions
+- [ ] 3.8 Build the Pi extension as compiled separately installable output with lockstep release version and compatible service/API range
+- [ ] 3.9 Verify internal workspace packages remain private and all product runtime imports resolve from the staged package
+- [ ] 3.10 Add package-size budgets and package-content regression tests
 
 ## 4. Isolated Development Instances
 
@@ -99,30 +103,25 @@
 
 ## 11. Release Automation and Supply Chain
 
-- [ ] 11.1 Define SemVer stable and next channel policies, tag formats, registry tags, and release authorization rules
-- [ ] 11.2 Add protected CI workflows for clean build, checks, unit, integration, E2E, package inspection, clean-install smoke, security validation, and OpenSpec validation
-- [ ] 11.3 Generate npm provenance, GitHub checksums, product archives, SBOM, dependency/license inventory, compatibility metadata, and release evidence
-- [ ] 11.4 Ensure untrusted pull-request jobs cannot access publication credentials or mutate release destinations
-- [ ] 11.5 Promote the exact previously verified artifact checksums without rebuilding in publication jobs
-- [ ] 11.6 Publish product and Pi extension packages coherently to stable or next registry tags
-- [ ] 11.7 Create immutable Git tags and GitHub stable or prerelease entries with verified archives, notes, checksums, SBOM, and migration guidance
-- [ ] 11.8 Add release rollback and partial-publication procedures that never overwrite immutable published versions
+- [ ] 11.1 Define SemVer stable and next channel policies including pre-1.0 `0.x` semantics, tag formats, registry tags, and release authorization rules
+- [ ] 11.2 Require an explicit prerelease registry tag for every `next` publication so a prerelease never becomes the default install
+- [ ] 11.3 Order publication before Git tagging so a failed publish never leaves a tag referencing an unpublished version
+- [ ] 11.4 Add protected CI workflows for clean build, checks, unit, integration, E2E, package inspection, clean-install smoke, security validation, and OpenSpec validation
+- [ ] 11.5 Generate npm provenance, GitHub checksums, product archives, SBOM, dependency/license inventory, compatibility metadata, and release evidence
+- [ ] 11.6 Record the resolved dependency closure in release evidence and document that it is outside verified artifact identity
+- [ ] 11.7 Ensure untrusted pull-request jobs cannot access publication credentials or mutate release destinations
+- [ ] 11.8 Promote the exact previously verified artifact checksums without rebuilding in publication jobs
+- [ ] 11.9 Publish product and Pi extension packages coherently to stable or next registry tags
+- [ ] 11.10 Create immutable Git tags and GitHub stable or prerelease entries with verified archives, notes, checksums, SBOM, and migration guidance
+- [ ] 11.11 Add release rollback and partial-publication procedures that never overwrite immutable published versions
 
-## 12. Homebrew Distribution
+## 12. Documentation and Release Acceptance
 
-- [ ] 12.1 Create or select a maintained Homebrew tap and formula consuming the verified GitHub product archive and checksum
-- [ ] 12.2 Declare compatible Node/runtime requirements and expose the installed `swf` executable without rebuilding different product code
-- [ ] 12.3 Ensure the formula does not install harnesses, credentials, projects, managed services, or execute post-install setup silently
-- [ ] 12.4 Automate formula updates only after verified stable or selected prerelease artifact publication
-- [ ] 12.5 Add formula audit and macOS installation smoke tests for version, doctor, production service lifecycle, dashboard, and uninstall state preservation
-
-## 13. Documentation and Release Acceptance
-
-- [ ] 13.1 Replace source shell-function instructions with checkout-local development and preview workflows
-- [ ] 13.2 Document npm, pnpm, GitHub archive, and Homebrew installation with explicit prerequisite and setup boundaries
-- [ ] 13.3 Document fast development, isolated instances, fixtures, preview, package verification, release channels, service logs, and managed services
-- [ ] 13.4 Document version compatibility, service restart, migration, downgrade, uninstall, state preservation, and destructive cleanup
-- [ ] 13.5 Document package contents, supply-chain verification, checksums, provenance, SBOM, and release evidence
-- [ ] 13.6 Clearly label APT, RPM, containers, native Windows services, and curl installers unsupported until separately specified
-- [ ] 13.7 Run formatting, lint, type checking, unit, integration, E2E, package smoke, OpenSpec validation, and Git whitespace verification
-- [ ] 13.8 Perform a release-candidate rehearsal that publishes nowhere, installs the exact artifacts through npm/pnpm-style and Homebrew test paths, and retains complete verification evidence
+- [ ] 12.1 Replace source shell-function instructions with checkout-local development and preview workflows
+- [ ] 12.2 Document npm, pnpm, and GitHub archive installation with explicit prerequisite and setup boundaries
+- [ ] 12.3 Document fast development, isolated instances, fixtures, preview, package verification, release channels, service logs, and managed services
+- [ ] 12.4 Document version compatibility, service restart, migration, downgrade, uninstall, state preservation, and destructive cleanup
+- [ ] 12.5 Document package contents, supply-chain verification, checksums, provenance, SBOM, and release evidence
+- [ ] 12.6 Clearly label Homebrew, APT, RPM, containers, native Windows services, and curl installers unsupported until separately specified
+- [ ] 12.7 Run formatting, lint, type checking, unit, integration, E2E, package smoke, OpenSpec validation, and Git whitespace verification
+- [ ] 12.8 Perform a release-candidate rehearsal that publishes nowhere, installs the exact artifacts through npm/pnpm-style paths on a machine without the source checkout, and retains complete verification evidence

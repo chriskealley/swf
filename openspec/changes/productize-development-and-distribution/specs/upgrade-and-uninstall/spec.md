@@ -15,7 +15,7 @@ Before applying an upgrade, SWF SHALL inspect installed CLI, running service, AP
 State migrations SHALL retain existing preview, backup, apply, verification, and rollback semantics. Package-manager upgrade hooks SHALL NOT migrate operational state or committed project configuration.
 
 #### Scenario: Package manager installs a new version
-- **WHEN** npm, pnpm, or Homebrew replaces product files
+- **WHEN** npm or pnpm replaces product files
 - **THEN** user state remains unchanged until the user explicitly previews and applies any required migration
 
 #### Scenario: Migration fails after package upgrade

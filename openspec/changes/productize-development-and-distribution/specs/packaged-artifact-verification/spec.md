@@ -45,11 +45,26 @@ Artifact smoke tests SHALL cover version/help, doctor, temporary Git project ini
 - **THEN** artifact verification fails
 
 ### Requirement: Exact artifact promotion
-Registry publication, GitHub release upload, and Homebrew metadata SHALL refer to the exact artifact checksums that passed package verification. Release jobs SHALL NOT rebuild different product archives after approval.
+Registry publication and GitHub release upload SHALL refer to the exact artifact checksums that passed package verification. Release jobs SHALL NOT rebuild different product archives after approval.
 
 #### Scenario: Promoted checksum differs
 - **WHEN** a publication candidate differs from the verified checksum
 - **THEN** promotion stops and requires a new verification run
+
+### Requirement: Dependency closure is outside artifact identity
+Verified artifact identity SHALL cover product files only. Third-party dependencies are declared with version ranges and resolved at installation, so an installed dependency closure MAY differ from the closure present during verification. This boundary SHALL be stated explicitly in release documentation rather than left implied, and diagnostics SHALL be able to report the resolved closure of a running installation.
+
+#### Scenario: Checksum scope is inspected
+- **WHEN** an operator verifies a published artifact against its checksum
+- **THEN** the checksum validates the product package contents and does not assert which third-party dependency versions were installed alongside it
+
+#### Scenario: Installation resolves newer dependencies
+- **WHEN** a user installs a published version after a dependency has released a compatible patch
+- **THEN** installation succeeds with the newer dependency and the product remains the verified artifact
+
+#### Scenario: Defect cannot be reproduced
+- **WHEN** reported behavior cannot be reproduced against the verified artifact
+- **THEN** diagnostics can report the resolved dependency closure so version drift can be identified
 
 ### Requirement: Release evidence
 Each release SHALL retain a machine-readable manifest containing source commit, version, toolchain, lockfile identity, package contents, checksums, tests, provenance references, SBOM reference, and publication destinations.

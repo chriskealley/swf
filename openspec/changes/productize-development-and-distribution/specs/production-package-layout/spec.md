@@ -59,8 +59,34 @@ The Pi extension SHALL be distributed as a separately installable Pi-compatible 
 - **THEN** the extension reports actionable upgrade guidance rather than issuing unsupported mutations
 
 ### Requirement: Internal package encapsulation
-Core and integration workspace packages MAY remain private and be bundled into the product. No internal package SHALL be published merely because the product is distributed; public SDK packages require an explicit supported API contract.
+Core and integration workspace packages SHALL remain private and be inlined into the product during assembly. The published manifest SHALL NOT declare any `workspace:` dependency or any unpublished internal package. No internal package SHALL be published merely because the product is distributed; public SDK packages require an explicit supported API contract.
 
 #### Scenario: Product is packed
 - **WHEN** the product artifact is assembled
 - **THEN** all required internal code is available without resolving unpublished private workspace packages
+
+#### Scenario: Manifest declares an unpublished internal package
+- **WHEN** package verification finds a `workspace:` protocol dependency or an unpublished internal package in the published manifest
+- **THEN** verification fails, because such a package cannot be installed by a consumer
+
+### Requirement: Declared third-party dependencies
+Third-party runtime dependencies SHALL be declared in the published manifest and resolved at installation rather than inlined into product files, so that dependency security patches reach existing installations without a SWF release. Every declared dependency SHALL be published and installable from the target registry.
+
+#### Scenario: Dependency publishes a patch
+- **WHEN** a declared dependency releases a compatible patch version
+- **THEN** a new installation resolves the patched version without requiring a new SWF release
+
+#### Scenario: Development-only tool is declared at runtime
+- **WHEN** the published manifest declares a build- or development-only tool such as a TypeScript runner or bundler as a runtime dependency
+- **THEN** package verification fails
+
+### Requirement: Product licence
+The product SHALL be distributed under the MIT licence. The repository SHALL contain a `LICENSE` file, the published package SHALL include it, and package manifests SHALL declare a matching licence identifier.
+
+#### Scenario: Package is inspected
+- **WHEN** the assembled package is verified
+- **THEN** it contains the `LICENSE` file and its manifest declares the matching MIT identifier
+
+#### Scenario: Licence metadata is missing or inconsistent
+- **WHEN** the manifest licence identifier is absent or does not match the repository `LICENSE`
+- **THEN** package verification fails
