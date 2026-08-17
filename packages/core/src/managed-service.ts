@@ -450,6 +450,73 @@ export async function uninstallManagedService(
   };
 }
 
+export interface OrphanedServiceReport {
+  orphaned: boolean;
+  definitionPath: string;
+  detail: string;
+  /** Both options are offered; neither is performed. */
+  options: Array<{ action: string; command: string; effect: string }>;
+}
+
+/**
+ * Detects a managed service definition left behind after the product was
+ * removed. A package manager cannot run reliable removal hooks, so the
+ * definition survives and would fail at login with no explanation. State is
+ * never touched: this only reports and offers choices.
+ */
+export async function diagnoseOrphanedManagedService(
+  definitionPath: string,
+  serviceEntryPath: string | undefined,
+): Promise<OrphanedServiceReport> {
+  const hasDefinition = await exists(definitionPath);
+  if (!hasDefinition)
+    return {
+      orphaned: false,
+      definitionPath,
+      detail: "no managed service definition is installed",
+      options: [],
+    };
+
+  const installed = await readFile(definitionPath, "utf8").catch(() => "");
+  if (!installed.includes(MANAGED_SERVICE_LABEL))
+    return {
+      orphaned: false,
+      definitionPath,
+      detail: "a definition exists at this path but SWF does not own it",
+      options: [],
+    };
+
+  const productPresent =
+    serviceEntryPath !== undefined && (await exists(serviceEntryPath));
+  if (productPresent)
+    return {
+      orphaned: false,
+      definitionPath,
+      detail: "the managed service definition matches an installed product",
+      options: [],
+    };
+
+  return {
+    orphaned: true,
+    definitionPath,
+    detail: `the managed service definition remains but its product is gone (${serviceEntryPath ?? "no entry path recorded"})`,
+    options: [
+      {
+        action: "reinstall the product",
+        command: "npm install --global @chriskealley/swf",
+        effect:
+          "restores the product the definition points at; no state is changed",
+      },
+      {
+        action: "remove the definition",
+        command: "swf service uninstall --apply --yes",
+        effect:
+          "removes only the definition; service home, credentials, and all project state are preserved",
+      },
+    ],
+  };
+}
+
 /** Guidance where managed services are unavailable. */
 export function manualFallbackGuidance(): string[] {
   return [

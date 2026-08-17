@@ -146,6 +146,41 @@ Sensitive-path rules are globs evaluated against repository-relative, forward-sl
 
 **Behavior change:** sensitive-path rules previously did not match as documented — `**` could not span path separators, so rules such as `.github/**`, `infra/**`, and `**/security/**` failed to match nested paths and the gate did not fire. Projects running autonomously with `sensitive-path` in `policy.riskOverrides` will now correctly stop for manual approval on changes that previously auto-approved.
 
+## Uninstall and cleanup
+
+Removing the package removes product files only. Everything below is preserved:
+
+- the user service home, its credentials, project registry, and audit history
+- recorded project trust
+- every project's committed `.swf/` configuration
+- every project's `.swf-state/` operational state, including run history, events, artifacts, and raw output
+- exported runs written outside the service home
+- all Git configuration
+
+SWF declares no uninstall hooks, so removal cannot run cleanup logic even in principle. **Service uninstall is not state uninstall**, and neither is package removal.
+
+### A managed service left behind
+
+A package manager cannot run reliable removal hooks, so a launchd agent or systemd unit installed earlier survives the product being removed and would fail at login with no explanation. SWF detects this and offers both choices without taking either:
+
+- reinstall the product the definition points at, or
+- `swf service uninstall --apply --yes`, which removes only the definition
+
+### Explicit destructive cleanup
+
+Cleanup is a separate, previewed, two-step operation. It is never implied by uninstalling the package or the managed service.
+
+```sh
+swf cleanup --scope logs,caches                        # preview only
+swf cleanup --scope logs,caches --apply --confirm <id> # apply the reviewed plan
+```
+
+Scopes are independent and never include one another: `service-metadata`, `credentials`, `logs`, `caches`, `development-instances`, `project-state`.
+
+The preview lists every candidate path with its **ownership basis** (why SWF considers it its own to remove) and its **effect** (what removing it costs), alongside everything preserved. Project operational state is removed only for projects named explicitly with `--project`; every other project is listed as preserved.
+
+The confirmation id binds that exact candidate list, is stored privately, expires after five minutes, and is single-use — so a plan cannot be reviewed and then silently widened before it is applied. Audit history and Git configuration are never candidates.
+
 ## Upgrades
 
 Replacing product files does not restart the service or migrate state. A package manager installs files and nothing else — SWF declares no install, postinstall, or prepare hooks, and package verification fails if one ever appears. The two can therefore disagree until you act.

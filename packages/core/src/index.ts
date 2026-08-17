@@ -9,6 +9,7 @@ export * from "./product.js";
 export * from "./service-launcher.js";
 export * from "./managed-service.js";
 export * from "./upgrade.js";
+export * from "./cleanup.js";
 export * from "./runtime.js";
 export * from "./project.js";
 export * from "./schemas.js";

@@ -95,11 +95,11 @@
 
 ## 10. State-Preserving Uninstall and Cleanup
 
-- [ ] 10.1 Document and test that package removal preserves user service home, credentials, registries, logs, audits, exports, project `.swf/`, and project `.swf-state/`
-- [ ] 10.2 Diagnose managed-service definitions that remain after product removal and provide reinstall or explicit cleanup guidance
-- [ ] 10.3 Add previewed scoped cleanup for user service metadata, credentials, logs, caches, development instances, and selected project operational state
-- [ ] 10.4 Require separate confirmation for destructive cleanup and list every path, ownership basis, effect, and preserved Git configuration
-- [ ] 10.5 Add tests proving service uninstall and user-scope cleanup never delete unselected project state or unowned resources
+- [x] 10.1 Document and test that package removal preserves user service home, credentials, registries, logs, audits, exports, project `.swf/`, and project `.swf-state/`
+- [x] 10.2 Diagnose managed-service definitions that remain after product removal and provide reinstall or explicit cleanup guidance
+- [x] 10.3 Add previewed scoped cleanup for user service metadata, credentials, logs, caches, development instances, and selected project operational state
+- [x] 10.4 Require separate confirmation for destructive cleanup and list every path, ownership basis, effect, and preserved Git configuration
+- [x] 10.5 Add tests proving service uninstall and user-scope cleanup never delete unselected project state or unowned resources
 
 ## 11. Release Automation and Supply Chain
 

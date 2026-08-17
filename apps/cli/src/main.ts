@@ -21,7 +21,15 @@ import {
   createServiceLaunchPlan,
   developmentProductMetadata,
   expectedPackagedServiceEntry,
+  CLEANUP_SCOPES,
+  applyCleanup,
   diagnoseManagedService,
+  discardCleanupPreview,
+  loadCleanupPreview,
+  persistCleanupPreview,
+  previewCleanup,
+  renderCleanupPreview,
+  type CleanupScope,
   evaluateUpgradePreflight,
   renderUpgradePreflight,
   manualFallbackGuidance,
@@ -1723,6 +1731,90 @@ const upgrade = defineCommand({
   },
 });
 
+const cleanup = defineCommand({
+  meta: {
+    name: "cleanup",
+    description:
+      "Preview or apply scoped removal of SWF operational data. Never implied by uninstall.",
+  },
+  args: {
+    json: { type: "boolean" },
+    scope: {
+      type: "string",
+      description: `Comma-separated: ${CLEANUP_SCOPES.join(", ")}`,
+    },
+    project: {
+      type: "string",
+      description: "Project state directory to include (repeatable via commas)",
+    },
+    apply: { type: "boolean" },
+    confirm: {
+      type: "string",
+      description: "Confirmation id from the preview",
+    },
+  },
+  async run({ args }) {
+    try {
+      const serviceHome =
+        process.env.SWF_SERVICE_HOME ??
+        process.env.SWF_CONFIG_HOME ??
+        join(process.env.HOME ?? process.cwd(), ".config", "swf");
+      const scopes = (args.scope ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean) as CleanupScope[];
+      const unknown = scopes.filter((scope) => !CLEANUP_SCOPES.includes(scope));
+      if (unknown.length)
+        throw new Error(
+          `Unknown cleanup scope(s): ${unknown.join(", ")}. Supported: ${CLEANUP_SCOPES.join(", ")}`,
+        );
+      if (!scopes.length)
+        throw new Error(
+          `Select at least one scope with --scope. Supported: ${CLEANUP_SCOPES.join(", ")}`,
+        );
+
+      const preview = await previewCleanup({
+        serviceHome,
+        scopes,
+        selectedProjectStateDirectories: (args.project ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      });
+
+      if (!args.apply) {
+        // Persist so the printed confirmation id binds this exact candidate
+        // list; recomputing at apply time could silently widen the plan.
+        await persistCleanupPreview(serviceHome, preview);
+        if (args.json) return output(preview, true);
+        consola.log(renderCleanupPreview(preview));
+        return;
+      }
+      if (!args.confirm)
+        throw new Error(
+          "Refusing destructive cleanup without --confirm <id> from a preview.",
+        );
+      const reviewed = await loadCleanupPreview(serviceHome, args.confirm);
+      if (!reviewed)
+        throw new Error(
+          "No reviewed preview matches that confirmation id. Run the preview again.",
+        );
+      const result = await applyCleanup({
+        preview: reviewed,
+        confirmationId: args.confirm,
+        confirmed: true,
+      });
+      await discardCleanupPreview(serviceHome, args.confirm);
+      if (args.json) return output(result, true);
+      for (const path of result.removed) consola.success(`Removed ${path}`);
+      for (const entry of result.skipped)
+        consola.info(`Skipped ${entry.path}: ${entry.reason}`);
+    } catch (error) {
+      fail(error, args.json);
+    }
+  },
+});
+
 const main = defineCommand({
   meta: {
     name: "swf",
@@ -1766,6 +1858,7 @@ const main = defineCommand({
     archive,
     dashboard,
     upgrade,
+    cleanup,
   },
 });
 await runMain(main);
