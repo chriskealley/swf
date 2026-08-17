@@ -53,6 +53,29 @@ export const forbiddenRuntimeDependencies = [
   "typescript",
 ] as const;
 
+/** Staging root for the separately installable Pi extension package. */
+export const extensionStagingRoot = join(
+  repositoryRoot,
+  "dist",
+  "pi-extension",
+);
+
+export const extensionLayout = {
+  entry: join("dist", "index.mjs"),
+  packageManifest: "package.json",
+  license: "LICENSE",
+  compatibility: "compatibility.json",
+} as const;
+
+/**
+ * Pi supplies these to the extension host, so they are peer dependencies rather
+ * than bundled copies; two Pi runtimes in one process would be incoherent.
+ */
+export const extensionPeerDependencies = [
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-coding-agent",
+] as const;
+
 export async function workspaceVersion(): Promise<string> {
   const manifest = JSON.parse(
     await readFile(join(repositoryRoot, "package.json"), "utf8"),

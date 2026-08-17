@@ -8,12 +8,16 @@ import {
   type ProductMetadata,
 } from "../packages/core/src/product.js";
 import {
+  extensionLayout,
+  extensionPeerDependencies,
+  extensionStagingRoot,
   externalRuntimeDependencies,
   productLayout,
   repositoryRoot,
   stagingRoot,
   workspaceVersion,
 } from "./product-layout.js";
+import { PRODUCT_COMPATIBILITY } from "../packages/core/src/product.js";
 
 interface BuildOptions {
   channel: ProductMetadata["build"]["channel"];
@@ -207,6 +211,84 @@ async function writePackageManifest(
   );
 }
 
+/**
+ * Assembles the Pi extension as a separately installable package. It shares the
+ * product's release version so a user can pair them by version alone, and
+ * records the SWF service/API range it is compatible with.
+ */
+export async function buildPiExtension(
+  metadata: ProductMetadata,
+  outputDirectory = extensionStagingRoot,
+): Promise<string> {
+  await rm(outputDirectory, { recursive: true, force: true });
+  await mkdir(join(outputDirectory, "dist"), { recursive: true });
+  await build({
+    entryPoints: [join(repositoryRoot, "extensions", "pi", "src", "index.ts")],
+    outfile: join(outputDirectory, extensionLayout.entry),
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node24",
+    sourcemap: "linked",
+    // Internal @swf modules are inlined; the Pi runtime is supplied by the host.
+    external: [...extensionPeerDependencies, ...externalRuntimeDependencies],
+    logLevel: "warning",
+  });
+
+  const workspaceManifest = JSON.parse(
+    await readFile(
+      join(repositoryRoot, "extensions", "pi", "package.json"),
+      "utf8",
+    ),
+  ) as { dependencies?: Record<string, string> };
+  const peers = Object.fromEntries(
+    extensionPeerDependencies.map((name) => [
+      name,
+      workspaceManifest.dependencies?.[name] ?? "*",
+    ]),
+  );
+
+  const manifest = {
+    name: "@chriskealley/swf-pi",
+    version: metadata.build.productVersion,
+    description: "SWF extension for the Pi coding agent",
+    type: "module",
+    license: "MIT",
+    repository: {
+      type: "git",
+      url: "git+https://github.com/chriskealley/swf.git",
+    },
+    engines: { node: ">=24.0.0" },
+    pi: { extensions: [`./${extensionLayout.entry}`] },
+    files: ["dist", "compatibility.json", "LICENSE"],
+    publishConfig: { access: "public" },
+    peerDependencies: peers,
+    dependencies: await declaredDependencyRanges(),
+  };
+  await writeFile(
+    join(outputDirectory, extensionLayout.packageManifest),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  await writeFile(
+    join(outputDirectory, extensionLayout.compatibility),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        productVersion: metadata.build.productVersion,
+        apiProtocolVersion: PRODUCT_COMPATIBILITY.apiProtocolVersion,
+        compatibleServiceRange: PRODUCT_COMPATIBILITY.compatibleClientRange,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await cp(
+    join(repositoryRoot, productLayout.license),
+    join(outputDirectory, extensionLayout.license),
+  ).catch(() => undefined);
+  return outputDirectory;
+}
+
 export async function buildProduct(
   options: BuildOptions,
 ): Promise<{ staging: string; metadata: ProductMetadata }> {
@@ -219,6 +301,7 @@ export async function buildProduct(
   const metadata = await writeProductMetadata(staging, options);
   await writePackageManifest(staging, metadata);
   await copyLicense(staging);
+  await buildPiExtension(metadata);
   return { staging, metadata };
 }
 

@@ -15,4 +15,9 @@ export default defineNitroConfig({
   srcDir: "src/server",
   compatibilityDate: "2026-04-02",
   publicAssets: [{ dir: dashboardAssets, baseURL: "/dashboard" }],
+  // Third-party dependencies are declared by the product manifest and installed
+  // beside the package, so tracing and vendoring them into the service output
+  // would ship a second duplicate copy. Node resolves the bare specifiers by
+  // walking up to the product root at runtime.
+  externals: { trace: false },
 });

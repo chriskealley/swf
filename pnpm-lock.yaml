@@ -14,6 +14,9 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
+      '@types/picomatch':
+        specifier: ^4.0.3
+        version: 4.0.3
       '@vitejs/plugin-vue':
         specifier: ^6.0.8
         version: 6.0.8(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.49.1)(tsx@4.23.6)(yaml@2.9.0))(vue@3.5.41(typescript@6.0.3))
@@ -26,6 +29,9 @@ importers:
       globals:
         specifier: ^17.9.0
         version: 17.9.0
+      picomatch:
+        specifier: ^4.0.5
+        version: 4.0.5
       prettier:
         specifier: ^3.9.6
         version: 3.9.6
@@ -6189,7 +6195,7 @@ snapshots:
 
   tsx@4.23.6:
     dependencies:
-      esbuild: 0.28.1
+      esbuild: 0.28.2
     optionalDependencies:
       fsevents: 2.3.3
 

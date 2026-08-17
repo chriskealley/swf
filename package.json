@@ -2,6 +2,11 @@
   "name": "swf",
   "version": "0.1.0",
   "description": "Durable agentic software factory",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chriskealley/swf.git"
+  },
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.20.0",
@@ -24,15 +29,18 @@
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false",
-    "build:product": "tsx scripts/build-product.ts"
+    "build:product": "tsx scripts/build-product.ts",
+    "verify:product": "tsx scripts/verify-product.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.2",
+    "@types/picomatch": "^4.0.3",
     "@vitejs/plugin-vue": "^6.0.8",
     "esbuild": "^0.28.2",
     "eslint": "^10.8.0",
     "globals": "^17.9.0",
+    "picomatch": "^4.0.5",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.66.0",

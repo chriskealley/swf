@@ -20,15 +20,15 @@
 ## 3. Product Package and Pi Extension Layout
 
 - [ ] 3.1 Reserve the resolved package names `@chriskealley/swf` and `@chriskealley/swf-pi` and configure public access for scoped publication
-- [ ] 3.2 Add the repository `LICENSE` (MIT) and declare a matching licence identifier in every published manifest
-- [ ] 3.3 Verify that no published manifest declares a `workspace:` dependency, an unpublished internal package, or a build-only tool such as `tsx` or `nitropack` as a runtime dependency
-- [ ] 3.4 Create release package manifests with versions, engines, bin, files, license, repository, dependencies, publish configuration, and provenance metadata
-- [ ] 3.5 Define a strict product content allowlist and assemble release staging from an empty directory
-- [ ] 3.6 Generate a per-file path, size, mode, and SHA-256 manifest and reject unexpected or forbidden content
-- [ ] 3.7 Ensure package contents exclude credentials, `.swf-state`, `.swf-dev`, logs, coverage, arbitrary fixtures, development output, and source-only runtime assumptions
-- [ ] 3.8 Build the Pi extension as compiled separately installable output with lockstep release version and compatible service/API range
-- [ ] 3.9 Verify internal workspace packages remain private and all product runtime imports resolve from the staged package
-- [ ] 3.10 Add package-size budgets and package-content regression tests
+- [x] 3.2 Add the repository `LICENSE` (MIT) and declare a matching licence identifier in every published manifest
+- [x] 3.3 Verify that no published manifest declares a `workspace:` dependency, an unpublished internal package, or a build-only tool such as `tsx` or `nitropack` as a runtime dependency
+- [x] 3.4 Create release package manifests with versions, engines, bin, files, license, repository, dependencies, publish configuration, and provenance metadata
+- [x] 3.5 Define a strict product content allowlist and assemble release staging from an empty directory
+- [x] 3.6 Generate a per-file path, size, mode, and SHA-256 manifest and reject unexpected or forbidden content
+- [x] 3.7 Ensure package contents exclude credentials, `.swf-state`, `.swf-dev`, logs, coverage, arbitrary fixtures, development output, and source-only runtime assumptions
+- [x] 3.8 Build the Pi extension as compiled separately installable output with lockstep release version and compatible service/API range
+- [x] 3.9 Verify internal workspace packages remain private and all product runtime imports resolve from the staged package
+- [x] 3.10 Add package-size budgets and package-content regression tests
 
 ## 4. Isolated Development Instances
 
