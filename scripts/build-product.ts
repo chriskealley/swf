@@ -25,6 +25,12 @@ interface BuildOptions {
   sourceCommit?: string;
   sourceDirty?: boolean;
   outputDirectory?: string;
+  /**
+   * Pins the build timestamp. A rebuild for reproducibility comparison must
+   * reuse the original value, or the embedded metadata differs for a reason
+   * that has nothing to do with the source.
+   */
+  builtAt?: string;
 }
 
 async function run(
@@ -118,6 +124,7 @@ async function writeProductMetadata(
     sourceCommit: options.sourceCommit ?? identity.sourceCommit,
     sourceDirty: options.sourceDirty ?? identity.sourceDirty,
     channel: options.channel,
+    builtAt: options.builtAt,
   });
   await writeFile(
     join(staging, productLayout.productMetadata),
@@ -296,8 +303,8 @@ export async function buildProduct(
   await rm(staging, { recursive: true, force: true });
   await mkdir(join(staging, "bin"), { recursive: true });
   await buildCli(staging);
-  await buildService(staging);
   await buildDashboard(staging);
+  await buildService(staging);
   const metadata = await writeProductMetadata(staging, options);
   await writePackageManifest(staging, metadata);
   await copyLicense(staging);

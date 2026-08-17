@@ -76,6 +76,9 @@ export const extensionPeerDependencies = [
   "@earendil-works/pi-coding-agent",
 ] as const;
 
+/** Bytes. A regression usually means a dependency got inlined. */
+export const packageSizeBudgetBytes = 4 * 1024 * 1024;
+
 export async function workspaceVersion(): Promise<string> {
   const manifest = JSON.parse(
     await readFile(join(repositoryRoot, "package.json"), "utf8"),

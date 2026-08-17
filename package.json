@@ -34,7 +34,8 @@
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false",
-    "verify:product": "tsx scripts/verify-product.ts"
+    "verify:product": "tsx scripts/verify-product.ts",
+    "verify:release": "tsx scripts/verify-release.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

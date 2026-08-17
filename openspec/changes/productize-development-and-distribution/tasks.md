@@ -53,16 +53,16 @@
 
 ## 6. Exact Packaged Artifact Verification
 
-- [ ] 6.1 Add deterministic product and Pi extension packing commands and inspect `npm pack` output before publication
-- [ ] 6.2 Verify bin targets, executable behavior, engines, dependencies, files, license, package size, and forbidden paths
-- [ ] 6.3 Install the exact tarball into a temporary prefix with isolated HOME, SWF config/service homes, cache, endpoint, and Git fixture
-- [ ] 6.4 Prove smoke tests resolve no modules or assets from the source workspace
-- [ ] 6.5 Smoke-test installed version/help, doctor, project initialization, production service start/health/authenticated query/stop, dashboard assets, and private permissions
-- [ ] 6.6 Smoke-test packaged templates and migration discovery and statically or dynamically validate Pi extension loading
-- [ ] 6.7 Simulate package uninstall and verify user and project state are preserved
-- [ ] 6.8 Generate artifact checksums and a release evidence manifest containing source, toolchain, lockfile, files, tests, provenance, and destinations
-- [ ] 6.9 Add reproducibility comparison and report known nondeterministic archive metadata
-- [ ] 6.10 Fail verification for dirty stable-release input or label explicitly allowed dirty output as non-publishable development artifacts
+- [x] 6.1 Add deterministic product and Pi extension packing commands and inspect `npm pack` output before publication
+- [x] 6.2 Verify bin targets, executable behavior, engines, dependencies, files, license, package size, and forbidden paths
+- [x] 6.3 Install the exact tarball into a temporary prefix with isolated HOME, SWF config/service homes, cache, endpoint, and Git fixture
+- [x] 6.4 Prove smoke tests resolve no modules or assets from the source workspace
+- [x] 6.5 Smoke-test installed version/help, doctor, project initialization, production service start/health/authenticated query/stop, dashboard assets, and private permissions
+- [x] 6.6 Smoke-test packaged templates and migration discovery and statically or dynamically validate Pi extension loading
+- [x] 6.7 Simulate package uninstall and verify user and project state are preserved
+- [x] 6.8 Generate artifact checksums and a release evidence manifest containing source, toolchain, lockfile, files, tests, provenance, and destinations
+- [x] 6.9 Add reproducibility comparison and report known nondeterministic archive metadata
+- [x] 6.10 Fail verification for dirty stable-release input or label explicitly allowed dirty output as non-publishable development artifacts
 
 ## 7. Production Service Lifecycle
 

@@ -5,9 +5,12 @@ import picomatch from "picomatch";
 import {
   externalRuntimeDependencies,
   forbiddenRuntimeDependencies,
+  packageSizeBudgetBytes,
   productLayout,
   stagingRoot,
 } from "./product-layout.js";
+
+export { packageSizeBudgetBytes };
 
 /**
  * Everything the product is allowed to ship. Assembly starts from an empty
@@ -57,9 +60,6 @@ export const forbiddenContent = [
   "**/.git/**",
   "**/.DS_Store",
 ] as const;
-
-/** Bytes. A regression here usually means a dependency got inlined. */
-export const packageSizeBudgetBytes = 4 * 1024 * 1024;
 
 export interface ManifestEntry {
   path: string;
