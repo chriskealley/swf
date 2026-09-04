@@ -118,6 +118,18 @@ class SimulatedHerdr implements CommandRunner {
   }
 }
 
+class AcceptanceCommandRunner extends NodeCommandRunner {
+  override async run(
+    command: string,
+    args: string[],
+    options?: CommandOptions,
+  ): Promise<ProcessResult> {
+    if (command === "openspec")
+      return { code: 0, stdout: "simulated openspec\n", stderr: "" };
+    return super.run(command, args, options);
+  }
+}
+
 class AcceptancePlanningAdapter implements HarnessAdapter {
   readonly id = "pi";
   readonly capabilities = {
@@ -359,7 +371,7 @@ describe("disposable operational acceptance", () => {
       projectTrust: async () => true,
       harnessAdapters: [new AcceptancePlanningAdapter()],
       herdrClient: new HerdrClient(new SimulatedHerdr()),
-      commandRunner: new NodeCommandRunner(),
+      commandRunner: new AcceptanceCommandRunner(),
     });
     serviceRef.current = service;
     await service.start();
