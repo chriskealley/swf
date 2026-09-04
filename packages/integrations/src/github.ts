@@ -134,7 +134,7 @@ export class GitHubAdapter implements HostingAdapter {
     }
     const remoteResult = await this.execute(
       "git",
-      ["remote", "get-url", remote],
+      ["remote", "get-url", "--", remote],
       input.cwd,
       true,
     );
@@ -188,6 +188,7 @@ export class GitHubAdapter implements HostingAdapter {
         "ls-remote",
         "--exit-code",
         "--heads",
+        "--",
         remote,
         `refs/heads/${targetBranch}`,
       ],
@@ -272,6 +273,7 @@ export class GitHubAdapter implements HostingAdapter {
       [
         "push",
         "--dry-run",
+        "--",
         remote,
         `${source.code === 0 ? sourceBranch : "HEAD"}:refs/heads/${sourceBranch}`,
       ],
@@ -378,7 +380,7 @@ export class GitHubAdapter implements HostingAdapter {
     const targetBranch = assertSafeGitBranchName(input.targetBranch);
     await this.execute(
       "git",
-      ["push", "--set-upstream", remote, sourceBranch],
+      ["push", "--set-upstream", "--", remote, sourceBranch],
       input.cwd,
     );
     const request = { ...input, remote, sourceBranch, targetBranch };

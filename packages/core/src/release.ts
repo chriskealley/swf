@@ -54,7 +54,7 @@ export async function releasePreflight(
   if (input.refreshTarget) {
     const fetched = await input.runner.run(
       "git",
-      ["fetch", "--prune", remote],
+      ["fetch", "--prune", "--", remote],
       { cwd: input.git.cwd },
     );
     checks.push({
@@ -107,7 +107,7 @@ export async function releasePreflight(
   });
   const remoteCheck = await input.runner.run(
     "git",
-    ["remote", "get-url", remote],
+    ["remote", "get-url", "--", remote],
     { cwd: input.git.cwd },
   );
   checks.push({
