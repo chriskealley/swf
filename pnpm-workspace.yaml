@@ -8,6 +8,7 @@ allowBuilds:
   deasync: false
   esbuild: true
   msgpackr-extract: false
+  protobufjs: false
 
 minimumReleaseAgeExclude:
   - "@vue/compiler-core@3.5.41"
