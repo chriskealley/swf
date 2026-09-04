@@ -344,7 +344,10 @@ export interface RiskAssessmentInput {
 
 /** Repository-relative, forward-slash form so globs match what git reports. */
 function normalizeChangedPath(path: string): string {
-  return path.replace(/^\.\//, "").replace(/\/+$/, "");
+  const normalized = path.startsWith("./") ? path.slice(2) : path;
+  let end = normalized.length;
+  while (end > 0 && normalized.charCodeAt(end - 1) === 47) end -= 1;
+  return normalized.slice(0, end);
 }
 
 /**

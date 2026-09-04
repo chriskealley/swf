@@ -1630,10 +1630,9 @@ async function openInBrowser(url: string): Promise<void> {
     process.platform === "darwin"
       ? "open"
       : process.platform === "win32"
-        ? "cmd"
+        ? "explorer.exe"
         : "xdg-open";
-  const commandArgs =
-    process.platform === "win32" ? ["/c", "start", url] : [url];
+  const commandArgs = [url];
   await new Promise<void>((resolve) => {
     const child = spawn(command, commandArgs, {
       stdio: "ignore",

@@ -75,8 +75,8 @@ export async function readLocalServiceMetadata(
       !metadata.credential
     )
       throw new Error("Invalid service metadata");
-    assertLoopbackHttpEndpoint(metadata.endpoint);
-    return metadata;
+    const endpoint = assertLoopbackHttpEndpoint(metadata.endpoint).origin;
+    return { ...metadata, endpoint };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       throw new ServiceUnavailableError();

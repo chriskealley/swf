@@ -3,6 +3,9 @@ packages:
   - packages/*
   - extensions/*
 
+overrides:
+  fast-uri: 3.1.6
+
 allowBuilds:
   "@google/genai": false
   deasync: false

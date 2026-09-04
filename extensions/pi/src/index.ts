@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { actionCommandType } from "@swf/core";
+import { actionCommandType, assertLoopbackHttpEndpoint } from "@swf/core";
 import type { OperatorAction, OperatorProjection } from "@swf/core";
 
 interface RunSummary {
@@ -36,11 +36,12 @@ async function withClient<T>(
   const metadata = JSON.parse(
     await readFile(join(home, "service.json"), "utf8"),
   ) as { endpoint: string; credential: string };
+  const endpoint = assertLoopbackHttpEndpoint(metadata.endpoint).origin;
   const request = async <R>(
     path: string,
     init: RequestInit = {},
   ): Promise<R> => {
-    const response = await fetch(`${metadata.endpoint}${path}`, {
+    const response = await fetch(`${endpoint}${path}`, {
       ...init,
       headers: {
         authorization: `Bearer ${metadata.credential}`,
