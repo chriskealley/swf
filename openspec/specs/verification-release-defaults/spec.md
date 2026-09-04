@@ -1,7 +1,9 @@
 # verification-release-defaults Specification
 
 ## Purpose
-TBD - created by archiving change improve-agent-execution-defaults. Update Purpose after archive.
+Define the evidence, task-completion, reproducibility, and operator-approval
+requirements that must hold before SWF can verify or release a change.
+
 ## Requirements
 ### Requirement: Task-completion verification
 Before Verifying can complete, SWF SHALL parse the active OpenSpec task list, require every applicable task to be checked, and require current evidence connecting each completed task to implementation and verification outcomes. A checked box alone SHALL NOT prove correct completion.
@@ -102,4 +104,3 @@ Releasing SHALL NOT infer OpenSpec archive from a generic release role. Archive 
 #### Scenario: Archive is configured
 - **WHEN** an explicit archive action is declared and its prerequisites are satisfied
 - **THEN** SWF archives deterministically, records the resulting paths, and includes them in the final dossier and delivery commit
-

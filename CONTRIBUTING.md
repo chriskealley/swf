@@ -55,7 +55,7 @@ pnpm test:e2e
 pnpm verify:product
 pnpm verify:release --channel=development
 pnpm verify:release-guard
-npx openspec validate --specs --strict
+pnpm exec openspec validate --specs --strict
 ```
 
 Add or update tests for behavior changes. Do not weaken a test merely to make a

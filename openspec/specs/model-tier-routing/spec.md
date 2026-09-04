@@ -1,7 +1,9 @@
 # model-tier-routing Specification
 
 ## Purpose
-TBD - created by archiving change improve-agent-execution-defaults. Update Purpose after archive.
+Define provider-neutral model tiers and explicit harness mappings so phase model
+selection remains portable, inspectable, and operator-controlled.
+
 ## Requirements
 ### Requirement: Provider-neutral model tiers
 SWF SHALL support named provider-neutral model tiers that phase profiles can select independently of concrete harness model identifiers. The default phase routes SHALL select `reasoning` for Planning, `coding` for Building, `reasoning` for Reviewing, `fast` for Verifying, and no model for deterministic Releasing.
@@ -79,4 +81,3 @@ The resolved model and harness SHALL satisfy required phase capabilities and app
 #### Scenario: Budget cannot admit the route
 - **WHEN** an applicable budget cannot safely admit a statically selected route because required usage is unknown
 - **THEN** execution follows configured strict-unknown policy and does not silently select a cheaper model
-

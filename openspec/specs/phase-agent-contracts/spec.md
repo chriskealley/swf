@@ -1,7 +1,9 @@
 # phase-agent-contracts Specification
 
 ## Purpose
-TBD - created by archiving change improve-agent-execution-defaults. Update Purpose after archive.
+Define explicit responsibilities, boundaries, inputs, outputs, and handoffs for
+each agentic phase while keeping deterministic release work agent-free.
+
 ## Requirements
 ### Requirement: Structured phase contracts
 Each agent phase SHALL resolve a structured contract containing its objective, responsibilities, allowed scope, prohibited actions, required inputs, required outputs, completion criteria, and handoff expectations. Prompt construction SHALL preserve the provenance of built-in, user, project, workflow, phase, and runtime contributions.
@@ -79,4 +81,3 @@ Operators SHALL be able to inspect the resolved phase contract, model tier, conc
 #### Scenario: Explain Verifying
 - **WHEN** an operator requests a phase explanation
 - **THEN** SWF shows that Verifying audits task completion, its selected checks and evidence, its `fast` tier, and its prohibited general review and delivery actions
-

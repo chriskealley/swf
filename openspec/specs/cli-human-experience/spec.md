@@ -1,7 +1,9 @@
 # cli-human-experience Specification
 
 ## Purpose
-TBD - created by archiving change improve-cli-operator-experience. Update Purpose after archive.
+Define a concise, predictable CLI experience that explains workflow state,
+required attention, and safe next actions to both people and automation.
+
 ## Requirements
 ### Requirement: Human-readable default output
 The CLI SHALL render concise human-oriented output by default rather than serializing service response objects. Every completed command SHALL explain what happened, the resulting state, anything requiring attention, and the recommended next command or action when one exists.
@@ -91,4 +93,3 @@ Human-mode failures SHALL show a concise cause, classified context, durable stat
 #### Scenario: Run remains resumable after failure
 - **WHEN** infrastructure failure leaves a durably resumable run
 - **THEN** the CLI identifies the existing change-bound run and recommends `swf run <change>` rather than suggesting a duplicate new run
-

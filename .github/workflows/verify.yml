@@ -57,7 +57,7 @@ jobs:
         run: pnpm verify:release
 
       - name: Validate OpenSpec changes
-        run: npx openspec validate --specs --strict
+        run: pnpm exec openspec validate --specs --strict
 
       - name: Confirm no publication credential is reachable
         run: pnpm verify:release-guard
