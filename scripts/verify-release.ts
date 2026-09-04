@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,7 +7,10 @@ import {
   checkNoWorkspaceResolution,
   checkPrivatePermissions,
   classifyDifference,
+  collectDependencyClosure,
   compareReproducibility,
+  createSbom,
+  detectProvenanceContext,
   createReleaseEvidence,
   decidePublishability,
   fileDigest,
@@ -19,6 +22,8 @@ import {
   runIsolated,
   simulateUninstall,
   smokePackagedService,
+  renderChecksumFile,
+  stageReleaseNotes,
   stagedFileDigests,
   type SmokeCheck,
 } from "../packages/dev/src/index.js";
@@ -154,9 +159,13 @@ async function main(): Promise<void> {
   const secondDigests = excludeVerificationArtifacts(
     await stagedFileDigests(stagingRoot),
   );
+  // Pack the rebuild into a separate directory: the filename is identical, so
+  // sharing a destination would overwrite the verified tarball and promotion
+  // would publish bytes that were never verified.
+  const repeatDestination = await mkdtemp(join(tmpdir(), "swf-pack-repeat-"));
   const repeatPack = await packArtifact({
     packageDirectory: stagingRoot,
-    destinationDirectory: packDestination,
+    destinationDirectory: repeatDestination,
   });
   const reproducibility = compareReproducibility(
     firstDigests,
@@ -325,14 +334,89 @@ async function main(): Promise<void> {
     const serviceSmoke = await smokePackagedService(environment);
     checks.push(...serviceSmoke.checks);
     checks.push(...(await checkPrivatePermissions(environment)));
+
+    // Collect the dependency closure before simulating uninstall: that step
+    // removes the installed tree, and an empty SBOM would look authoritative
+    // while describing nothing.
+    const closure = await collectDependencyClosure(installed);
+    process.stdout.write(
+      `  ok   dependency closure: ${closure.totalPackages} packages, ${Object.keys(closure.licenses).length} licence(s)\n`,
+    );
+    if (!closure.totalPackages)
+      throw new Error(
+        "Dependency closure is empty; the installed product was not inspected",
+      );
+
     checks.push(...(await simulateUninstall(environment)));
 
     process.stdout.write("5. Smoke results\n");
     if (!report(checks)) throw new Error("Smoke checks failed");
 
-    process.stdout.write("6. Writing release evidence\n");
+    process.stdout.write("6. Collecting supply-chain evidence\n");
+    if (closure.unknownLicenses.length)
+      process.stdout.write(
+        `  note ${closure.unknownLicenses.length} package(s) declare no licence: ${closure.unknownLicenses.slice(0, 3).join(", ")}\n`,
+      );
+
     const evidenceDirectory = join(repositoryRoot, "dist", "release");
     await mkdir(evidenceDirectory, { recursive: true });
+
+    const releaseNotesPath = await stageReleaseNotes({
+      version: product.version,
+      source: join(repositoryRoot, "docs", "releases", `${product.version}.md`),
+      evidenceDirectory,
+    });
+    process.stdout.write(`  ok   ${releaseNotesPath}\n`);
+
+    const sbom = createSbom({
+      name: product.name,
+      version: product.version,
+      license: "MIT",
+      closure,
+    });
+    await writeFile(
+      join(evidenceDirectory, "sbom.json"),
+      `${JSON.stringify(sbom, null, 2)}\n`,
+    );
+
+    // Copy the packed tarballs beside their evidence so publication promotes
+    // the verified artifact rather than rebuilding one.
+    for (const artifact of [product, extension])
+      await cp(
+        artifact.tarballPath,
+        join(evidenceDirectory, artifact.filename),
+      );
+
+    await writeFile(
+      join(evidenceDirectory, "checksums.txt"),
+      renderChecksumFile([
+        { filename: product.filename, sha256: product.sha256 },
+        { filename: extension.filename, sha256: extension.sha256 },
+      ]),
+    );
+
+    // Promotion metadata: publication must use these digests without rebuilding.
+    await writeFile(
+      join(evidenceDirectory, "promotion.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          channel,
+          artifacts: [product, extension].map(
+            ({ name, filename, sha256, integrity }) => ({
+              name,
+              filename,
+              sha256,
+              integrity,
+            }),
+          ),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    process.stdout.write("7. Writing release evidence\n");
     const evidence = createReleaseEvidence({
       source: {
         commit: metadata.build.sourceCommit,
@@ -365,7 +449,19 @@ async function main(): Promise<void> {
         passed,
         detail,
       })),
-      provenance: { requested: channel !== "development" },
+      provenance: {
+        requested: channel !== "development",
+        environment: detectProvenanceContext().available
+          ? "github-actions-oidc"
+          : undefined,
+      },
+      dependencyClosure: {
+        // Declared ranges are artifact identity; the resolved closure is not.
+        declared: closure.declared,
+        resolvedPackages: closure.totalPackages,
+        licenses: closure.licenses,
+        note: "resolved at install time and outside verified artifact identity; a later install may resolve different versions",
+      },
       destinations:
         channel === "development"
           ? []
@@ -378,7 +474,10 @@ async function main(): Promise<void> {
     if (keep)
       process.stdout.write(`\nRetained smoke prefix at ${environment.root}\n`);
     else await removeSmokeEnvironment(environment);
-    if (!keep) await rm(packDestination, { recursive: true, force: true });
+    if (!keep) {
+      await rm(packDestination, { recursive: true, force: true });
+      await rm(repeatDestination, { recursive: true, force: true });
+    }
   }
 
   process.stdout.write("\nRelease verification passed\n");

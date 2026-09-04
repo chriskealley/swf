@@ -171,6 +171,13 @@ export interface ReleaseEvidence {
   }>;
   tests: Array<{ suite: string; passed: boolean; detail?: string }>;
   provenance: { requested: boolean; environment?: string };
+  /** Recorded for diagnosis; explicitly not part of artifact identity. */
+  dependencyClosure?: {
+    declared: Record<string, string>;
+    resolvedPackages: number;
+    licenses: Record<string, number>;
+    note: string;
+  };
   destinations: string[];
 }
 

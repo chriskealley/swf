@@ -35,7 +35,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false",
     "verify:product": "tsx scripts/verify-product.ts",
-    "verify:release": "tsx scripts/verify-release.ts"
+    "verify:promotion": "tsx scripts/verify-promotion.ts",
+    "verify:release": "tsx scripts/verify-release.ts",
+    "verify:release-guard": "tsx scripts/release-guard.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

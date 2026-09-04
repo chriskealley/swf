@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a reproducible problem in SWF
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Remove credentials, tokens, private repository details, and other sensitive data from logs before submitting. Report vulnerabilities privately through the Security tab.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests for this problem.
+          required: true
+        - label: This report does not contain a security vulnerability or sensitive data.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: SWF version or commit
+      placeholder: 0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Node.js, pnpm, Git, Herdr, harness, and terminal versions that are relevant.
+      placeholder: |
+        OS: macOS 15
+        Node.js: 24.x
+        pnpm: 11.20.0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reliable sequence of commands or repository fixture that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste concise, redacted logs or error output. Do not include service credentials or private repository data.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add screenshots, links, suspected causes, or workarounds if useful.

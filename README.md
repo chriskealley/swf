@@ -14,7 +14,12 @@ SWF includes:
 - deterministic evidence, checkpoints, rollback, and OpenSpec dossiers;
 - cost budgets, retention controls, recovery, and run export/import.
 
-> **Status:** This repository is currently a source-based, pre-release workspace. macOS and Linux are supported. Native Windows support is preview-only.
+> **Status:** SWF is pre-1.0. macOS and Linux are supported. Native Windows
+> support is preview-only.
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
+opening a change, follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report
+suspected vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 
 ## Requirements
 
@@ -44,7 +49,23 @@ These are required only when selected by a workflow:
 
 See [Harness adapter capabilities](docs/harness-adapters.md) for structured-output, resume, tool-policy, model, and usage limitations.
 
-## Installation from source
+## Installation
+
+Install a published release with npm or pnpm:
+
+```sh
+npm install --global @chriskealley/swf@0.1.0
+# or
+pnpm add --global @chriskealley/swf@0.1.0
+```
+
+Package installation writes product files and dependencies only. It does not
+start a service, create credentials, trust a project, configure GitHub, migrate
+state, or install a managed user service. See
+[Installation and distribution](docs/installation.md) for GitHub archive
+installation and the complete setup boundary.
+
+### Installation from source
 
 Clone the repository and install its pinned workspace dependencies:
 
@@ -66,14 +87,21 @@ pnpm swf doctor
 
 Diagnostics check required tools, versions, PATH visibility, Git support, project permissions, Herdr integrations, selected harnesses, GitHub authentication, and terminal capabilities.
 
-### Convenient source-checkout command
+### Checkout-local development
 
-Commands below use `swf`. Until a published package is available, either prefix commands with `pnpm --dir /path/to/swf swf` or define a shell function:
+Do not globally link the source checkout or define a shell function. Start an
+isolated named development instance from the repository:
 
 ```sh
-export SWF_REPO="$HOME/src/swf"
-swf() { pnpm --dir "$SWF_REPO" --silent swf "$@"; }
+pnpm dev start --instance local
+pnpm dev status --instance local
 ```
+
+The command prints its private service home, service endpoint, dashboard URL,
+logs, and the exact checkout-local CLI invocation. Use explicit `--cwd` or
+project selectors when operating on another repository. See
+[Contributor development](docs/development.md) for fast watch mode,
+production-like preview, fixtures, lifecycle commands, and cleanup.
 
 SWF never silently installs software or creates credentials. Preview supported remediation before applying it:
 
@@ -267,13 +295,17 @@ swf transfer import \
 
 ## Dashboard
 
-Start the dashboard development server from the SWF checkout:
+For an installed product, start or locate the compatible service and open its
+packaged dashboard:
 
 ```sh
-pnpm dev:dashboard
+swf dashboard open
 ```
 
-Open the local URL printed by Vite, then enter the service endpoint and credential from the private service metadata. Dashboard credentials remain in memory and are sent only to loopback HTTP endpoints.
+For contributor development, `pnpm dev start --instance <name>` starts the
+service and Vite watchers together and prints the isolated dashboard URL. Enter
+the service credential from that instance's private metadata. Dashboard
+credentials remain in memory and are sent only to loopback HTTP endpoints.
 
 The dashboard provides project and run timelines, phase status, retained output, artifacts, delivery state, cost provenance, budget status, adapter capabilities, safe controls, and preview-plus-confirmation pruning.
 
@@ -285,6 +317,20 @@ The Pi status widget displays the service-owned stopping phase and attention sum
 
 ## Development
 
+The normal contributor path is an isolated named instance:
+
+```sh
+pnpm dev start --instance local
+pnpm dev logs --instance local
+pnpm dev preview --instance release-preview
+pnpm dev stop --instance local
+```
+
+Fast mode runs source-aware service and dashboard watchers with source maps.
+Production-like preview instead assembles and runs the compiled package layout
+without source or workspace runtime resolution. Full details are in
+[Contributor development](docs/development.md).
+
 ```sh
 pnpm build
 pnpm check
@@ -292,7 +338,8 @@ pnpm test
 pnpm test:e2e
 ```
 
-Run the service or dashboard in development mode:
+The lower-level standalone watchers remain available for focused debugging,
+but they do not provide the named-instance lifecycle or isolation guarantees:
 
 ```sh
 pnpm dev:service
@@ -320,7 +367,9 @@ pnpm test:e2e
 
 ## Documentation
 
-- [Installation and prerequisites](docs/installation.md)
+- [Installation and distribution](docs/installation.md)
+- [Contributor development](docs/development.md)
+- [Package contents and verification](docs/distribution.md)
 - [Project configuration](docs/project-configuration.md)
 - [Delivery](docs/delivery.md)
 - [Troubleshooting](docs/troubleshooting.md)

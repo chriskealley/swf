@@ -1,0 +1,164 @@
+name: Release
+
+# Publication is dispatched explicitly from main, never from a pull request,
+# and only reaches credentials through the protected `release` environment.
+# The workflow creates the tag after both registry publications succeed.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package version to release (without a v prefix)
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        type: choice
+        options:
+          - stable
+          - next
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      channel: ${{ steps.identity.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm test:e2e
+
+      - name: Validate release identity
+        id: identity
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Releases must be dispatched from main, not $GITHUB_REF" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_REF_PROTECTED" != "true" ]; then
+            echo "Releases require a protected main branch" >&2
+            exit 1
+          fi
+          if [ "$VERSION" != "${VERSION#v}" ]; then
+            echo "Version must not include the v tag prefix" >&2
+            exit 1
+          fi
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Requested version $VERSION does not match package version $PACKAGE_VERSION" >&2
+            exit 1
+          fi
+          if git rev-parse --verify --quiet "refs/tags/v$VERSION" >/dev/null; then
+            echo "Tag v$VERSION already exists; published versions must not be reused" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the exact artifact
+        run: pnpm verify:release --channel=${{ steps.identity.outputs.channel }}
+
+      # The verified artifact is promoted as-is. Publication jobs never rebuild,
+      # so what is published is exactly what passed verification.
+      - name: Upload the verified artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-artifacts
+          path: |
+            dist/product/
+            dist/pi-extension/
+            dist/release/
+          retention-days: 7
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    # A protected environment gates stable publication on explicit approval.
+    environment: release
+    permissions:
+      contents: write
+      # Required for npm provenance via OIDC.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Download the verified artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-artifacts
+          path: dist/
+
+      - name: Confirm the promoted artifact matches its verified checksums
+        run: pnpm install --frozen-lockfile && pnpm verify:promotion
+
+      # Publish before tagging: a registry version can never be reused, while a
+      # Git tag can be re-cut. The dist-tag is always explicit so a prerelease
+      # never becomes the default install.
+      - name: Publish the product
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          REGISTRY_TAG: ${{ needs.verify.outputs.channel == 'stable' && 'latest' || 'next' }}
+        run: |
+          TARBALL="$(node -p 'require("./dist/release/promotion.json").artifacts.find(({ name }) => name === "@chriskealley/swf").filename')"
+          npm publish "dist/release/$TARBALL" --provenance --tag "$REGISTRY_TAG"
+
+      - name: Publish the Pi extension
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          REGISTRY_TAG: ${{ needs.verify.outputs.channel == 'stable' && 'latest' || 'next' }}
+        run: |
+          TARBALL="$(node -p 'require("./dist/release/promotion.json").artifacts.find(({ name }) => name === "@chriskealley/swf-pi").filename')"
+          npm publish "dist/release/$TARBALL" --provenance --tag "$REGISTRY_TAG"
+
+      - name: Create and push the Git tag
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          TAG="v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "$TAG" "$GITHUB_SHA" --message "$TAG"
+          git push origin "$TAG"
+
+      # The GitHub release is last: --verify-tag prevents it from silently
+      # manufacturing a tag outside the publish-before-tag sequence.
+      - name: Create the GitHub release
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" \
+            --verify-tag \
+            ${{ needs.verify.outputs.channel == 'next' && '--prerelease' || '' }} \
+            --title "v$VERSION" \
+            --notes-file dist/release/release-notes.md \
+            dist/release/*.tgz \
+            dist/release/checksums.txt \
+            dist/release/sbom.json \
+            dist/release/release-evidence.json
