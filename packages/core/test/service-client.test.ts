@@ -46,10 +46,15 @@ describe("SWF service client", () => {
     await expect(
       client.query("run", { projectId: "p", runId: "r" }),
     ).resolves.toEqual({ ok: true });
+    await expect(client.health()).resolves.toEqual({ ok: true });
     await client.command({ type: "pause", projectId: "p", runId: "r" });
     expect(calls).toMatchObject([
       {
         url: "http://127.0.0.1:34671/api/v1/query?resource=run&projectId=p&runId=r",
+        init: { headers: { authorization: "Bearer secret" } },
+      },
+      {
+        url: "http://127.0.0.1:34671/api/health",
         init: { headers: { authorization: "Bearer secret" } },
       },
       {
@@ -65,5 +70,27 @@ describe("SWF service client", () => {
     await expect(readLocalServiceMetadata(home)).rejects.toBeInstanceOf(
       ServiceUnavailableError,
     );
+  });
+
+  it("rejects non-loopback metadata and normalizes the accepted origin", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swf-client-"));
+    directories.push(home);
+    const metadata = {
+      schemaVersion: 1,
+      serviceId: "s",
+      pid: 1,
+      endpoint: "http://127.0.0.1:34671/untrusted-path",
+      credential: "secret",
+      startedAt: "2026-04-02T12:00:00.000Z",
+    };
+    await writeFile(join(home, "service.json"), JSON.stringify(metadata));
+    await expect(readLocalServiceMetadata(home)).resolves.toMatchObject({
+      endpoint: "http://127.0.0.1:34671",
+    });
+    await writeFile(
+      join(home, "service.json"),
+      JSON.stringify({ ...metadata, endpoint: "https://example.com" }),
+    );
+    await expect(readLocalServiceMetadata(home)).rejects.toThrow("loopback");
   });
 });

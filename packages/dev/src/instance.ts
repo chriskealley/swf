@@ -24,6 +24,8 @@ export const DevelopmentInstanceSchema = z.object({
   sourceCommit: z.string().min(1),
   endpoint: z.string().url(),
   port: z.number().int().positive(),
+  dashboardEndpoint: z.string().url().optional(),
+  dashboardPort: z.number().int().positive().optional(),
   serviceHome: z.string().min(1),
   logsDirectory: z.string().min(1),
   packageDirectory: z.string().min(1),
@@ -134,6 +136,12 @@ export async function createInstance(
       `Refusing to use the installed service port ${INSTALLED_SERVICE_PORT}`,
     );
 
+  let dashboardPort: number | undefined;
+  if (input.mode === "fast") {
+    dashboardPort = await allocateLoopbackPort();
+    while (dashboardPort === port) dashboardPort = await allocateLoopbackPort();
+  }
+
   const instance = DevelopmentInstanceSchema.parse({
     schemaVersion: 1,
     name: input.name,
@@ -142,6 +150,11 @@ export async function createInstance(
     sourceCommit: input.sourceCommit,
     endpoint: `http://127.0.0.1:${port}`,
     port,
+    dashboardEndpoint:
+      dashboardPort === undefined
+        ? undefined
+        : `http://127.0.0.1:${dashboardPort}`,
+    dashboardPort,
     serviceHome: paths.serviceHome,
     logsDirectory: paths.logsDirectory,
     packageDirectory: paths.packageDirectory,
@@ -157,6 +170,23 @@ export async function createInstance(
     await mkdir(directory, { recursive: true, mode: 0o700 });
   await writeInstance(instance);
   return instance;
+}
+
+/** Adds the dashboard endpoint to metadata created before fast mode owned it. */
+export async function ensureFastDashboardEndpoint(
+  instance: DevelopmentInstance,
+): Promise<DevelopmentInstance> {
+  if (instance.dashboardEndpoint && instance.dashboardPort) return instance;
+  let dashboardPort = await allocateLoopbackPort();
+  while (dashboardPort === instance.port)
+    dashboardPort = await allocateLoopbackPort();
+  const updated = DevelopmentInstanceSchema.parse({
+    ...instance,
+    dashboardPort,
+    dashboardEndpoint: `http://127.0.0.1:${dashboardPort}`,
+  });
+  await writeInstance(updated);
+  return updated;
 }
 
 export async function writeInstance(

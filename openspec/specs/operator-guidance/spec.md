@@ -1,7 +1,9 @@
 # operator-guidance Specification
 
 ## Purpose
-TBD - created by archiving change improve-cli-operator-experience. Update Purpose after archive.
+Define the durable service projection and semantic guidance that keep operators
+oriented and constrain every suggested action to the current workflow state.
+
 ## Requirements
 ### Requirement: Service-owned operator projection
 The service SHALL derive an operator-facing projection from durable run state, resolved workflow configuration, approvals, checks, artifacts, checkpoints, delivery state, and active invocations. The projection SHALL identify what most recently happened, the current workflow state, any item requiring operator attention, the actions currently permitted, and one recommended next action when progression is possible.
@@ -80,4 +82,3 @@ Failures SHALL be classified as configuration, dependency, infrastructure, harne
 #### Scenario: Work product validation fails
 - **WHEN** an agent completes but required artifacts or checks fail
 - **THEN** guidance lists the failed validations and recommends retry, request-changes, or inspection according to policy
-

@@ -3,11 +3,15 @@ packages:
   - packages/*
   - extensions/*
 
+overrides:
+  fast-uri: 3.1.6
+
 allowBuilds:
   "@google/genai": false
   deasync: false
   esbuild: true
   msgpackr-extract: false
+  protobufjs: false
 
 minimumReleaseAgeExclude:
   - "@vue/compiler-core@3.5.41"

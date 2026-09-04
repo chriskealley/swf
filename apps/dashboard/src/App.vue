@@ -22,7 +22,9 @@ import type {
   RunDetail,
 } from "./types.js";
 
-const endpoint = ref("http://127.0.0.1:34671");
+const endpoint = ref(
+  import.meta.env.VITE_SWF_ENDPOINT ?? "http://127.0.0.1:34671",
+);
 const credential = ref("");
 const api = ref<DashboardApi>();
 const overview = ref<DashboardOverview>();

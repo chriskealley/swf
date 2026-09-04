@@ -92,6 +92,20 @@ describe("GitHub hosting adapter", () => {
     });
   });
 
+  it("rejects option-like Git identifiers before invoking Git", async () => {
+    const runner = new FakeRunner(() => undefined);
+    await expect(
+      new GitHubAdapter(runner).preflight({
+        ...preflight,
+        remote: "--upload-pack=malware",
+      }),
+    ).resolves.toMatchObject({
+      valid: false,
+      checks: [{ id: "remote", status: "failed" }],
+    });
+    expect(runner.calls).toHaveLength(0);
+  });
+
   it("reports authentication, permission, target, and auto-merge failures", async () => {
     const adapter = new GitHubAdapter(
       new FakeRunner((command, args) => {

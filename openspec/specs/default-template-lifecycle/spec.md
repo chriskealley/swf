@@ -1,7 +1,9 @@
 # default-template-lifecycle Specification
 
 ## Purpose
-TBD - created by archiving change improve-agent-execution-defaults. Update Purpose after archive.
+Define how SWF versions, generates, compares, and selectively upgrades
+project-owned defaults without overwriting local customization.
+
 ## Requirements
 ### Requirement: Versioned generated defaults
 Newly generated SWF configuration SHALL record a template version and per-file provenance sufficient to compare project-owned defaults with later template versions. Generated files remain committed project configuration and SHALL NOT become remotely managed state.
@@ -68,4 +70,3 @@ SWF upgrades, service startup, project registration, diagnostics, and workflow e
 #### Scenario: Model tier mapping is newly required
 - **WHEN** an existing project lacks mappings needed by an adopted tier-based profile
 - **THEN** diagnostics reports the missing explicit setup rather than silently assigning a concrete model
-

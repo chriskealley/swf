@@ -120,6 +120,25 @@ describe("deterministic release and reviewed adoption", () => {
     ).toBe(false);
   });
 
+  it("rejects option-like Git identifiers before invoking Git", async () => {
+    const root = await mkdtemp(join(tmpdir(), "swf-release-identifiers-"));
+    roots.push(root);
+    const runner = new FakeRunner();
+    await expect(
+      releasePreflight({
+        runId: "8c86919c-3569-4e97-9f09-1bba7b49ed3d",
+        git: new GitClient(root, runner),
+        runner,
+        sourceBranch: "swf/run",
+        targetBranch: "main",
+        remote: "--upload-pack=malware",
+        mergeMethod: "merge",
+        expectedSourceCommit: "source",
+      }),
+    ).rejects.toThrow("remote");
+    expect(runner.calls).toHaveLength(0);
+  });
+
   it("applies only confirmed model mappings and discovered checks", async () => {
     const root = await mkdtemp(join(tmpdir(), "swf-adopt-"));
     roots.push(root);

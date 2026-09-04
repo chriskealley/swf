@@ -19,7 +19,62 @@ Ghostty is supported but optional. iTerm2, WezTerm, Kitty, macOS Terminal, GNOME
 
 Codex CLI, Claude Code, and GitHub Copilot CLI are optional until a project workflow selects them. Their verified structured-output, resume, model, permission, and usage capabilities are documented in [harness-adapters.md](./harness-adapters.md); selected adapters also require their matching Herdr status integration.
 
-## Bootstrap
+## Install the product
+
+### npm
+
+```sh
+npm install --global @chriskealley/swf@0.1.0
+```
+
+### pnpm
+
+```sh
+pnpm add --global @chriskealley/swf@0.1.0
+```
+
+Both package managers install the same verified product files and resolve the
+declared third-party dependencies from the registry. The separately published
+Pi integration is `@chriskealley/swf-pi@0.1.0`; keep its version aligned with
+the product.
+
+### Verified GitHub release archive
+
+GitHub releases contain the exact npm tarballs that passed verification rather
+than a separately rebuilt archive. Download both tarballs and their evidence:
+
+```sh
+gh release download v0.1.0 \
+  --repo chriskealley/swf \
+  --pattern '*.tgz' \
+  --pattern checksums.txt \
+  --pattern sbom.json \
+  --pattern release-evidence.json
+
+shasum -a 256 --check checksums.txt
+npm install --global ./chriskealley-swf-0.1.0.tgz
+```
+
+On Linux, use `sha256sum --check checksums.txt` where `shasum` is unavailable.
+Installing a downloaded tarball still resolves its declared third-party
+dependencies from npm; those resolved versions are recorded for diagnosis but
+are outside the product tarball's checksum identity.
+
+## Installation boundary
+
+A package installation changes product files and installs declared runtime
+dependencies. It does **not**:
+
+- install Node, Git, Herdr, Pi, OpenSpec, `gh`, or optional harnesses;
+- authenticate npm, GitHub, or a harness;
+- create or replace a Git remote;
+- trust or initialize a project;
+- create credentials or start the SWF service;
+- install or enable a launchd agent or systemd user unit;
+- restart a running service, migrate state, or rewrite `.swf/`; or
+- remove service or project state during package uninstall.
+
+## Bootstrap and diagnostics
 
 A Node-based CLI cannot install a missing Node runtime. Install a compatible Node release first, then install SWF through its published package or checkout. Run:
 
@@ -77,7 +132,7 @@ From an initialized project, routine inspection and decisions use the change nam
 
 The dashboard connects only to the loopback endpoint and credential published in the private service metadata. Adapter versions and capability limitations are in [harness-adapters.md](./harness-adapters.md). Security, autonomous-policy implications, pruning, budgets, reconciliation, migration, export/import, and crash recovery are covered in [operations.md](./operations.md).
 
-# Installation and first-run configuration
+## First-run configuration
 
 After `swf init --trust`, inspect the generated `.swf/models.yaml` and bind the three policy tiers to models installed in the selected harness. SWF intentionally leaves those values unset because model identifiers and credentials are provider- and operator-specific.
 

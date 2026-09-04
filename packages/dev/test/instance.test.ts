@@ -54,6 +54,10 @@ describe("development instance metadata", () => {
     });
     const paths = instancePaths(root, "alpha");
     expect(instance.endpoint).toBe(`http://127.0.0.1:${instance.port}`);
+    expect(instance.dashboardEndpoint).toBe(
+      `http://127.0.0.1:${instance.dashboardPort}`,
+    );
+    expect(instance.dashboardPort).not.toBe(instance.port);
     for (const directory of [
       paths.serviceHome,
       paths.logsDirectory,
@@ -159,6 +163,8 @@ describe("endpoint isolation", () => {
       sourceCommit: "1".repeat(40),
     });
     expect(first.port).not.toBe(second.port);
+    expect(first.dashboardPort).not.toBe(first.port);
+    expect(second.dashboardPort).not.toBe(second.port);
     expect(first.serviceHome).not.toBe(second.serviceHome);
     expect(first.logsDirectory).not.toBe(second.logsDirectory);
     expect((await listInstances(root)).map(({ name }) => name)).toEqual([

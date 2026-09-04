@@ -6,7 +6,9 @@ import { pathToFileURL } from "node:url";
 import {
   assertPreviewArtifact,
   createGitFixture,
+  createFastDevelopmentPlan,
   createInstance,
+  ensureFastDashboardEndpoint,
   fixtureCapabilitySummary,
   fixtureEnvironment,
   inspectPreviewCommand,
@@ -94,6 +96,9 @@ function describeInstance(instance: DevelopmentInstance): string {
   return [
     `instance   ${instance.name} (${instance.mode})`,
     `endpoint   ${instance.endpoint}`,
+    ...(instance.dashboardEndpoint
+      ? [`dashboard  ${instance.dashboardEndpoint}`]
+      : []),
     `home       ${instance.serviceHome}`,
     `logs       ${instance.logsDirectory}`,
     `commit     ${instance.sourceCommit.slice(0, 12)}`,
@@ -102,7 +107,9 @@ function describeInstance(instance: DevelopmentInstance): string {
 }
 
 async function start(name: string): Promise<void> {
-  const instance = await ensureInstance(name);
+  const instance = await ensureFastDashboardEndpoint(
+    await ensureInstance(name),
+  );
   const existing = await instanceStatus(repositoryRoot, name);
   if (existing.health === "running") {
     process.stdout.write(
@@ -110,24 +117,23 @@ async function start(name: string): Promise<void> {
     );
     return;
   }
+  const plan = createFastDevelopmentPlan(instance);
   const { instance: started, logPath } = await startInstance(
     repositoryRoot,
     name,
     {
-      command: "pnpm",
+      command: join(repositoryRoot, "node_modules", ".bin", "tsx"),
       args: [
-        "--filter",
-        "@swf/service",
-        "dev",
-        "--host=127.0.0.1",
-        `--port=${instance.port}`,
+        join(repositoryRoot, "scripts", "swf-fast-dev.ts"),
+        "--instance",
+        name,
       ],
       cwd: repositoryRoot,
     },
   );
   process.stdout.write(`${describeInstance(started)}\nlog        ${logPath}\n`);
   process.stdout.write(
-    `\nPoint a checkout CLI at it with:\n  SWF_SERVICE_HOME=${started.serviceHome} pnpm swf <command>\n`,
+    `\nPoint the checkout CLI at it with:\n  SWF_SERVICE_HOME=${started.serviceHome} NODE_OPTIONS=${plan.cli.environment.NODE_OPTIONS} pnpm swf <command>\n`,
   );
 }
 

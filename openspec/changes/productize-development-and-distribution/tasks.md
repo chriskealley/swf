@@ -19,7 +19,7 @@
 
 ## 3. Product Package and Pi Extension Layout
 
-- [ ] 3.1 Reserve the resolved package names `@chriskealley/swf` and `@chriskealley/swf-pi` and configure public access for scoped publication
+- [x] 3.1 Reserve the resolved package names `@chriskealley/swf` and `@chriskealley/swf-pi` and configure public access for scoped publication
 - [x] 3.2 Add the repository `LICENSE` (MIT) and declare a matching licence identifier in every published manifest
 - [x] 3.3 Verify that no published manifest declares a `workspace:` dependency, an unpublished internal package, or a build-only tool such as `tsx` or `nitropack` as a runtime dependency
 - [x] 3.4 Create release package manifests with versions, engines, bin, files, license, repository, dependencies, publish configuration, and provenance metadata
@@ -36,7 +36,7 @@
 - [x] 4.2 Add a checkout-local CLI command or executable that requires no global link or shell function and preserves target project cwd semantics
 - [x] 4.3 Allocate isolated loopback endpoints and create private `.swf-dev/<instance>/` homes without reading or modifying installed SWF state
 - [x] 4.4 Add development instance start, list, status, logs, stop, restart, and confirmed cleanup commands
-- [ ] 4.5 Implement fast source development with source maps and safe service/dashboard watch behavior
+- [x] 4.5 Implement fast source development with source maps and safe service/dashboard watch behavior
 - [x] 4.6 Detect unsafe HMR ownership replacement and perform or recommend a controlled isolated-service restart
 - [x] 4.7 Support multiple concurrent named development instances without shared credentials, registries, ports, or logs
 - [x] 4.8 Add tests proving installed stable service and user metadata remain untouched by development instances
@@ -103,25 +103,25 @@
 
 ## 11. Release Automation and Supply Chain
 
-- [ ] 11.1 Define SemVer stable and next channel policies including pre-1.0 `0.x` semantics, tag formats, registry tags, and release authorization rules
-- [ ] 11.2 Require an explicit prerelease registry tag for every `next` publication so a prerelease never becomes the default install
-- [ ] 11.3 Order publication before Git tagging so a failed publish never leaves a tag referencing an unpublished version
-- [ ] 11.4 Add protected CI workflows for clean build, checks, unit, integration, E2E, package inspection, clean-install smoke, security validation, and OpenSpec validation
-- [ ] 11.5 Generate npm provenance, GitHub checksums, product archives, SBOM, dependency/license inventory, compatibility metadata, and release evidence
-- [ ] 11.6 Record the resolved dependency closure in release evidence and document that it is outside verified artifact identity
-- [ ] 11.7 Ensure untrusted pull-request jobs cannot access publication credentials or mutate release destinations
-- [ ] 11.8 Promote the exact previously verified artifact checksums without rebuilding in publication jobs
-- [ ] 11.9 Publish product and Pi extension packages coherently to stable or next registry tags
-- [ ] 11.10 Create immutable Git tags and GitHub stable or prerelease entries with verified archives, notes, checksums, SBOM, and migration guidance
-- [ ] 11.11 Add release rollback and partial-publication procedures that never overwrite immutable published versions
+- [x] 11.1 Define SemVer stable and next channel policies including pre-1.0 `0.x` semantics, tag formats, registry tags, and release authorization rules
+- [x] 11.2 Require an explicit prerelease registry tag for every `next` publication so a prerelease never becomes the default install
+- [x] 11.3 Order publication before Git tagging so a failed publish never leaves a tag referencing an unpublished version
+- [x] 11.4 Add protected CI workflows for clean build, checks, unit, integration, E2E, package inspection, clean-install smoke, security validation, and OpenSpec validation
+- [x] 11.5 Generate npm provenance, GitHub checksums, product archives, SBOM, dependency/license inventory, compatibility metadata, and release evidence
+- [x] 11.6 Record the resolved dependency closure in release evidence and document that it is outside verified artifact identity
+- [x] 11.7 Ensure untrusted pull-request jobs cannot access publication credentials or mutate release destinations
+- [x] 11.8 Promote the exact previously verified artifact checksums without rebuilding in publication jobs
+- [x] 11.9 Publish product and Pi extension packages coherently to stable or next registry tags
+- [x] 11.10 Create immutable Git tags and GitHub stable or prerelease entries with verified archives, notes, checksums, SBOM, and migration guidance
+- [x] 11.11 Add release rollback and partial-publication procedures that never overwrite immutable published versions
 
 ## 12. Documentation and Release Acceptance
 
-- [ ] 12.1 Replace source shell-function instructions with checkout-local development and preview workflows
-- [ ] 12.2 Document npm, pnpm, and GitHub archive installation with explicit prerequisite and setup boundaries
-- [ ] 12.3 Document fast development, isolated instances, fixtures, preview, package verification, release channels, service logs, and managed services
-- [ ] 12.4 Document version compatibility, service restart, migration, downgrade, uninstall, state preservation, and destructive cleanup
-- [ ] 12.5 Document package contents, supply-chain verification, checksums, provenance, SBOM, and release evidence
-- [ ] 12.6 Clearly label Homebrew, APT, RPM, containers, native Windows services, and curl installers unsupported until separately specified
-- [ ] 12.7 Run formatting, lint, type checking, unit, integration, E2E, package smoke, OpenSpec validation, and Git whitespace verification
+- [x] 12.1 Replace source shell-function instructions with checkout-local development and preview workflows
+- [x] 12.2 Document npm, pnpm, and GitHub archive installation with explicit prerequisite and setup boundaries
+- [x] 12.3 Document fast development, isolated instances, fixtures, preview, package verification, release channels, service logs, and managed services
+- [x] 12.4 Document version compatibility, service restart, migration, downgrade, uninstall, state preservation, and destructive cleanup
+- [x] 12.5 Document package contents, supply-chain verification, checksums, provenance, SBOM, and release evidence
+- [x] 12.6 Clearly label Homebrew, APT, RPM, containers, native Windows services, and curl installers unsupported until separately specified
+- [x] 12.7 Run formatting, lint, type checking, unit, integration, E2E, package smoke, OpenSpec validation, and Git whitespace verification
 - [ ] 12.8 Perform a release-candidate rehearsal that publishes nowhere, installs the exact artifacts through npm/pnpm-style paths on a machine without the source checkout, and retains complete verification evidence

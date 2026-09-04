@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { ReleasePreflightSchema, type DocumentValue } from "./schemas.js";
+import {
+  assertSafeGitBranchName,
+  assertSafeGitRemoteName,
+} from "./security.js";
 import type { CommandRunner, GitClient } from "./git.js";
 
 export type ReleasePreflight = DocumentValue<"releasePreflight">;
@@ -23,11 +27,14 @@ export interface ReleasePreflightInput {
 export async function releasePreflight(
   input: ReleasePreflightInput,
 ): Promise<ReleasePreflight> {
+  const sourceBranch = assertSafeGitBranchName(input.sourceBranch);
+  const targetBranch = assertSafeGitBranchName(input.targetBranch);
+  const remote = assertSafeGitRemoteName(input.remote);
   const checks: ReleasePreflight["checks"] = [];
   const sourceStatus = await input.git.status();
   checks.push({
     id: "source-branch",
-    status: sourceStatus.branch === input.sourceBranch ? "passed" : "failed",
+    status: sourceStatus.branch === sourceBranch ? "passed" : "failed",
     detail: `source branch is ${sourceStatus.branch}`,
   });
   checks.push({
@@ -47,7 +54,7 @@ export async function releasePreflight(
   if (input.refreshTarget) {
     const fetched = await input.runner.run(
       "git",
-      ["fetch", "--prune", input.remote],
+      ["fetch", "--prune", "--", remote],
       { cwd: input.git.cwd },
     );
     checks.push({
@@ -55,7 +62,7 @@ export async function releasePreflight(
       status: fetched.code === 0 ? "passed" : "failed",
       detail:
         fetched.code === 0
-          ? `refreshed ${input.remote}`
+          ? `refreshed ${remote}`
           : fetched.stderr.trim() || "target refresh failed",
     });
   } else
@@ -64,11 +71,9 @@ export async function releasePreflight(
       status: "passed",
       detail: "target refresh was not requested",
     });
-  const target = await input.runner.run(
-    "git",
-    ["rev-parse", input.targetBranch],
-    { cwd: input.git.cwd },
-  );
+  const target = await input.runner.run("git", ["rev-parse", targetBranch], {
+    cwd: input.git.cwd,
+  });
   const targetCommit =
     target.code === 0 ? target.stdout.trim() : "unresolved-target";
   checks.push({
@@ -76,7 +81,7 @@ export async function releasePreflight(
     status: target.code === 0 ? "passed" : "failed",
     detail:
       target.code === 0
-        ? `${input.targetBranch} is ${targetCommit}`
+        ? `${targetBranch} is ${targetCommit}`
         : target.stderr.trim() || "target branch is unavailable",
   });
   if (input.expectedTargetCommit)
@@ -87,7 +92,7 @@ export async function releasePreflight(
     });
   const mergeCheck = await input.runner.run(
     "git",
-    ["merge-tree", input.targetBranch, input.sourceBranch],
+    ["merge-tree", targetBranch, sourceBranch],
     { cwd: input.git.cwd },
   );
   checks.push({
@@ -102,7 +107,7 @@ export async function releasePreflight(
   });
   const remoteCheck = await input.runner.run(
     "git",
-    ["remote", "get-url", input.remote],
+    ["remote", "get-url", "--", remote],
     { cwd: input.git.cwd },
   );
   checks.push({
@@ -110,7 +115,7 @@ export async function releasePreflight(
     status: remoteCheck.code === 0 ? "passed" : "failed",
     detail:
       remoteCheck.code === 0
-        ? `${input.remote} is configured`
+        ? `${remote} is configured`
         : remoteCheck.stderr.trim() || "remote is unavailable",
   });
   for (const policy of input.policyChecks ?? [])
@@ -122,11 +127,11 @@ export async function releasePreflight(
   return ReleasePreflightSchema.parse({
     schemaVersion: 1,
     runId: input.runId,
-    sourceBranch: input.sourceBranch,
-    targetBranch: input.targetBranch,
+    sourceBranch,
+    targetBranch,
     sourceCommit: sourceStatus.head,
     targetCommit,
-    remote: input.remote,
+    remote,
     mergeMethod: input.mergeMethod,
     checks,
     valid: checks.every(({ status }) => status === "passed"),

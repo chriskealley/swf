@@ -282,7 +282,7 @@ class FakeHostingAdapter implements HostingAdapter {
   }
 }
 
-class ArchiveCommandRunner extends NodeCommandRunner {
+class RecordingOpenSpecCommandRunner extends NodeCommandRunner {
   readonly archiveCalls: string[][] = [];
   override async run(
     command: string,
@@ -451,7 +451,7 @@ describe("user-scoped SWF service", () => {
   it("creates a durable run and executes Planning through the service-owned scheduler", async () => {
     const home = await temporaryDirectory("swf-service-entry-");
     const projectRoot = await temporaryDirectory("swf-service-entry-project-");
-    const runner = new NodeCommandRunner();
+    const runner = new RecordingOpenSpecCommandRunner();
     const git = async (args: string[]) => {
       const result = await runner.run("git", args, { cwd: projectRoot });
       if (result.code !== 0) throw new Error(result.stderr);
@@ -1236,7 +1236,7 @@ describe("user-scoped SWF service", () => {
 
   it("archives only after successful delivery and explicit opt-in", async () => {
     const adapter = new FakeHostingAdapter();
-    const runner = new ArchiveCommandRunner();
+    const runner = new RecordingOpenSpecCommandRunner();
     const { service } = await setupDelivery(
       adapter,
       "escalate",

@@ -75,8 +75,8 @@ export async function readLocalServiceMetadata(
       !metadata.credential
     )
       throw new Error("Invalid service metadata");
-    assertLoopbackHttpEndpoint(metadata.endpoint);
-    return metadata;
+    const endpoint = assertLoopbackHttpEndpoint(metadata.endpoint).origin;
+    return { ...metadata, endpoint };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       throw new ServiceUnavailableError();
@@ -139,6 +139,10 @@ export class SwfServiceClient {
     if (input.phaseId) query.set("phaseId", input.phaseId);
     if (input.ref) query.set("ref", input.ref);
     return this.request<T>(`/api/v1/query?${query}`);
+  }
+
+  async health<T>(init: RequestInit = {}): Promise<T> {
+    return this.request<T>("/api/health", init);
   }
 
   async registerProject(input: {

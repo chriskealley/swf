@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { actionCommandType } from "@swf/core";
+import { SwfServiceClient, actionCommandType } from "@swf/core";
 import type { OperatorAction, OperatorProjection } from "@swf/core";
 
 interface RunSummary {
@@ -18,14 +17,6 @@ interface RunSummary {
   costs?: { exactUsd?: number; estimatedUsd?: number; unknown?: number };
 }
 
-interface SwfServiceClient {
-  query<T>(
-    resource: string,
-    input?: { projectId?: string; runId?: string },
-  ): Promise<T>;
-  command(command: Record<string, unknown>): Promise<unknown>;
-}
-
 async function withClient<T>(
   operation: (client: SwfServiceClient) => Promise<T>,
 ): Promise<T> {
@@ -33,47 +24,7 @@ async function withClient<T>(
     process.env.SWF_SERVICE_HOME ??
     process.env.SWF_CONFIG_HOME ??
     join(process.env.HOME ?? process.cwd(), ".config", "swf");
-  const metadata = JSON.parse(
-    await readFile(join(home, "service.json"), "utf8"),
-  ) as { endpoint: string; credential: string };
-  const request = async <R>(
-    path: string,
-    init: RequestInit = {},
-  ): Promise<R> => {
-    const response = await fetch(`${metadata.endpoint}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${metadata.credential}`,
-        ...(init.headers ?? {}),
-      },
-    });
-    const body = (await response.json()) as {
-      result?: R;
-      statusMessage?: string;
-    };
-    if (!response.ok)
-      throw new Error(
-        body.statusMessage ?? `SWF service returned HTTP ${response.status}`,
-      );
-    return body.result as R;
-  };
-  return operation({
-    query: <R>(
-      resource: string,
-      input: { projectId?: string; runId?: string } = {},
-    ) => {
-      const query = new URLSearchParams({ resource });
-      if (input.projectId) query.set("projectId", input.projectId);
-      if (input.runId) query.set("runId", input.runId);
-      return request<R>(`/api/v1/query?${query}`);
-    },
-    command: (command) =>
-      request<unknown>("/api/v1/commands", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(command),
-      }),
-  });
+  return operation(await SwfServiceClient.connect(home));
 }
 
 const enumSchema = (values: string[]) => ({ type: "string", enum: values });

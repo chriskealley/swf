@@ -9,6 +9,8 @@ import {
   type PullRequestObservation,
   type PullRequestReference,
   type PullRequestRequest,
+  assertSafeGitBranchName,
+  assertSafeGitRemoteName,
 } from "@swf/core";
 
 interface RepositoryView {
@@ -113,32 +115,49 @@ export class GitHubAdapter implements HostingAdapter {
       };
 
     const checks: HostingPreflightCheck[] = [];
-    const remote = await this.execute(
-      "git",
-      ["remote", "get-url", input.remote],
-      input.cwd,
-      true,
-    );
-    if (remote.code !== 0) {
+    let remote: string;
+    let sourceBranch: string;
+    let targetBranch: string;
+    try {
+      remote = assertSafeGitRemoteName(input.remote);
+      sourceBranch = assertSafeGitBranchName(input.sourceBranch);
+      targetBranch = assertSafeGitBranchName(input.targetBranch);
+    } catch (error) {
       checks.push({
         id: "remote",
         status: "failed",
-        detail: `Git remote ${input.remote} is not configured`,
-        remediation: `Configure ${input.remote} or explicitly select local-branch delivery`,
+        detail:
+          error instanceof Error ? error.message : "Invalid Git identifier",
+        remediation: "Use valid, non-option Git remote and branch names",
+      });
+      return { valid: false, skipped: false, checks };
+    }
+    const remoteResult = await this.execute(
+      "git",
+      ["remote", "get-url", "--", remote],
+      input.cwd,
+      true,
+    );
+    if (remoteResult.code !== 0) {
+      checks.push({
+        id: "remote",
+        status: "failed",
+        detail: `Git remote ${remote} is not configured`,
+        remediation: `Configure ${remote} or explicitly select local-branch delivery`,
       });
       return { valid: false, skipped: false, checks };
     }
     checks.push({
       id: "remote",
       status: "passed",
-      detail: `${input.remote}: ${remote.stdout.trim()}`,
+      detail: `${remote}: ${remoteResult.stdout.trim()}`,
     });
-    const repository = githubRepositoryFromRemote(remote.stdout);
+    const repository = githubRepositoryFromRemote(remoteResult.stdout);
     if (!repository) {
       checks.push({
         id: "repository",
         status: "failed",
-        detail: `Remote ${input.remote} is not a GitHub repository`,
+        detail: `Remote ${remote} is not a GitHub repository`,
         remediation:
           "Configure a github.com remote or explicitly select local-branch delivery",
       });
@@ -169,8 +188,9 @@ export class GitHubAdapter implements HostingAdapter {
         "ls-remote",
         "--exit-code",
         "--heads",
-        input.remote,
-        `refs/heads/${input.targetBranch}`,
+        "--",
+        remote,
+        `refs/heads/${targetBranch}`,
       ],
       input.cwd,
       true,
@@ -180,12 +200,12 @@ export class GitHubAdapter implements HostingAdapter {
         ? {
             id: "target-branch",
             status: "passed",
-            detail: `${input.remote}/${input.targetBranch} exists`,
+            detail: `${remote}/${targetBranch} exists`,
           }
         : {
             id: "target-branch",
             status: "failed",
-            detail: `Target branch ${input.targetBranch} cannot be resolved on ${input.remote}`,
+            detail: `Target branch ${targetBranch} cannot be resolved on ${remote}`,
             remediation: "Correct the configured target branch",
           },
     );
@@ -244,7 +264,7 @@ export class GitHubAdapter implements HostingAdapter {
 
     const source = await this.execute(
       "git",
-      ["rev-parse", "--verify", input.sourceBranch],
+      ["rev-parse", "--verify", sourceBranch],
       input.cwd,
       true,
     );
@@ -253,8 +273,9 @@ export class GitHubAdapter implements HostingAdapter {
       [
         "push",
         "--dry-run",
-        input.remote,
-        `${source.code === 0 ? input.sourceBranch : "HEAD"}:refs/heads/${input.sourceBranch}`,
+        "--",
+        remote,
+        `${source.code === 0 ? sourceBranch : "HEAD"}:refs/heads/${sourceBranch}`,
       ],
       input.cwd,
       true,
@@ -264,7 +285,7 @@ export class GitHubAdapter implements HostingAdapter {
         ? {
             id: "push",
             status: "passed",
-            detail: `Can push ${input.sourceBranch} to ${input.remote}`,
+            detail: `Can push ${sourceBranch} to ${remote}`,
           }
         : {
             id: "push",
@@ -354,12 +375,16 @@ export class GitHubAdapter implements HostingAdapter {
   async createOrUpdatePullRequest(
     input: PullRequestRequest,
   ): Promise<PullRequestReference> {
+    const remote = assertSafeGitRemoteName(input.remote);
+    const sourceBranch = assertSafeGitBranchName(input.sourceBranch);
+    const targetBranch = assertSafeGitBranchName(input.targetBranch);
     await this.execute(
       "git",
-      ["push", "--set-upstream", input.remote, input.sourceBranch],
+      ["push", "--set-upstream", "--", remote, sourceBranch],
       input.cwd,
     );
-    const existing = await this.findPullRequest(input);
+    const request = { ...input, remote, sourceBranch, targetBranch };
+    const existing = await this.findPullRequest(request);
     if (existing) {
       await this.execute(
         "gh",
@@ -379,8 +404,8 @@ export class GitHubAdapter implements HostingAdapter {
       return {
         number: existing.number,
         url: existing.url,
-        sourceBranch: input.sourceBranch,
-        targetBranch: input.targetBranch,
+        sourceBranch,
+        targetBranch,
         created: false,
       };
     }
@@ -392,9 +417,9 @@ export class GitHubAdapter implements HostingAdapter {
         "--repo",
         input.repository,
         "--head",
-        input.sourceBranch,
+        sourceBranch,
         "--base",
-        input.targetBranch,
+        targetBranch,
         "--title",
         input.title,
         "--body",
@@ -404,18 +429,18 @@ export class GitHubAdapter implements HostingAdapter {
       true,
     );
     if (created.code !== 0) {
-      const raced = await this.findPullRequest(input);
+      const raced = await this.findPullRequest(request);
       if (!raced)
         throw new GitHubCommandError("gh", ["pr", "create"], created.stderr);
       return {
         number: raced.number,
         url: raced.url,
-        sourceBranch: input.sourceBranch,
-        targetBranch: input.targetBranch,
+        sourceBranch,
+        targetBranch,
         created: false,
       };
     }
-    const pullRequest = await this.findPullRequest(input);
+    const pullRequest = await this.findPullRequest(request);
     if (!pullRequest)
       throw new Error(
         "GitHub created the pull request but it could not be queried",
@@ -423,8 +448,8 @@ export class GitHubAdapter implements HostingAdapter {
     return {
       number: pullRequest.number,
       url: pullRequest.url || created.stdout.trim(),
-      sourceBranch: input.sourceBranch,
-      targetBranch: input.targetBranch,
+      sourceBranch,
+      targetBranch,
       created: true,
     };
   }

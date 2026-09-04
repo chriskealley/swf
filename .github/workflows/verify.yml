@@ -1,0 +1,71 @@
+name: Verify
+
+# Runs for every push and pull request, including forks.
+#
+# This workflow deliberately has NO access to publication credentials. Its
+# permissions are read-only and no secret is referenced, so an untrusted
+# pull request cannot reach a release destination even if it changes this file.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format, lint, and type check
+        run: pnpm check
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: Integration tests
+        run: pnpm test:integration
+
+      - name: Build the product artifact
+        run: pnpm build:product
+
+      - name: Inspect package contents
+        run: pnpm verify:product
+
+      - name: End-to-end tests
+        run: pnpm test:e2e
+
+      - name: Verify the exact packed artifact and clean install
+        run: pnpm verify:release
+
+      - name: Validate OpenSpec changes
+        run: pnpm exec openspec validate --specs --strict
+
+      - name: Confirm no publication credential is reachable
+        run: pnpm verify:release-guard
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: dist/release/
+          if-no-files-found: ignore

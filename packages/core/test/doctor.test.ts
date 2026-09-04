@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runDoctor, type CommandResult } from "../src/doctor.js";
 
@@ -54,28 +57,36 @@ describe("runDoctor", () => {
   });
 
   it("fails a selected harness whose version changed below compatibility", async () => {
-    const checks = await runDoctor({
-      cwd: process.cwd(),
-      environment: { PATH: process.env.PATH },
-      selectedHarnesses: ["codex"],
-      execute: (command, args) => {
-        if (args[0] === "--version")
-          return success(
-            command === "codex" ? "codex 0.1.0" : `${command} 99.0.0`,
-          );
-        if (command === "git" && args[0] === "rev-parse")
-          return success("true\n");
-        if (command === "git" && args[0] === "remote")
-          return success("https://github.com/example/swf.git\n");
-        if (command === "gh") return success("Logged in\n");
-        if (command === "herdr")
-          return success("pi: installed\ncodex: installed\n");
-        return success("");
-      },
-    });
-    expect(checks.find((check) => check.id === "tool.codex")).toMatchObject({
-      status: "fail",
-    });
+    const tools = await mkdtemp(join(tmpdir(), "swf-doctor-tools-"));
+    await writeFile(join(tools, "codex"), "");
+    try {
+      const checks = await runDoctor({
+        cwd: process.cwd(),
+        environment: {
+          PATH: `${tools}${delimiter}${process.env.PATH ?? ""}`,
+        },
+        selectedHarnesses: ["codex"],
+        execute: (command, args) => {
+          if (args[0] === "--version")
+            return success(
+              command === "codex" ? "codex 0.1.0" : `${command} 99.0.0`,
+            );
+          if (command === "git" && args[0] === "rev-parse")
+            return success("true\n");
+          if (command === "git" && args[0] === "remote")
+            return success("https://github.com/example/swf.git\n");
+          if (command === "gh") return success("Logged in\n");
+          if (command === "herdr")
+            return success("pi: installed\ncodex: installed\n");
+          return success("");
+        },
+      });
+      expect(checks.find((check) => check.id === "tool.codex")).toMatchObject({
+        status: "fail",
+      });
+    } finally {
+      await rm(tools, { recursive: true, force: true });
+    }
   });
 
   it("reports unauthenticated GitHub and missing Herdr integration", async () => {

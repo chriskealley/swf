@@ -129,3 +129,37 @@ export function assertLoopbackHttpEndpoint(endpoint: string): URL {
     throw new Error("SWF service endpoint must use loopback HTTP");
   return url;
 }
+
+/** Reject values that Git could interpret as options or invalid remote names. */
+export function assertSafeGitRemoteName(remote: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(remote))
+    throw new Error(`Invalid Git remote name: ${remote}`);
+  return remote;
+}
+
+/**
+ * Enforces the relevant `git check-ref-format --branch` constraints without
+ * starting a subprocess. In particular, a branch can never begin with `-`.
+ */
+export function assertSafeGitBranchName(branch: string): string {
+  const components = branch.split("/");
+  const hasProhibitedCharacter = [...branch].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 32 || code === 127 || "~^:?*\\".includes(character);
+  });
+  if (
+    !branch ||
+    branch.startsWith("-") ||
+    branch.endsWith(".") ||
+    branch.endsWith("/") ||
+    branch.includes("..") ||
+    branch.includes("@{") ||
+    hasProhibitedCharacter ||
+    components.some(
+      (component) =>
+        !component || component.startsWith(".") || component.endsWith(".lock"),
+    )
+  )
+    throw new Error(`Invalid Git branch name: ${branch}`);
+  return branch;
+}

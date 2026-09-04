@@ -18,6 +18,8 @@ import {
   StateMigrationManager,
   assertBudgetsAvailable,
   assertLoopbackHttpEndpoint,
+  assertSafeGitBranchName,
+  assertSafeGitRemoteName,
   evaluateBudgets,
   exportRun,
   importRun,
@@ -89,6 +91,14 @@ describe("security and retention", () => {
     expect(() => assertLoopbackHttpEndpoint("http://0.0.0.0:3000")).toThrow(
       "loopback",
     );
+    expect(assertSafeGitRemoteName("origin")).toBe("origin");
+    expect(assertSafeGitBranchName("release/0.1.0-prep")).toBe(
+      "release/0.1.0-prep",
+    );
+    expect(() => assertSafeGitRemoteName("--upload-pack=malware")).toThrow(
+      "remote",
+    );
+    expect(() => assertSafeGitBranchName("--help")).toThrow("branch");
   });
 
   it("redacts events and artifacts before persistence and marks pruned references", async () => {
