@@ -1580,7 +1580,9 @@ const dashboard = defineCommand({
         try {
           const metadata = await readLocalServiceMetadata();
           const url = `${metadata.endpoint.replace(/\/$/, "")}/dashboard/`;
-          const compatibility = await dashboardCompatibility(metadata.endpoint);
+          const compatibility = await dashboardCompatibility(
+            new SwfServiceClient(metadata),
+          );
           if (args.json) return output({ url, compatibility }, true);
           consola.log(url);
           if (compatibility?.length)
@@ -1599,14 +1601,12 @@ const dashboard = defineCommand({
  * it, so an incompatible pair is reported rather than silently misbehaving.
  */
 async function dashboardCompatibility(
-  endpoint: string,
+  service: SwfServiceClient,
 ): Promise<string[] | undefined> {
   try {
-    const response = await fetch(`${endpoint.replace(/\/$/, "")}/api/health`);
-    if (!response.ok) return undefined;
-    const health = (await response.json()) as {
+    const health = await service.health<{
       compatibility?: Parameters<typeof evaluateCompatibility>[0];
-    };
+    }>();
     if (!health.compatibility) return undefined;
     const report = evaluateCompatibility(health.compatibility, {
       clientVersion: productMetadata.build.productVersion,
@@ -1665,17 +1665,13 @@ const upgrade = defineCommand({
       const running = await (async () => {
         try {
           const metadata = await readLocalServiceMetadata();
-          const response = await fetch(`${metadata.endpoint}/api/health`, {
-            signal: AbortSignal.timeout(3_000),
-          });
-          if (!response.ok) return undefined;
-          const health = (await response.json()) as {
+          const health = await new SwfServiceClient(metadata).health<{
             product?: { productVersion?: string; sourceCommit?: string };
             compatibility?: {
               apiProtocolVersion?: number;
               stateSchemaVersion?: number;
             };
-          };
+          }>({ signal: AbortSignal.timeout(3_000) });
           return {
             productVersion: health.product?.productVersion,
             sourceCommit: health.product?.sourceCommit,

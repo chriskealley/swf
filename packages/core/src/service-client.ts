@@ -141,6 +141,10 @@ export class SwfServiceClient {
     return this.request<T>(`/api/v1/query?${query}`);
   }
 
+  async health<T>(init: RequestInit = {}): Promise<T> {
+    return this.request<T>("/api/health", init);
+  }
+
   async registerProject(input: {
     projectId: string;
     displayName: string;

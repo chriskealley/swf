@@ -46,10 +46,15 @@ describe("SWF service client", () => {
     await expect(
       client.query("run", { projectId: "p", runId: "r" }),
     ).resolves.toEqual({ ok: true });
+    await expect(client.health()).resolves.toEqual({ ok: true });
     await client.command({ type: "pause", projectId: "p", runId: "r" });
     expect(calls).toMatchObject([
       {
         url: "http://127.0.0.1:34671/api/v1/query?resource=run&projectId=p&runId=r",
+        init: { headers: { authorization: "Bearer secret" } },
+      },
+      {
+        url: "http://127.0.0.1:34671/api/health",
         init: { headers: { authorization: "Bearer secret" } },
       },
       {
