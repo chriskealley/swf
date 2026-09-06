@@ -67,7 +67,7 @@ export function instancePaths(
  * interfaces means a reported port is only claimed to be free on loopback,
  * which is the only interface a development instance listens on.
  */
-export async function allocateLoopbackPort(): Promise<number> {
+async function requestLoopbackPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.unref();
@@ -80,17 +80,22 @@ export async function allocateLoopbackPort(): Promise<number> {
         return;
       }
       const { port } = address;
-      server.close(() =>
-        port === INSTALLED_SERVICE_PORT
-          ? reject(
-              new Error(
-                `Allocated the installed service port ${INSTALLED_SERVICE_PORT}`,
-              ),
-            )
-          : resolve(port),
-      );
+      server.close(() => resolve(port));
     });
   });
+}
+
+/**
+ * Retries when the OS selects the installed service's reserved port. The
+ * reserved value can fall inside a runner's ephemeral range, so receiving it
+ * is expected contention rather than an allocation failure.
+ */
+export async function allocateLoopbackPort(
+  requestPort: () => Promise<number> = requestLoopbackPort,
+): Promise<number> {
+  let port = await requestPort();
+  while (port === INSTALLED_SERVICE_PORT) port = await requestPort();
+  return port;
 }
 
 export interface CreateInstanceInput {

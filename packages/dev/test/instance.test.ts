@@ -136,6 +136,18 @@ describe("endpoint isolation", () => {
     expect(port).not.toBe(INSTALLED_SERVICE_PORT);
   });
 
+  it("retries when the OS allocates the installed service port", async () => {
+    const requested = [INSTALLED_SERVICE_PORT, 41_234];
+    const port = await allocateLoopbackPort(async () => {
+      const candidate = requested.shift();
+      if (candidate === undefined) throw new Error("no candidate port");
+      return candidate;
+    });
+
+    expect(port).toBe(41_234);
+    expect(requested).toEqual([]);
+  });
+
   it("refuses an explicit installed service port", async () => {
     await expect(
       createInstance({
