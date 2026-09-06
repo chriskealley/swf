@@ -9,7 +9,7 @@ import {
   stat,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { allocateLoopbackPort } from "./instance.js";
 import {
   createGitFixture,
@@ -20,6 +20,7 @@ import {
 export interface SmokeEnvironment {
   root: string;
   prefix: string;
+  globalModulesDirectory: string;
   home: string;
   serviceHome: string;
   cacheDirectory: string;
@@ -95,7 +96,10 @@ export async function runIsolated(
  */
 export async function installTarball(
   tarballPath: string,
-  options: { packageManager?: string } = {},
+  options: {
+    packageManager?: "npm" | "pnpm";
+    additionalTarballs?: string[];
+  } = {},
 ): Promise<SmokeEnvironment> {
   const root = await mkdtemp(join(tmpdir(), "swf-smoke-"));
   const prefix = join(root, "prefix");
@@ -107,29 +111,33 @@ export async function installTarball(
 
   const fixture = await createGitFixture({ retain: true });
   const manager = options.packageManager ?? "npm";
+  const binDirectory = join(prefix, "bin");
+  const managerEnvironment = {
+    PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
+    HOME: home,
+    npm_config_cache: cacheDirectory,
+    PNPM_HOME: prefix,
+  };
+  const tarballs = [tarballPath, ...(options.additionalTarballs ?? [])];
+  const installArguments =
+    manager === "pnpm"
+      ? ["add", "--global", ...tarballs]
+      : [
+          "install",
+          "--global",
+          "--prefix",
+          prefix,
+          "--no-audit",
+          "--no-fund",
+          ...tarballs,
+        ];
 
   const install = await new Promise<CommandResult>((resolve, reject) => {
-    const child = spawn(
-      manager,
-      [
-        "install",
-        "--global",
-        "--prefix",
-        prefix,
-        "--no-audit",
-        "--no-fund",
-        tarballPath,
-      ],
-      {
-        cwd: root,
-        env: {
-          PATH: process.env.PATH ?? "",
-          HOME: home,
-          npm_config_cache: cacheDirectory,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const child = spawn(manager === "pnpm" ? "pnpm" : "npm", installArguments, {
+      cwd: root,
+      env: managerEnvironment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
@@ -140,13 +148,58 @@ export async function installTarball(
   if (install.code !== 0)
     throw new Error(`global install failed: ${install.stderr.trim()}`);
 
+  const globalModulesDirectory =
+    manager === "npm"
+      ? join(prefix, "lib", "node_modules")
+      : await new Promise<string>((resolve, reject) => {
+          const child = spawn(
+            "pnpm",
+            ["list", "--global", "--json", "--depth=0"],
+            {
+              cwd: root,
+              env: managerEnvironment,
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          );
+          let stdout = "";
+          let stderr = "";
+          child.stdout.on(
+            "data",
+            (chunk: Buffer) => (stdout += chunk.toString()),
+          );
+          child.stderr.on(
+            "data",
+            (chunk: Buffer) => (stderr += chunk.toString()),
+          );
+          child.once("error", reject);
+          child.once("close", (code) => {
+            if (code !== 0)
+              return reject(new Error(`pnpm list failed: ${stderr.trim()}`));
+            try {
+              const [listing] = JSON.parse(stdout) as Array<{
+                dependencies?: Record<string, { path?: string }>;
+              }>;
+              const productPath =
+                listing?.dependencies?.["@chriskealley/swf"]?.path;
+              if (!productPath)
+                throw new Error(
+                  "pnpm did not report the installed product path",
+                );
+              resolve(dirname(dirname(productPath)));
+            } catch (error) {
+              reject(error);
+            }
+          });
+        });
+
   return {
     root,
     prefix,
+    globalModulesDirectory,
     home,
     serviceHome,
     cacheDirectory,
-    executable: join(prefix, "bin", "swf"),
+    executable: join(binDirectory, "swf"),
     port: await allocateLoopbackPort(),
     fixture,
   };
@@ -163,13 +216,7 @@ export async function removeSmokeEnvironment(
 export function installedPackageDirectory(
   environment: SmokeEnvironment,
 ): string {
-  return join(
-    environment.prefix,
-    "lib",
-    "node_modules",
-    "@chriskealley",
-    "swf",
-  );
+  return join(environment.globalModulesDirectory, "@chriskealley", "swf");
 }
 
 /**
