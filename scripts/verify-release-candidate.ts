@@ -251,10 +251,9 @@ async function main(): Promise<void> {
       `exit ${initialize.code}`,
     );
 
-    const extensionDirectory = join(
-      environment.globalModulesDirectory,
-      "@chriskealley",
-      "swf-pi",
+    const extensionDirectory = installedPackageDirectory(
+      environment,
+      "@chriskealley/swf-pi",
     );
     const extensionManifest = JSON.parse(
       await readFile(join(extensionDirectory, "package.json"), "utf8"),

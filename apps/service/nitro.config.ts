@@ -15,9 +15,14 @@ export default defineNitroConfig({
   srcDir: "src/server",
   compatibilityDate: "2026-04-02",
   publicAssets: [{ dir: dashboardAssets, baseURL: "/dashboard" }],
-  // Third-party dependencies are declared by the product manifest and installed
-  // beside the package, so tracing and vendoring them into the service output
-  // would ship a second duplicate copy. Node resolves the bare specifiers by
-  // walking up to the product root at runtime.
-  externals: { trace: false },
+  // The service is copied into the published product rather than installed as
+  // its own package. Inline its runtime dependencies so Nitro cannot preserve
+  // build-machine file URLs that will not exist on a consumer machine. The
+  // product manifest still declares these dependencies for the CLI bundle.
+  externals: {
+    trace: false,
+    inline: [
+      /(?:^|\/)node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(?:effect|picomatch|yaml|zod)(?:\/|$)/,
+    ],
+  },
 });
