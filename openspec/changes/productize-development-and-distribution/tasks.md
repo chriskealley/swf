@@ -124,4 +124,4 @@
 - [x] 12.5 Document package contents, supply-chain verification, checksums, provenance, SBOM, and release evidence
 - [x] 12.6 Clearly label Homebrew, APT, RPM, containers, native Windows services, and curl installers unsupported until separately specified
 - [x] 12.7 Run formatting, lint, type checking, unit, integration, E2E, package smoke, OpenSpec validation, and Git whitespace verification
-- [ ] 12.8 Perform a release-candidate rehearsal that publishes nowhere, installs the exact artifacts through npm/pnpm-style paths on a machine without the source checkout, and retains complete verification evidence
+- [x] 12.8 Perform a release-candidate rehearsal that publishes nowhere, installs the exact artifacts through npm/pnpm-style paths on a machine without the source checkout, and retains complete verification evidence ([GitHub Actions run 34020033491](https://github.com/chriskealley/swf/actions/runs/34020033491))
