@@ -18,6 +18,27 @@ Releases begin pre-1.0. Under SemVer a `0.y.z` minor increment may introduce bre
 
 Git tags are `v<version>`. Both packages — the product and the Pi extension — release together at the same version, so a user can pair them by version alone.
 
+## Release-candidate rehearsal
+
+Before the irreversible publication workflow, dispatch the non-publishing
+rehearsal from `main`:
+
+```sh
+gh workflow run release-candidate.yml --ref main -f version=0.1.0
+```
+
+The build job produces the exact product and Pi-extension tarballs and their
+normal release evidence. Separate Ubuntu and macOS jobs deliberately omit the
+source checkout, download only those candidate inputs, and install both
+packages through npm and pnpm global-style paths. Each job checks artifact
+digests, installed CLI behavior, project initialization, Pi loading, service
+health and authentication, dashboard assets, private permissions, and
+state-preserving uninstall behavior.
+
+The rehearsal has read-only repository permissions, receives no publication
+credential, creates no tag or release, and retains its candidate inputs and
+per-machine JSON evidence and logs for 30 days.
+
 ## The one irreversible step
 
 A registry version can never be reused. npm's unpublish window is narrow and the version is burned regardless, so a broken release can only be superseded, never replaced.

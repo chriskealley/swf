@@ -1,0 +1,101 @@
+name: Release candidate rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package version to rehearse without publishing
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - name: Validate rehearsal identity
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Release-candidate rehearsals must run from main" >&2
+            exit 1
+          fi
+          if [ "$VERSION" != "$(node -p "require('./package.json').version")" ]; then
+            echo "Requested version does not match package.json" >&2
+            exit 1
+          fi
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm test:e2e
+      - name: Build and verify the exact stable candidate
+        run: pnpm verify:release --channel=stable
+      - name: Bundle the checkout-independent smoke runner
+        run: >-
+          pnpm exec esbuild scripts/verify-release-candidate.ts
+          --bundle --platform=node --format=esm
+          --outfile=dist/release/verify-release-candidate.mjs
+      - name: Upload exact candidate inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-inputs
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 30
+
+  clean-install:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        package-manager: [npm, pnpm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Deliberately no actions/checkout: this runner receives artifacts only.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        if: matrix.package-manager == 'pnpm'
+        with:
+          version: 11.20.0
+          run_install: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-inputs
+          path: ${{ runner.temp }}/swf-release-candidate
+      - name: Install and smoke without a source checkout
+        working-directory: ${{ runner.temp }}/swf-release-candidate
+        shell: bash
+        run: |
+          set -o pipefail
+          node verify-release-candidate.mjs \
+            --package-manager=${{ matrix.package-manager }} \
+            2>&1 | tee release-candidate-smoke.log
+      - name: Retain machine evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ runner.os }}-${{ matrix.package-manager }}
+          path: |
+            ${{ runner.temp }}/swf-release-candidate/release-candidate-evidence.json
+            ${{ runner.temp }}/swf-release-candidate/release-candidate-smoke.log
+          if-no-files-found: error
+          retention-days: 30
