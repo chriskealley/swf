@@ -64,6 +64,23 @@ describe.skipIf(!assembled)("assembled package contents", () => {
     );
   });
 
+  it("rejects build-machine file imports", async () => {
+    const entry = join(stagingRoot, "service", "server", "index.mjs");
+    const original = await readFile(entry, "utf8");
+    await writeFile(
+      entry,
+      `${original}\nimport 'file:///build/node_modules/example/index.js';\n`,
+    );
+    try {
+      const { violations } = await verifyProduct(stagingRoot);
+      expect(violations).toContain(
+        "absolute file import: service/server/index.mjs",
+      );
+    } finally {
+      await writeFile(entry, original);
+    }
+  });
+
   it("rejects forbidden content when it appears", async () => {
     const leaked = join(stagingRoot, "service", "server", "service.json");
     await writeFile(leaked, "{}");

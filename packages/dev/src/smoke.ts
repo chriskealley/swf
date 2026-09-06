@@ -21,6 +21,7 @@ export interface SmokeEnvironment {
   root: string;
   prefix: string;
   globalModulesDirectory: string;
+  packageDirectories: Record<string, string>;
   home: string;
   serviceHome: string;
   cacheDirectory: string;
@@ -148,10 +149,15 @@ export async function installTarball(
   if (install.code !== 0)
     throw new Error(`global install failed: ${install.stderr.trim()}`);
 
-  const globalModulesDirectory =
+  const packageDirectories =
     manager === "npm"
-      ? join(prefix, "lib", "node_modules")
-      : await new Promise<string>((resolve, reject) => {
+      ? Object.fromEntries(
+          ["@chriskealley/swf", "@chriskealley/swf-pi"].map((name) => [
+            name,
+            join(prefix, "lib", "node_modules", ...name.split("/")),
+          ]),
+        )
+      : await new Promise<Record<string, string>>((resolve, reject) => {
           const child = spawn(
             "pnpm",
             ["list", "--global", "--json", "--depth=0"],
@@ -179,23 +185,32 @@ export async function installTarball(
               const [listing] = JSON.parse(stdout) as Array<{
                 dependencies?: Record<string, { path?: string }>;
               }>;
-              const productPath =
-                listing?.dependencies?.["@chriskealley/swf"]?.path;
-              if (!productPath)
+              const dependencies = listing?.dependencies ?? {};
+              const installed = Object.fromEntries(
+                Object.entries(dependencies).flatMap(([name, value]) =>
+                  value.path ? [[name, value.path]] : [],
+                ),
+              );
+              if (!installed["@chriskealley/swf"])
                 throw new Error(
                   "pnpm did not report the installed product path",
                 );
-              resolve(dirname(dirname(productPath)));
+              resolve(installed);
             } catch (error) {
               reject(error);
             }
           });
         });
+  const productDirectory = packageDirectories["@chriskealley/swf"];
+  if (!productDirectory)
+    throw new Error("installed product directory was not resolved");
+  const globalModulesDirectory = dirname(dirname(productDirectory));
 
   return {
     root,
     prefix,
     globalModulesDirectory,
+    packageDirectories,
     home,
     serviceHome,
     cacheDirectory,
@@ -215,8 +230,12 @@ export async function removeSmokeEnvironment(
 /** Resolves the installed package directory beneath the temporary prefix. */
 export function installedPackageDirectory(
   environment: SmokeEnvironment,
+  packageName = "@chriskealley/swf",
 ): string {
-  return join(environment.globalModulesDirectory, "@chriskealley", "swf");
+  const directory = environment.packageDirectories[packageName];
+  if (!directory)
+    throw new Error(`installed package not found: ${packageName}`);
+  return directory;
 }
 
 /**

@@ -219,6 +219,11 @@ export async function verifyProduct(
   for (const path of files) {
     if (forbidden(path)) violations.push(`forbidden content: ${path}`);
     else if (!allowed(path)) violations.push(`unexpected content: ${path}`);
+    if (path.endsWith(".mjs")) {
+      const contents = await readFile(join(root, path), "utf8");
+      if (/\b(?:from\s+|import\s*)["']file:/u.test(contents))
+        violations.push(`absolute file import: ${path}`);
+    }
   }
 
   const entries = await Promise.all(files.map((path) => describe(root, path)));
