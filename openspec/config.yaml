@@ -1,4 +1,14 @@
 schema: spec-driven
+context: "Roadmap coordination: read openspec/roadmap.md before proposing, applying, or archiving changes. Multiple changes may be active concurrently; lifecycle Status and active Work state are separate."
+rules:
+  proposal:
+    - Link the proposal to exactly one roadmap item and record the OpenSpec change name on that item when work becomes active.
+  tasks:
+    - Respect roadmap dependencies and blocked or paused work states; do not treat another active change as preventing concurrent work.
+operations:
+  archive:
+    guidance:
+      - After a successful archive, mark the linked roadmap item done and clear its active Work state; do not change unrelated roadmap items.
 
 # Project context (optional)
 # This is shown to AI when creating artifacts.

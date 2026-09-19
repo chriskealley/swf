@@ -4,6 +4,7 @@ node_modules/
 **/dist/
 .openspec/
 openspec/
+.agents/
 .claude/
 .codex/
 .github/
