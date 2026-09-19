@@ -133,6 +133,35 @@ the product publishes and the extension is then rejected, the two packages are
 out of step; recover with the partial-publication path under
 [If publication fails part way](#if-publication-fails-part-way) rather than retrying the published version.
 
+### Release environment configuration
+
+The npm trusted publisher accepts a run because it came from the `release`
+environment, so what that environment admits is part of the publication trust
+boundary. Its settings live in GitHub, not in this repository: nothing here
+creates them, and `pnpm verify:release-guard` cannot see them.
+
+Under **Settings -> Environments -> release**:
+
+| Setting             | Value                                   |
+| ------------------- | --------------------------------------- |
+| Deployment branches | Selected branches and tags, `main` only |
+| Required reviewers  | `chriskealley`                          |
+
+Name `main` explicitly rather than choosing "Protected branches only". That
+option matches a category, so protecting any further branch later would grant
+it entry to the release environment — and with it the trusted publisher —
+without anyone changing an environment setting. Naming the branch makes
+widening a deliberate act.
+
+The required reviewer is an approval gate, not separation of duties: the
+approver and the dispatcher are the same person on this repository. It exists
+so stable publication cannot proceed unattended, not so a second party signs
+off.
+
+These settings are defence in depth rather than the only defence. The verify
+job independently refuses to run unless `GITHUB_REF` is `refs/heads/main` and
+`GITHUB_REF_PROTECTED` is `true`, and the publish job depends on it.
+
 ### Retiring token publishing
 
 Once a release has published tokenlessly, close the door on tokens entirely:
