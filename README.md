@@ -376,3 +376,13 @@ pnpm test:e2e
 - [Architecture](docs/architecture.md)
 - [Harness adapter capabilities](docs/harness-adapters.md)
 - [Security, retention, recovery, migration, and transfer](docs/operations.md)
+- [Releasing](docs/releasing.md)
+
+## Roadmap
+
+[`openspec/roadmap.md`](openspec/roadmap.md) is the authoritative plan: what is
+shipped, what is ready to start, and what each outcome has to satisfy before it
+counts as done. Items are delivered as OpenSpec changes under
+[`openspec/changes/`](openspec/changes/), and each completed change is archived
+with the specification it produced, so the reasoning behind a shipped outcome
+stays readable after the fact.
