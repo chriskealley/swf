@@ -55,8 +55,7 @@ artifacts.
 
 ### RM-008 — Adopt tokenless npm trusted publishing
 
-**Status:** active
-**Work state:** available
+**Status:** done
 **Priority:** 50
 **Depends on:** RM-003
 **Change:** `adopt-npm-trusted-publishing`
