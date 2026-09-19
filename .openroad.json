@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "installedAt": "2026-09-19T07:24:20.849Z",
+  "consumers": ["codex", "pi", "claude"],
+  "files": [
+    ".claude/skills/openroad-next/SKILL.md",
+    ".claude/skills/openroad/SKILL.md",
+    ".codex/skills/openroad-next/SKILL.md",
+    ".codex/skills/openroad/SKILL.md",
+    ".pi/skills/openroad-next/SKILL.md",
+    ".pi/skills/openroad/SKILL.md",
+    "openspec/roadmap.md"
+  ]
+}
