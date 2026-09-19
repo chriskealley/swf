@@ -53,6 +53,22 @@ release evidence, checksums, and an SBOM. Acceptance is the archived
 `productize-development-and-distribution` change and published `v0.1.0`
 artifacts.
 
+### RM-008 — Adopt tokenless npm trusted publishing
+
+**Status:** done
+**Priority:** 50
+**Depends on:** RM-003
+**Change:** `adopt-npm-trusted-publishing`
+
+Replace long-lived npm publication tokens with workflow-bound OIDC trusted
+publishing for both the SWF product and Pi extension while preserving the
+protected release environment, explicit stable-release approval, exact-artifact
+promotion, publish-before-tag ordering, provenance, and fail-closed release
+guards. Acceptance requires the workflow, documentation, policy tests, and
+release specification to describe and enforce tokenless publication, with the
+matching trusted-publisher configuration recorded as an external release
+prerequisite.
+
 ### RM-004 — Start eligible roadmap work through SWF
 
 **Status:** ready

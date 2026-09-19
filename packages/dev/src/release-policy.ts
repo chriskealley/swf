@@ -170,6 +170,51 @@ const SECRET_REFERENCE = /\$\{\{\s*secrets\./;
 const PUBLISH_COMMAND = /npm\s+publish|gh\s+release\s+create/;
 
 /**
+ * Ways a long-lived npm publication credential reaches a workflow: a secret
+ * whose name reads as an npm token, the variable npm reads it from, and the
+ * `.npmrc` entry that `setup-node`'s `registry-url` generates. Any of them
+ * suppresses trusted publishing, because npm only mints a short-lived identity
+ * when no credential is already configured for the registry.
+ */
+const LONG_LIVED_NPM_CREDENTIALS: ReadonlyArray<
+  readonly [name: string, pattern: RegExp]
+> = [
+  [
+    "an npm publication secret",
+    /\$\{\{\s*secrets\.[A-Za-z0-9_]*NPM[A-Za-z0-9_]*TOKEN/,
+  ],
+  ["a NODE_AUTH_TOKEN assignment", /^\s*NODE_AUTH_TOKEN\s*:/m],
+  ["an .npmrc _authToken entry", /_authToken\s*=/],
+  [
+    "a setup-node registry-url, which generates an .npmrc auth entry",
+    /^\s*registry-url\s*:/m,
+  ],
+];
+
+/** The first npm release able to publish through a trusted publisher. */
+const TRUSTED_PUBLISHING_NPM_BASELINE = [11, 5, 1] as const;
+
+/**
+ * The lowest npm version a `npm@<spec>` range can resolve to, or undefined for
+ * a spec with no floor (`latest`, a tag, a URL). A floor is required rather
+ * than inferred: `latest` happens to satisfy the baseline today, but it states
+ * no minimum, so it cannot be audited.
+ */
+function npmSpecFloor(spec: string): [number, number, number] | undefined {
+  const match = /^(?:\^|~|>=|>)?v?(\d+)\.(\d+)\.(\d+)/.exec(spec.trim());
+  if (!match) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function meetsBaseline(floor: readonly [number, number, number]): boolean {
+  for (const [index, required] of TRUSTED_PUBLISHING_NPM_BASELINE.entries()) {
+    const actual = floor[index] ?? 0;
+    if (actual !== required) return actual > required;
+  }
+  return true;
+}
+
+/**
  * Statically verifies the release workflow's trust boundary and irreversible
  * operation order. The checks intentionally inspect the workflow source: they
  * run on untrusted pull requests before GitHub can expose release credentials.
@@ -217,6 +262,29 @@ export function auditReleaseWorkflow(contents: string): string[] {
     violations.push(
       "a publishing workflow does not request an OIDC token; provenance would be unavailable",
     );
+  for (const [name, pattern] of LONG_LIVED_NPM_CREDENTIALS)
+    if (publishes && pattern.test(contents))
+      violations.push(
+        `a publishing workflow references ${name}; registry publication must use short-lived trusted-publishing credentials`,
+      );
+
+  if (publishes) {
+    const installedNpmSpecs = [
+      ...contents.matchAll(
+        /npm\s+(?:install|i)\s+(?:-g|--global)\s+npm@(\S+)/g,
+      ),
+    ].map(([, spec]) => (spec ?? "").replace(/^["']|["']$/g, ""));
+    const floors = installedNpmSpecs
+      .map(npmSpecFloor)
+      .filter(
+        (floor): floor is [number, number, number] => floor !== undefined,
+      );
+    if (floors.length === 0 || !floors.every(meetsBaseline))
+      violations.push(
+        `a publishing workflow does not install npm >=${TRUSTED_PUBLISHING_NPM_BASELINE.join(".")}, which trusted publishing requires`,
+      );
+  }
+
   if (publishes && npmPublishOffsets.length !== 2)
     violations.push(
       "a publishing workflow must publish exactly the product and Pi extension",
