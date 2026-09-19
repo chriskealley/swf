@@ -55,9 +55,11 @@ artifacts.
 
 ### RM-008 — Adopt tokenless npm trusted publishing
 
-**Status:** ready
+**Status:** active
+**Work state:** available
 **Priority:** 50
 **Depends on:** RM-003
+**Change:** `adopt-npm-trusted-publishing`
 
 Replace long-lived npm publication tokens with workflow-bound OIDC trusted
 publishing for both the SWF product and Pi extension while preserving the

@@ -61,8 +61,14 @@ dirty state and is explicitly non-publishable.
 
 `pnpm verify:promotion` re-hashes the candidates immediately before
 publication. npm provenance is produced in the protected GitHub Actions release
-environment using OIDC. Release secrets are unavailable to pull-request
-verification jobs.
+environment using OIDC. Registry publication authenticates with that same
+short-lived workflow identity through a per-package npm trusted publisher:
+there is no long-lived npm token, and `pnpm verify:release-guard` fails the
+build if one is reintroduced. Release credentials are unavailable to
+pull-request verification jobs, and an identity that cannot be verified fails
+publication rather than falling back to another credential. See
+[releasing.md](releasing.md#registry-authentication) for the trusted-publisher
+configuration each package requires.
 
 ## Supported distribution channels
 

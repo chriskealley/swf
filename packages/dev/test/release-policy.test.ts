@@ -22,6 +22,7 @@ jobs:
       id-token: write
     steps:
       - run: if [ "$GITHUB_REF" != "refs/heads/main" ]; then exit 1; fi
+      - run: npm install -g npm@^11.5.1
       - run: npm publish "dist/release/$TARBALL" --tag latest
       - run: npm publish "dist/release/$TARBALL" --tag latest
       - run: git tag v0.2.0
@@ -151,6 +152,73 @@ describe("publication order", () => {
     expect(auditReleaseWorkflow(workflow).join(" ")).toContain(
       "exact verified tarballs",
     );
+  });
+
+  it("accepts a tokenless trusted-publishing workflow", () => {
+    expect(validReleaseWorkflow).not.toContain("NODE_AUTH_TOKEN");
+    expect(auditReleaseWorkflow(validReleaseWorkflow)).toEqual([]);
+  });
+
+  it("rejects a reintroduced npm publication secret", () => {
+    const workflow = validReleaseWorkflow.replace(
+      "      - run: npm install -g npm@^11.5.1\n",
+      "      - run: npm install -g npm@^11.5.1\n        env:\n          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}\n",
+    );
+    const violations = auditReleaseWorkflow(workflow).join(" ");
+    expect(violations).toContain("an npm publication secret");
+    expect(violations).toContain("a NODE_AUTH_TOKEN assignment");
+    expect(violations).toContain("short-lived trusted-publishing credentials");
+  });
+
+  it("rejects a setup-node registry-url that writes an npmrc auth entry", () => {
+    const workflow = validReleaseWorkflow.replace(
+      "    steps:\n",
+      "    steps:\n      - uses: actions/setup-node@v5\n        with:\n          registry-url: https://registry.npmjs.org\n",
+    );
+    expect(auditReleaseWorkflow(workflow).join(" ")).toContain(
+      "generates an .npmrc auth entry",
+    );
+  });
+
+  it("rejects publication without the trusted-publishing npm baseline", () => {
+    const missing = validReleaseWorkflow.replace(
+      "      - run: npm install -g npm@^11.5.1\n",
+      "",
+    );
+    expect(auditReleaseWorkflow(missing).join(" ")).toContain(
+      "does not install npm >=11.5.1",
+    );
+
+    const tooOld = validReleaseWorkflow.replace("npm@^11.5.1", "npm@^11.4.0");
+    expect(auditReleaseWorkflow(tooOld).join(" ")).toContain(
+      "does not install npm >=11.5.1",
+    );
+
+    const unpinned = validReleaseWorkflow.replace("npm@^11.5.1", "npm@latest");
+    expect(auditReleaseWorkflow(unpinned).join(" ")).toContain(
+      "does not install npm >=11.5.1",
+    );
+  });
+
+  it("still rejects a weakened trust boundary", () => {
+    const cases: ReadonlyArray<[string, string]> = [
+      ["    environment: release\n", "does not use a protected environment"],
+      ["      id-token: write\n", "does not request an OIDC token"],
+      [
+        '      - run: if [ "$GITHUB_REF" != "refs/heads/main" ]; then exit 1; fi\n',
+        "does not restrict dispatch to main",
+      ],
+      [
+        '      - run: npm publish "dist/release/$TARBALL" --tag latest\n',
+        "exactly the product and Pi extension",
+      ],
+    ];
+    for (const [removed, expected] of cases)
+      expect(
+        auditReleaseWorkflow(validReleaseWorkflow.replace(removed, "")).join(
+          " ",
+        ),
+      ).toContain(expected);
   });
 });
 

@@ -103,10 +103,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
+      # No registry-url: it writes an .npmrc auth entry, and npm falls back to
+      # trusted publishing only when no credential is configured.
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1, which the bundled npm for the
+      # pinned Node version is not guaranteed to provide.
+      - name: Install an npm that supports trusted publishing
+        run: npm install -g npm@^11.5.1
 
       - name: Download the verified artifacts
         uses: actions/download-artifact@v4
@@ -119,10 +125,11 @@ jobs:
 
       # Publish before tagging: a registry version can never be reused, while a
       # Git tag can be re-cut. The dist-tag is always explicit so a prerelease
-      # never becomes the default install.
+      # never becomes the default install. Authentication is the run's own OIDC
+      # identity via the registry's trusted publisher for each package; there is
+      # no long-lived npm token to fall back to.
       - name: Publish the product
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           REGISTRY_TAG: ${{ needs.verify.outputs.channel == 'stable' && 'latest' || 'next' }}
         run: |
           TARBALL="$(node -p 'require("./dist/release/promotion.json").artifacts.find(({ name }) => name === "@chriskealley/swf").filename')"
@@ -130,7 +137,6 @@ jobs:
 
       - name: Publish the Pi extension
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           REGISTRY_TAG: ${{ needs.verify.outputs.channel == 'stable' && 'latest' || 'next' }}
         run: |
           TARBALL="$(node -p 'require("./dist/release/promotion.json").artifacts.find(({ name }) => name === "@chriskealley/swf-pi").filename')"

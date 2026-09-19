@@ -73,9 +73,79 @@ The registry tag is always explicit. Publishing a prerelease without `--tag next
 Two workflows, with a deliberate split:
 
 - **`verify.yml`** runs on every push and pull request, including forks. It has read-only permissions and references no secret, so untrusted code cannot reach a publication credential.
-- **`release.yml`** runs only by explicit dispatch from protected `main`, enters the protected `release` environment before credentials are available, and is the only workflow that can publish or create a release tag.
+- **`release.yml`** runs only by explicit dispatch from protected `main`, enters the protected `release` environment before it can publish, and is the only workflow that can publish or create a release tag.
 
-`pnpm verify:release-guard` audits the workflows statically on every pull request. It fails if a pull-request-triggered workflow gains a secret or publish command, if publication is not manually dispatched from `main`, if a publishing workflow lacks a protected environment or OIDC permission, if it publishes anything other than the two verified tarballs, or if either registry publication can occur after Git tagging.
+`pnpm verify:release-guard` audits the workflows statically on every pull request. It fails if a pull-request-triggered workflow gains a secret or publish command, if publication is not manually dispatched from `main`, if a publishing workflow lacks a protected environment or OIDC permission, if it publishes anything other than the two verified tarballs, if either registry publication can occur after Git tagging, if a publishing workflow references a long-lived npm publication credential, or if it does not install an npm that supports trusted publishing.
+
+## Registry authentication
+
+Publication is tokenless. There is no npm token in this repository, in its
+secrets, or in the `release` environment. Each publish authenticates with an
+OIDC identity minted for that single workflow run and accepted by a trusted
+publisher registered against the package. The credential cannot be reused,
+copied, or exercised outside the run that received it.
+
+Three things in `release.yml` keep that true, and the guard enforces all three:
+
+- The publish job's `setup-node` step sets no `registry-url`. That input writes
+  an `.npmrc` auth entry, and npm falls back to trusted publishing only when no
+  credential is configured for the registry.
+- No step sets `NODE_AUTH_TOKEN` or references an npm token secret.
+- The job installs `npm@^11.5.1`, the first npm able to publish through a
+  trusted publisher. The npm bundled with the pinned Node version is not
+  guaranteed to meet that floor, so it is installed explicitly rather than
+  assumed.
+
+If the registry cannot verify the run's identity, publication fails. There is
+no second credential to fall back to, and because publication precedes tagging,
+a failure leaves no tag pointing at an unpublished version.
+
+### Trusted publisher configuration
+
+Each package needs its own trusted publisher on npmjs.com, under **Settings ->
+Trusted publisher**. This is an external prerequisite: no repository automation
+creates it, and it must exist before the first dispatch. Both
+`@chriskealley/swf` and `@chriskealley/swf-pi` take identical values:
+
+| Field                | Value                      |
+| -------------------- | -------------------------- |
+| Publisher            | GitHub Actions             |
+| Organization or user | `chriskealley`             |
+| Repository           | `swf`                      |
+| Workflow filename    | `release.yml`              |
+| Environment name     | `release`                  |
+| Allowed actions      | must include `npm publish` |
+
+The environment name is optional to npm but is set deliberately: it is what
+binds publication to the approval gate, so a run of `release.yml` that never
+entered the protected environment cannot publish.
+
+Allowed actions must include `npm publish`. `npm stage publish` is always
+permitted and cannot be disabled, and configurations created after 2026-09-03
+default to staged publishing alone. Left that way, both publish steps fail
+authentication. Staged publishing is also the wrong shape for this workflow: a
+staged package is pending approval rather than live, so the workflow would push
+the Git tag and create the GitHub release while nothing was actually published
+— the inversion that publish-before-tag exists to prevent.
+
+A missing or mismatched trusted publisher fails that package's publication. If
+the product publishes and the extension is then rejected, the two packages are
+out of step; recover with the partial-publication path under
+[If publication fails part way](#if-publication-fails-part-way) rather than retrying the published version.
+
+### Retiring token publishing
+
+Once a release has published tokenlessly, close the door on tokens entirely:
+
+1. Delete the `NPM_TOKEN` repository secret.
+2. For each package, set **Settings -> Publishing access** to **"Require
+   two-factor authentication and disallow tokens"**. This affects only
+   traditional token authentication; trusted publishing keeps working, because
+   it uses OIDC.
+
+Do this after a proven release, not before. Until then, restoring the previous
+token wiring is the rollback; afterwards, rollback also means re-enabling token
+publishing.
 
 ## Promotion, not rebuilding
 
