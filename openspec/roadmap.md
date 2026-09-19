@@ -55,7 +55,7 @@ artifacts.
 
 ### RM-004 — Start eligible roadmap work through SWF
 
-**Status:** planned
+**Status:** ready
 **Priority:** 100
 **Depends on:** RM-003
 
@@ -66,11 +66,10 @@ existing checks, approvals, phase gates, evidence, recovery, and delivery
 behavior. OpenRoad remains the authority for roadmap selection and lifecycle;
 SWF remains the authority for execution after intake.
 
-This item remains planned until OpenRoad exposes versioned, machine-readable
-operations for selecting the next eligible item and atomically recording its
-active change. Acceptance requires idempotent recovery so an interruption
-cannot leave a roadmap item without its SWF run or a run without its roadmap
-link.
+OpenRoad 0.2.0 provides versioned, machine-readable operations for selecting
+the next eligible item and idempotently recording its active change. SWF must
+build on those operations and provide recovery so an interruption cannot leave
+a roadmap item without its SWF run or a run without its roadmap link.
 
 ### RM-005 — Evaluate typed decision models for semantic gates
 

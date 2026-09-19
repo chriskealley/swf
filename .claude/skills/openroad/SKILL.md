@@ -16,4 +16,6 @@ Use this skill when the user asks to create, edit, review, or synchronize `opens
 7. When an OpenSpec change is successfully archived, mark its linked item `done` and remove `Work state`. Do not infer successful archival merely from intent.
 8. Run `openroad doctor` after edits and fix validation errors.
 
+Use `openroad next --json` to select eligible work and `openroad start <roadmap-id> --change <change-name> --json` to link an existing OpenSpec change. Do not reproduce those state transitions with manual Markdown edits when the commands are available.
+
 Do not edit OpenSpec-generated skills or fork an OpenSpec schema for roadmap coordination.
