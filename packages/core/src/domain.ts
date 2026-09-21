@@ -10,6 +10,7 @@ import {
   GateStatusSchema,
   InvocationSchema,
   PhaseStatusSchema,
+  RoadmapProvenanceSchema,
   RunSchema,
   RunStatusSchema,
   WorkUnitStatusSchema,
@@ -174,7 +175,11 @@ const RollbackPayload = z
   })
   .strict();
 const RunCreatedPayload = z
-  .object({ changeIdentity: z.string().min(1) })
+  .object({
+    changeIdentity: z.string().min(1),
+    /** Present only when the run originated from a roadmap item. */
+    roadmap: RoadmapProvenanceSchema.optional(),
+  })
   .strict();
 
 const eventPayloadSchemas = {

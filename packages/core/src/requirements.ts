@@ -44,6 +44,13 @@ export const requirements = {
     reason:
       "GitHub CLI supplies required authentication and PR delivery operations.",
   },
+  openroad: {
+    command: "openroad",
+    minimumVersion: "0.2.0",
+    required: false,
+    reason:
+      "OpenRoad owns roadmap eligibility and linkage for optional roadmap intake.",
+  },
   codex: {
     command: "codex",
     minimumVersion: "0.146.0",

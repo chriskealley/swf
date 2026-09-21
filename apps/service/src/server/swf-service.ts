@@ -40,7 +40,12 @@ import {
   DeliveryOrchestrator,
   DeliveryPreflightError,
   ExplorationStore,
+  ProcessOpenRoadAdapter,
+  ROADMAP_INTAKE_STATE_VERSION,
+  RoadmapIntakeJournal,
+  roadmapIntakeMigrations,
   RunEventStore,
+  selectChangeName,
   assertBudgetsAvailable,
   assertChecksAdopted,
   assertLoopbackHttpEndpoint,
@@ -117,6 +122,10 @@ import {
   developmentProductMetadata,
   readProductMetadata,
   type ProductMetadata,
+  type OpenRoadAdapter,
+  type OpenRoadDiagnostic,
+  type OpenRoadRoadmapItem,
+  type RoadmapIntakeRecord,
 } from "@swf/core";
 import {
   ClaudeHarnessAdapter,
@@ -469,6 +478,8 @@ export interface ServiceOptions {
   herdrClient?: HerdrClient;
   commandRunner?: CommandRunner;
   adoptSameProcessLock?: boolean;
+  /** Injected in tests; defaults to the OpenRoad CLI process adapter. */
+  openRoadAdapter?: OpenRoadAdapter;
 }
 
 export interface ServiceQuery {
@@ -532,6 +543,70 @@ export interface PruningPreview {
 interface PendingPruning extends PruningPreview {
   projectId: string;
   paths: string[];
+}
+
+export const ROADMAP_INTAKE_RESULT_VERSION = 1;
+
+export type RoadmapIntakeMode = "planning-only" | "automatic";
+
+/**
+ * Stable classifications an operator or automation can branch on.
+ * `selected` is a fresh association, `resumed` is an idempotent repeat,
+ * `recovered` completed a previously interrupted association, and the three
+ * non-success values each mean no new change or run was created.
+ */
+export type RoadmapIntakeClassification =
+  | "selected"
+  | "resumed"
+  | "recovered"
+  | "no-eligible-work"
+  | "invalid-roadmap"
+  | "conflict";
+
+export interface RoadmapIntakeConflict {
+  reason: string;
+  itemId?: string;
+  changeName?: string;
+  runId?: string;
+  /** The counterpart SWF observed instead of the expected one. */
+  observedItemId?: string;
+  observedChangeName?: string;
+  observedRunId?: string;
+}
+
+/**
+ * The versioned envelope roadmap entry returns. Intake classification is kept
+ * separate from run execution status so automation can tell normal roadmap
+ * exhaustion from a failed run.
+ */
+export interface RoadmapIntakeResult {
+  schemaVersion: typeof ROADMAP_INTAKE_RESULT_VERSION;
+  intake: RoadmapIntakeClassification;
+  mode: RoadmapIntakeMode;
+  operationId?: string;
+  itemId?: string;
+  itemTitle?: string;
+  changeName?: string;
+  runId?: string;
+  /** The run's durable status, present whenever a run exists. */
+  status?: Run["status"];
+  phaseId?: string;
+  /** Why execution stopped, when it stopped without completing. */
+  stoppedReason?: string;
+  /** OpenRoad's own diagnostics, passed through unmodified. */
+  diagnostics: OpenRoadDiagnostic[];
+  conflicts?: RoadmapIntakeConflict[];
+  /** A command the operator can run next. Never included in place of state. */
+  nextAction?: string;
+}
+
+interface RoadmapAssociation {
+  record: RoadmapIntakeRecord;
+  item?: OpenRoadRoadmapItem;
+  classification: Extract<
+    RoadmapIntakeClassification,
+    "selected" | "resumed" | "recovered"
+  >;
 }
 
 export type ServiceCommand = (
@@ -638,6 +713,13 @@ export type ServiceCommand = (
       selectedPaths?: string[];
     }
   | {
+      type: "roadmap-new" | "roadmap-run" | "roadmap-reconcile";
+      projectId: string;
+      workflowId?: string;
+      policyId?: string;
+      authorization?: ApprovalAuthorization;
+    }
+  | {
       type: "reconcile";
       projectId: string;
       apply?: boolean;
@@ -692,6 +774,7 @@ export class SwfService {
   private readonly projectTrust: (root: string) => Promise<boolean>;
   private readonly stuckAfterMs: number;
   private readonly adoptSameProcessLock: boolean;
+  private readonly openRoad: OpenRoadAdapter;
   private lock?: Awaited<ReturnType<typeof open>>;
   private metadata?: ServiceMetadata;
   private acceptingWork = false;
@@ -715,6 +798,8 @@ export class SwfService {
     this.hostingAdapter = options.hostingAdapter ?? new GitHubAdapter();
     this.herdr = options.herdrClient ?? new HerdrClient();
     this.commandRunner = options.commandRunner ?? new NodeCommandRunner();
+    this.openRoad =
+      options.openRoadAdapter ?? new ProcessOpenRoadAdapter(this.commandRunner);
     this.harnessAdapters = options.harnessAdapters ?? [
       new PiHarnessAdapter(this.herdr),
       new CodexHarnessAdapter(this.herdr),
@@ -2375,6 +2460,7 @@ export class SwfService {
     workflowId?: string;
     policyId?: string;
     authorization?: ApprovalAuthorization;
+    roadmap?: Run["roadmap"];
   }): Promise<{
     run: Run;
     settings: Awaited<ReturnType<typeof loadProjectExecutionSettings>>;
@@ -2458,6 +2544,7 @@ export class SwfService {
       policyId,
       description: input.description,
       phaseIds: settings.workflow.phases.map(({ id }) => id),
+      roadmap: input.roadmap,
     });
 
     if (input.authorization) {
@@ -3980,6 +4067,465 @@ export class SwfService {
     };
   }
 
+  private roadmapJournal(project: RegisteredProject): RoadmapIntakeJournal {
+    // Intake holds this lock across OpenRoad calls, worktree preparation, and
+    // the OpenSpec scaffold, so its timeout is far longer than a state write.
+    return new RoadmapIntakeJournal(project.stateDirectory, {
+      timeoutMs: 180_000,
+      staleMs: 600_000,
+      pollMs: 50,
+    });
+  }
+
+  private roadmapUnavailable(
+    operation: string,
+    diagnostics: OpenRoadDiagnostic[],
+  ): Error {
+    return new Error(
+      `OpenRoad ${operation} is unavailable: ${
+        diagnostics.map(({ message }) => message).join("; ") ||
+        "no diagnostics were returned"
+      }`,
+    );
+  }
+
+  private roadmapConflict(
+    mode: RoadmapIntakeMode,
+    record: Pick<RoadmapIntakeRecord, "operationId" | "itemId" | "changeName">,
+    conflicts: RoadmapIntakeConflict[],
+    diagnostics: OpenRoadDiagnostic[] = [],
+  ): RoadmapIntakeResult {
+    return {
+      schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+      intake: "conflict",
+      mode,
+      operationId: record.operationId,
+      itemId: record.itemId,
+      changeName: record.changeName,
+      diagnostics,
+      conflicts,
+      nextAction: `swf roadmap reconcile (inspect ${record.itemId} and ${record.changeName} before retrying)`,
+    };
+  }
+
+  /**
+   * Carries one intake record forward to a complete item/change/run
+   * association. Every step is re-derived from durable state, so calling this
+   * after an interruption converges rather than duplicating work.
+   */
+  private async completeRoadmapIntake(input: {
+    project: RegisteredProject;
+    journal: RoadmapIntakeJournal;
+    record: RoadmapIntakeRecord;
+    mode: RoadmapIntakeMode;
+    origin: "selection" | "journal";
+    workflowId?: string;
+    policyId?: string;
+    authorization?: ApprovalAuthorization;
+  }): Promise<RoadmapIntakeResult | RoadmapAssociation> {
+    const { project, journal, record, mode } = input;
+    const store = new RunEventStore(project.stateDirectory, {
+      redaction: this.redactor,
+    });
+    const changeIdentity = `openspec/changes/${record.changeName}`;
+    const boundRunId = await store.findRunByChangeIdentity(changeIdentity);
+    let runId = boundRunId;
+    let reusedRun = Boolean(boundRunId);
+
+    if (boundRunId) {
+      const run = await store.readRun(boundRunId);
+      // A run on this change name that belongs to someone else is never
+      // reassigned: both identities are reported and the caller stops.
+      if (run.roadmap?.itemId !== record.itemId)
+        return this.roadmapConflict(mode, record, [
+          {
+            reason: run.roadmap
+              ? "The OpenSpec change is bound to a run for a different roadmap item"
+              : "The OpenSpec change is bound to a direct-entry run with no roadmap provenance",
+            itemId: record.itemId,
+            changeName: record.changeName,
+            runId: boundRunId,
+            observedItemId: run.roadmap?.itemId,
+            observedRunId: boundRunId,
+          },
+        ]);
+      if (record.runId && record.runId !== boundRunId)
+        return this.roadmapConflict(mode, record, [
+          {
+            reason: "Recorded intake run does not match the bound run",
+            itemId: record.itemId,
+            changeName: record.changeName,
+            runId: record.runId,
+            observedRunId: boundRunId,
+          },
+        ]);
+    } else {
+      const prepared = await this.prepareRun({
+        project,
+        changeName: record.changeName,
+        description: record.itemTitle ?? record.itemId,
+        workflowId: input.workflowId,
+        policyId: input.policyId,
+        authorization: input.authorization,
+        roadmap: {
+          source: "openroad",
+          itemId: record.itemId,
+          ...(record.itemTitle ? { itemTitle: record.itemTitle } : {}),
+          operationId: record.operationId,
+          linkedAt: new Date().toISOString(),
+        },
+      });
+      runId = prepared.run.runId;
+      reusedRun = false;
+      await writeAtomically(
+        join(project.stateDirectory, "runs", runId, "planning-input.json"),
+        `${JSON.stringify(
+          {
+            kind: "roadmap",
+            itemId: record.itemId,
+            operationId: record.operationId,
+            description: record.itemTitle ?? record.itemId,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    }
+
+    const withRun = await journal.record({
+      ...record,
+      step: "run-created",
+      runId,
+    });
+
+    // OpenRoad links a change that exists at the project root, but the run's
+    // scaffold lives in its isolated worktree until delivery merges it. The
+    // directory is created here so linkage has the change identity it requires
+    // without SWF writing any planning content outside the run.
+    await mkdir(join(project.root, "openspec", "changes", record.changeName), {
+      recursive: true,
+    });
+
+    // OpenRoad activation is last and idempotent: it needs the scaffold to
+    // exist, and a repeat of it reports the existing link rather than failing.
+    const started = await this.openRoad.start(
+      project.root,
+      record.itemId,
+      record.changeName,
+    );
+    if (started.kind === "conflict")
+      return this.roadmapConflict(
+        mode,
+        withRun,
+        [
+          {
+            reason: "OpenRoad refused to link this item and change",
+            itemId: record.itemId,
+            changeName: record.changeName,
+            runId,
+          },
+        ],
+        started.diagnostics,
+      );
+    if (started.kind === "invalid-roadmap")
+      return {
+        schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+        intake: "invalid-roadmap",
+        mode,
+        operationId: record.operationId,
+        itemId: record.itemId,
+        changeName: record.changeName,
+        runId,
+        diagnostics: started.diagnostics,
+        nextAction: "openroad doctor",
+      };
+    if (started.kind !== "linked")
+      throw this.roadmapUnavailable("start", started.diagnostics);
+    // The adapter already rejects a drifted identity; this repeats the check
+    // at the durable write so no adapter can complete a record for work other
+    // than the one it was asked to link.
+    if (
+      started.item.id !== record.itemId ||
+      started.changeName !== record.changeName
+    )
+      return this.roadmapConflict(
+        mode,
+        withRun,
+        [
+          {
+            reason: "OpenRoad linked identities other than the requested ones",
+            itemId: record.itemId,
+            changeName: record.changeName,
+            runId,
+            observedItemId: started.item.id,
+            observedChangeName: started.changeName,
+          },
+        ],
+        started.result.status,
+      );
+
+    await journal.record({
+      ...withRun,
+      step: "roadmap-linked",
+      observedItemStatus: started.item.status,
+    });
+    const completed = await journal.record({ ...withRun, step: "completed" });
+    return {
+      record: completed,
+      item: started.item,
+      classification:
+        input.origin === "journal"
+          ? "recovered"
+          : reusedRun || !started.changed
+            ? "resumed"
+            : "selected",
+    };
+  }
+
+  /**
+   * Resolves the roadmap item, OpenSpec change, and SWF run that this request
+   * should operate on, or a terminal result when nothing can be started. Runs
+   * under the per-project intake lock so two requests cannot race for one item.
+   */
+  private async associateRoadmapWork(input: {
+    project: RegisteredProject;
+    mode: RoadmapIntakeMode;
+    select: boolean;
+    workflowId?: string;
+    policyId?: string;
+    authorization?: ApprovalAuthorization;
+  }): Promise<RoadmapIntakeResult | RoadmapAssociation> {
+    const { project, mode } = input;
+    const journal = this.roadmapJournal(project);
+    return journal.withLock(async () => {
+      const doctor = await this.openRoad.doctor(project.root);
+      if (doctor.kind === "invalid-roadmap")
+        return {
+          schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+          intake: "invalid-roadmap",
+          mode,
+          diagnostics: doctor.diagnostics,
+          nextAction: "openroad doctor",
+        } satisfies RoadmapIntakeResult;
+      if (doctor.kind !== "ready")
+        throw this.roadmapUnavailable("doctor", doctor.diagnostics);
+
+      // Unfinished intents are settled before any new selection so an
+      // interrupted startup can never become a second change or run.
+      for (const record of await journal.incomplete()) {
+        const resolved = await this.completeRoadmapIntake({
+          ...input,
+          journal,
+          record,
+          origin: "journal",
+        });
+        return resolved;
+      }
+      if (!input.select)
+        return {
+          schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+          intake: "recovered",
+          mode,
+          diagnostics: [],
+          nextAction: "swf roadmap new",
+        } satisfies RoadmapIntakeResult;
+
+      const next = await this.openRoad.next(project.root);
+      if (next.kind === "no-eligible-work")
+        return this.resumeInFlightRoadmapRun(project, mode, next.diagnostics);
+      if (next.kind === "invalid-roadmap")
+        return {
+          schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+          intake: "invalid-roadmap",
+          mode,
+          diagnostics: next.diagnostics,
+          nextAction: "openroad doctor",
+        } satisfies RoadmapIntakeResult;
+      if (next.kind === "conflict")
+        return {
+          schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+          intake: "conflict",
+          mode,
+          diagnostics: next.diagnostics,
+          conflicts: [
+            { reason: "OpenRoad reported a conflicting roadmap state" },
+          ],
+        } satisfies RoadmapIntakeResult;
+      if (next.kind !== "selected")
+        throw this.roadmapUnavailable("next", next.diagnostics);
+
+      const item = next.item;
+      const owners = new Map<string, string>();
+      for (const entry of (await journal.read()).records)
+        owners.set(entry.changeName, entry.itemId);
+      // An item OpenRoad already links to a change keeps that change name.
+      const selection = item.change
+        ? ({
+            kind: "selected",
+            changeName: item.change,
+            reusedExisting: true,
+          } as const)
+        : selectChangeName(item, (name) => owners.get(name));
+      if (selection.kind === "exhausted")
+        return {
+          schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+          intake: "conflict",
+          mode,
+          itemId: item.id,
+          itemTitle: item.title,
+          diagnostics: [],
+          conflicts: [
+            {
+              reason: `Every derived change name is already owned by another roadmap item: ${selection.candidates.join(", ")}`,
+              itemId: item.id,
+            },
+          ],
+        } satisfies RoadmapIntakeResult;
+
+      const record = await journal.record({
+        operationId: randomUUID(),
+        itemId: item.id,
+        itemTitle: item.title,
+        changeName: selection.changeName,
+        mode,
+        step: "intent-recorded",
+        observedItemStatus: item.status,
+      });
+      return this.completeRoadmapIntake({
+        ...input,
+        journal,
+        record,
+        origin: "selection",
+      });
+    });
+  }
+
+  /**
+   * With nothing new to start, a single unfinished roadmap-originated run is
+   * resumed instead of reported as exhaustion, so a repeated request converges
+   * on the run it already created. Several in-flight runs stay untouched
+   * because picking one of them would be a guess.
+   */
+  private async resumeInFlightRoadmapRun(
+    project: RegisteredProject,
+    mode: RoadmapIntakeMode,
+    diagnostics: OpenRoadDiagnostic[],
+  ): Promise<RoadmapIntakeResult | RoadmapAssociation> {
+    const exhausted: RoadmapIntakeResult = {
+      schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+      intake: "no-eligible-work",
+      mode,
+      diagnostics,
+      nextAction: "openroad next",
+    };
+    const journal = this.roadmapJournal(project);
+    const store = new RunEventStore(project.stateDirectory, {
+      redaction: this.redactor,
+    });
+    const candidates: Array<{ record: RoadmapIntakeRecord; runId: string }> =
+      [];
+    for (const record of (await journal.read()).records) {
+      if (!record.runId) continue;
+      const loaded = await store.load(record.runId).catch(() => undefined);
+      if (
+        !loaded ||
+        ["completed", "cancelled", "failed"].includes(loaded.state.run.status)
+      )
+        continue;
+      candidates.push({ record, runId: record.runId });
+    }
+    if (candidates.length !== 1) return exhausted;
+    return {
+      record: candidates[0]!.record,
+      classification: "resumed",
+    };
+  }
+
+  private async enterRoadmapWorkflow(
+    command: Extract<
+      ServiceCommand,
+      { type: "roadmap-new" | "roadmap-run" | "roadmap-reconcile" }
+    >,
+  ): Promise<RoadmapIntakeResult> {
+    if (!this.acceptingWork)
+      throw new Error("SWF service is draining and cannot start new work");
+    const project = await this.project(command.projectId);
+    const location = await findProjectRoot(project.root);
+    if (!location?.initialized)
+      throw new Error("Roadmap entry requires an initialized project");
+    const mode: RoadmapIntakeMode =
+      command.type === "roadmap-run" ? "automatic" : "planning-only";
+
+    const associated = await this.associateRoadmapWork({
+      project,
+      mode,
+      select: command.type !== "roadmap-reconcile",
+      workflowId: command.workflowId,
+      policyId: command.policyId,
+      authorization: command.authorization,
+    });
+    if ("intake" in associated) return associated;
+
+    const { record, classification } = associated;
+    const runId = record.runId!;
+    const base: RoadmapIntakeResult = {
+      schemaVersion: ROADMAP_INTAKE_RESULT_VERSION,
+      intake: classification,
+      mode,
+      operationId: record.operationId,
+      itemId: record.itemId,
+      itemTitle: record.itemTitle,
+      changeName: record.changeName,
+      runId,
+      diagnostics: [],
+    };
+
+    const store = new RunEventStore(project.stateDirectory, {
+      redaction: this.redactor,
+    });
+    // Status lives in the event log, not the creation-time run document.
+    const current = (await store.load(runId)).state.run;
+    // The association is durable either way; execution is only attempted when
+    // the run is actually free to advance.
+    if (this.activeWork.has(runId) || current.status === "running")
+      return {
+        ...base,
+        status: current.status,
+        stoppedReason: "the run already has active work",
+        nextAction: `swf status ${record.changeName}`,
+      };
+    if (command.type === "roadmap-reconcile")
+      return {
+        ...base,
+        status: current.status,
+        nextAction: `swf roadmap ${mode === "automatic" ? "run" : "new"}`,
+      };
+    if (
+      ["blocked", "failed", "cancelled", "completed"].includes(current.status)
+    )
+      return {
+        ...base,
+        status: current.status,
+        stoppedReason: `the run is ${current.status}`,
+        nextAction: `swf status ${record.changeName}`,
+      };
+
+    const executed = (await this.enterWorkflow({
+      type: mode === "automatic" ? "run" : "next",
+      projectId: project.projectId,
+      changeName: record.changeName,
+    })) as { runId: string; phaseId?: string; status: Run["status"] };
+    return {
+      ...base,
+      status: executed.status,
+      phaseId: executed.phaseId,
+      nextAction:
+        executed.status === "completed"
+          ? `swf deliver ${record.changeName}`
+          : `swf status ${record.changeName}`,
+    };
+  }
+
   private async persistRunDossier(
     projectId: string,
     runId: string,
@@ -4213,6 +4759,12 @@ export class SwfService {
       command.type === "phase-run"
     )
       return this.enterWorkflow(command);
+    if (
+      command.type === "roadmap-new" ||
+      command.type === "roadmap-run" ||
+      command.type === "roadmap-reconcile"
+    )
+      return this.enterRoadmapWorkflow(command);
     if (
       command.type === "model-map-preview" ||
       command.type === "model-map-apply" ||
@@ -4660,7 +5212,11 @@ export class SwfService {
     }
     if (command.type === "migrate") {
       const project = await this.project(command.projectId);
-      const manager = new StateMigrationManager(project.stateDirectory);
+      const manager = new StateMigrationManager(
+        project.stateDirectory,
+        roadmapIntakeMigrations,
+        ROADMAP_INTAKE_STATE_VERSION,
+      );
       const result = command.rollbackBackupId
         ? await manager
             .rollback(command.rollbackBackupId)
@@ -5255,11 +5811,59 @@ export class SwfService {
     return recovered;
   }
 
+  /**
+   * Settles roadmap intents that were interrupted mid-association. Safe work
+   * is completed; anything whose identities cannot be proven is left alone and
+   * published for an operator to resolve.
+   */
+  private async recoverRoadmapIntake(
+    project: RegisteredProject,
+  ): Promise<void> {
+    const journal = this.roadmapJournal(project);
+    if (!(await journal.incomplete()).length) return;
+    try {
+      const resolved = await this.associateRoadmapWork({
+        project,
+        mode: "planning-only",
+        select: false,
+      });
+      this.broker.publish({
+        type:
+          "intake" in resolved && resolved.intake === "conflict"
+            ? "roadmap.intake-blocked"
+            : "roadmap.intake-recovered",
+        projectId: project.projectId,
+        runId: "intake" in resolved ? resolved.runId : resolved.record.runId,
+        data:
+          "intake" in resolved
+            ? { ...resolved }
+            : {
+                intake: resolved.classification,
+                itemId: resolved.record.itemId,
+                changeName: resolved.record.changeName,
+                runId: resolved.record.runId,
+              },
+      });
+    } catch (error) {
+      this.broker.publish({
+        type: "roadmap.intake-recovery-error",
+        projectId: project.projectId,
+        data: {
+          message:
+            error instanceof Error
+              ? error.message
+              : "roadmap intake recovery failed",
+        },
+      });
+    }
+  }
+
   async recover(reconcile?: RecoveryReconciler): Promise<void> {
     this.requireRunning();
     const projects = await this.registry.reconcile();
     for (const project of projects) {
       if (project.availability !== "available") continue;
+      await this.recoverRoadmapIntake(project);
       for (const run of await this.listRuns(project)) {
         const store = new RunEventStore(project.stateDirectory, {
           redaction: this.redactor,
