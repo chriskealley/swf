@@ -18,8 +18,8 @@ import {
 const compatibility = {
   apiProtocolVersion: 2,
   stateSchemaVersion: 3,
-  compatibleClientRange: ">=0.1.0 <0.2.0",
-  piExtensionRange: ">=0.1.0 <0.2.0",
+  compatibleClientRange: ">=0.2.0 <0.3.0",
+  piExtensionRange: ">=0.2.0 <0.3.0",
   minimumNodeVersion: "24.0.0",
 };
 
@@ -30,10 +30,10 @@ function finding(report: ReturnType<typeof evaluateCompatibility>, id: string) {
 describe("compatibility evaluation", () => {
   it("accepts a client inside every declared range", () => {
     const report = evaluateCompatibility(compatibility, {
-      clientVersion: "0.1.4",
+      clientVersion: "0.2.4",
       clientApiProtocolVersion: 2,
       stateSchemaVersion: 3,
-      piExtensionVersion: "0.1.0",
+      piExtensionVersion: "0.2.0",
       nodeVersion: "v24.16.0",
     });
     expect(report.compatible).toBe(true);
@@ -42,7 +42,7 @@ describe("compatibility evaluation", () => {
 
   it("rejects a client outside the compatible range", () => {
     const report = evaluateCompatibility(compatibility, {
-      clientVersion: "0.2.0",
+      clientVersion: "0.3.0",
       clientApiProtocolVersion: 2,
       stateSchemaVersion: 3,
     });
@@ -66,7 +66,7 @@ describe("compatibility evaluation", () => {
 
   it("blocks mutation when a version is unreported but does not call it incompatible", () => {
     const report = evaluateCompatibility(compatibility, {
-      clientVersion: "0.1.4",
+      clientVersion: "0.2.4",
       clientApiProtocolVersion: 2,
     });
     expect(finding(report, "state-schema")?.status).toBe("unknown");
@@ -76,7 +76,7 @@ describe("compatibility evaluation", () => {
 
   it("reports a state schema mismatch with migration remediation", () => {
     const report = evaluateCompatibility(compatibility, {
-      clientVersion: "0.1.4",
+      clientVersion: "0.2.4",
       clientApiProtocolVersion: 2,
       stateSchemaVersion: 2,
     });
@@ -127,7 +127,7 @@ describe("compatibility evaluation", () => {
       finding(
         evaluateCompatibility(
           { ...compatibility, compatibleClientRange: ">>bad range" },
-          { clientVersion: "0.1.0" },
+          { clientVersion: "0.2.0" },
         ),
         "client-range",
       )?.status,
@@ -137,7 +137,7 @@ describe("compatibility evaluation", () => {
   it("matches a prerelease against its own range", () => {
     expect(
       finding(
-        evaluateCompatibility(compatibility, { clientVersion: "0.1.5-next.2" }),
+        evaluateCompatibility(compatibility, { clientVersion: "0.2.5-next.2" }),
         "client-range",
       )?.status,
     ).toBe("compatible");

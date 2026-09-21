@@ -26,18 +26,18 @@ Codex CLI, Claude Code, and GitHub Copilot CLI are optional until a project work
 ### npm
 
 ```sh
-npm install --global @chriskealley/swf@0.1.0
+npm install --global @chriskealley/swf@0.2.0
 ```
 
 ### pnpm
 
 ```sh
-pnpm add --global @chriskealley/swf@0.1.0
+pnpm add --global @chriskealley/swf@0.2.0
 ```
 
 Both package managers install the same verified product files and resolve the
 declared third-party dependencies from the registry. The separately published
-Pi integration is `@chriskealley/swf-pi@0.1.0`; keep its version aligned with
+Pi integration is `@chriskealley/swf-pi@0.2.0`; keep its version aligned with
 the product.
 
 ### Verified GitHub release archive
@@ -46,7 +46,7 @@ GitHub releases contain the exact npm tarballs that passed verification rather
 than a separately rebuilt archive. Download both tarballs and their evidence:
 
 ```sh
-gh release download v0.1.0 \
+gh release download v0.2.0 \
   --repo chriskealley/swf \
   --pattern '*.tgz' \
   --pattern checksums.txt \
@@ -54,7 +54,7 @@ gh release download v0.1.0 \
   --pattern release-evidence.json
 
 shasum -a 256 --check checksums.txt
-npm install --global ./chriskealley-swf-0.1.0.tgz
+npm install --global ./chriskealley-swf-0.2.0.tgz
 ```
 
 On Linux, use `sha256sum --check checksums.txt` where `shasum` is unavailable.

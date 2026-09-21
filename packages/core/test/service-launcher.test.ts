@@ -54,8 +54,8 @@ function healthResponse(body: unknown, ok = true): Response {
 const compatibility = {
   apiProtocolVersion: 1,
   stateSchemaVersion: 1,
-  compatibleClientRange: ">=0.1.0 <0.2.0",
-  piExtensionRange: ">=0.1.0 <0.2.0",
+  compatibleClientRange: ">=0.2.0 <0.3.0",
+  piExtensionRange: ">=0.2.0 <0.3.0",
   minimumNodeVersion: "24.0.0",
 };
 
@@ -209,7 +209,7 @@ describe("readiness handshake", () => {
       attempts: 1,
       fetchImplementation: (async () =>
         healthResponse({ compatibility })) as unknown as typeof fetch,
-      clientVersion: "0.1.0",
+      clientVersion: "0.2.0",
       clientApiProtocolVersion: 1,
     });
     expect(result.ready).toBe(true);
@@ -222,7 +222,7 @@ describe("readiness handshake", () => {
         healthResponse({
           compatibility: { ...compatibility, apiProtocolVersion: 9 },
         })) as unknown as typeof fetch,
-      clientVersion: "0.1.0",
+      clientVersion: "0.2.0",
       clientApiProtocolVersion: 1,
     });
     expect(result.ready).toBe(false);

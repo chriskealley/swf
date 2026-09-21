@@ -57,9 +57,9 @@ See [Harness adapter capabilities](docs/harness-adapters.md) for structured-outp
 Install a published release with npm or pnpm:
 
 ```sh
-npm install --global @chriskealley/swf@0.1.0
+npm install --global @chriskealley/swf@0.2.0
 # or
-pnpm add --global @chriskealley/swf@0.1.0
+pnpm add --global @chriskealley/swf@0.2.0
 ```
 
 Package installation writes product files and dependencies only. It does not
