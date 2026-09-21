@@ -145,3 +145,74 @@ describe("runDoctor", () => {
     ).toMatchObject({ status: "warn" });
   });
 });
+
+describe("runDoctor roadmap intake readiness", () => {
+  const baseline = (command: string, args: string[]): CommandResult => {
+    if (args[0] === "--version") return success(`${command} 99.0.0`);
+    if (command === "git" && args[0] === "rev-parse") return success("true\n");
+    if (command === "git") return success("https://example.test/swf.git\n");
+    if (command === "gh") return success("Logged in\n");
+    if (command === "herdr") return success("pi: installed 1.0.0\n");
+    return success("");
+  };
+
+  it("omits OpenRoad entirely when roadmap intake is not requested", async () => {
+    const checks = await runDoctor({
+      cwd: process.cwd(),
+      environment: { PATH: process.env.PATH },
+      execute: baseline,
+    });
+    expect(checks.some((check) => check.id === "tool.openroad")).toBe(false);
+    expect(checks.some((check) => check.id === "roadmap.openroad")).toBe(false);
+    expect(checks.filter((check) => check.status === "fail")).toHaveLength(0);
+  });
+
+  it("reports OpenRoad readiness when roadmap intake is requested", async () => {
+    const checks = await runDoctor({
+      cwd: process.cwd(),
+      environment: { PATH: process.env.PATH },
+      roadmapIntake: true,
+      execute: (command, args) =>
+        command === "openroad" && args[0] === "doctor"
+          ? success("Healthy: 8 roadmap item(s), 3 skill consumer(s).")
+          : baseline(command, args),
+    });
+    expect(checks.find((check) => check.id === "tool.openroad")).toMatchObject({
+      status: "pass",
+    });
+    expect(
+      checks.find((check) => check.id === "roadmap.openroad"),
+    ).toMatchObject({ status: "pass" });
+  });
+
+  it("fails roadmap readiness when OpenRoad rejects the roadmap", async () => {
+    const checks = await runDoctor({
+      cwd: process.cwd(),
+      environment: { PATH: process.env.PATH },
+      roadmapIntake: true,
+      execute: (command, args) =>
+        command === "openroad" && args[0] === "doctor"
+          ? {
+              status: 1,
+              stdout: "",
+              stderr: "Roadmap validation failed:\n- bad",
+            }
+          : baseline(command, args),
+    });
+    expect(
+      checks.find((check) => check.id === "roadmap.openroad"),
+    ).toMatchObject({ status: "fail" });
+  });
+
+  it("warns rather than fails when OpenRoad is absent", async () => {
+    const checks = await runDoctor({
+      cwd: process.cwd(),
+      environment: { PATH: "" },
+      roadmapIntake: true,
+      execute: () => ({ status: 1, stdout: "", stderr: "missing" }),
+    });
+    expect(checks.find((check) => check.id === "tool.openroad")).toMatchObject({
+      status: "warn",
+    });
+  });
+});

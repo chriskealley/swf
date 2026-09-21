@@ -17,6 +17,8 @@ Ghostty is supported but optional. iTerm2, WezTerm, Kitty, macOS Terminal, GNOME
 | OpenSpec          | 1.6.0                     | Change planning artifacts             |
 | GitHub CLI (`gh`) | 2.0.0                     | Authentication and GitHub PR delivery |
 
+OpenRoad (`openroad`) 0.2.0 is optional and is required only for roadmap-driven workflow entry; see [roadmap-intake.md](./roadmap-intake.md). `swf doctor` inspects it only when you pass `--roadmap`.
+
 Codex CLI, Claude Code, and GitHub Copilot CLI are optional until a project workflow selects them. Their verified structured-output, resume, model, permission, and usage capabilities are documented in [harness-adapters.md](./harness-adapters.md); selected adapters also require their matching Herdr status integration.
 
 ## Install the product

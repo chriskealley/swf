@@ -33,6 +33,11 @@ export interface DoctorOptions {
   architecture?: string;
   execute?: (command: string, args: string[], cwd: string) => CommandResult;
   selectedHarnesses?: RequirementId[];
+  /**
+   * Report OpenRoad readiness. Left off, OpenRoad is not inspected at all, so a
+   * project that only uses direct entry never sees roadmap diagnostics.
+   */
+  roadmapIntake?: boolean;
 }
 
 function defaultExecute(
@@ -176,6 +181,7 @@ export async function runDoctor(
     "openspec",
     "gh",
   ];
+  if (options.roadmapIntake) toolIds.push("openroad");
   for (const harness of options.selectedHarnesses ?? []) {
     if (!toolIds.includes(harness)) toolIds.push(harness);
   }
@@ -254,6 +260,32 @@ export async function runDoctor(
           remediation: "Run gh auth login, then rerun swf doctor.",
         },
   );
+
+  if (options.roadmapIntake) {
+    const roadmap = execute("openroad", ["doctor"], cwd);
+    checks.push(
+      roadmap.status === 0
+        ? {
+            id: "roadmap.openroad",
+            status: "pass",
+            summary:
+              roadmap.stdout.trim() || "OpenRoad roadmap validation passed",
+            detail:
+              "OpenRoad owns roadmap eligibility; SWF only starts what it returns.",
+          }
+        : {
+            id: "roadmap.openroad",
+            status: "fail",
+            summary: "OpenRoad cannot validate this project's roadmap",
+            detail:
+              roadmap.stderr.trim() ||
+              roadmap.stdout.trim() ||
+              `openroad doctor exited with code ${roadmap.status}`,
+            remediation:
+              "Run openroad doctor and repair openspec/roadmap.md, or use direct swf new/swf run entry.",
+          },
+    );
+  }
 
   const herdrStatus = execute("herdr", ["integration", "status"], cwd);
   const harnessIntegrations = [

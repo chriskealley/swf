@@ -33,11 +33,15 @@ The system SHALL establish one stable roadmap item, OpenSpec change, and SWF run
 - **THEN** the system returns or resumes the existing run without creating another item link, change, or run
 
 ### Requirement: Partial-start recovery
-Before selecting additional work, the system SHALL reconcile recoverable roadmap intake intents and SHALL either complete the missing association step or report an explicit conflict without replacing either identity.
+Before selecting additional work, the system SHALL reconcile recoverable roadmap intake intents and SHALL either complete the missing association step or report an explicit conflict without replacing either identity. Recoverable intents are those the system durably recorded; it SHALL NOT parse the roadmap to discover associations made outside it.
 
 #### Scenario: Roadmap link exists without a run
-- **WHEN** an item is active and linked to the intended OpenSpec change but no SWF run is bound to that change
+- **WHEN** an item with a durably recorded SWF intake intent is active and linked to the intended OpenSpec change but no SWF run is bound to that change
 - **THEN** the system creates and binds the missing run and starts or resumes Planning for that same item and change
+
+#### Scenario: A roadmap link was made outside the system
+- **WHEN** an item is active and linked to a change for which the system holds no recorded intake intent
+- **THEN** the system does not discover or adopt that association through roadmap intake, and direct entry with that change name remains available
 
 #### Scenario: Run exists without roadmap activation
 - **WHEN** the intended OpenSpec change and SWF run exist with matching roadmap provenance but the roadmap item is not linked and active

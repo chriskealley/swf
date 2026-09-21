@@ -407,3 +407,35 @@ export async function inspectOperationalHealth(
   }
   return report;
 }
+
+/**
+ * State version introduced by roadmap intake. Roadmap provenance is an optional
+ * run field and the intake journal is a new file, so the migration only has to
+ * establish the journal and stamp the version: existing runs and their change
+ * bindings are left byte-for-byte alone.
+ */
+export const ROADMAP_INTAKE_STATE_VERSION = 2;
+
+export const roadmapIntakeMigrations: StateMigration[] = [
+  {
+    from: 1,
+    to: ROADMAP_INTAKE_STATE_VERSION,
+    description:
+      "Add the roadmap intake journal; run documents gain optional roadmap provenance.",
+    async apply(stateDirectory: string): Promise<void> {
+      const path = join(stateDirectory, "roadmap-intake.json");
+      try {
+        await stat(path);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+      await writeFile(
+        path,
+        `${JSON.stringify({ schemaVersion: 1, records: [] }, null, 2)}\n`,
+        { mode: 0o600 },
+      );
+    },
+  },
+];
