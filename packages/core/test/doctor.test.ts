@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runDoctor, type CommandResult } from "../src/doctor.js";
 
 const success = (stdout: string): CommandResult => ({
@@ -147,6 +147,23 @@ describe("runDoctor", () => {
 });
 
 describe("runDoctor roadmap intake readiness", () => {
+  let tools = "";
+
+  async function toolPath(includeOpenRoad = true): Promise<string> {
+    const commands = ["node", "git", "herdr", "pi", "openspec", "gh"];
+    if (includeOpenRoad) commands.push("openroad");
+    for (const command of commands) await writeFile(join(tools, command), "");
+    return tools;
+  }
+
+  beforeEach(async () => {
+    tools = await mkdtemp(join(tmpdir(), "swf-doctor-roadmap-tools-"));
+  });
+
+  afterEach(async () => {
+    await rm(tools, { recursive: true, force: true });
+  });
+
   const baseline = (command: string, args: string[]): CommandResult => {
     if (args[0] === "--version") return success(`${command} 99.0.0`);
     if (command === "git" && args[0] === "rev-parse") return success("true\n");
@@ -159,7 +176,7 @@ describe("runDoctor roadmap intake readiness", () => {
   it("omits OpenRoad entirely when roadmap intake is not requested", async () => {
     const checks = await runDoctor({
       cwd: process.cwd(),
-      environment: { PATH: process.env.PATH },
+      environment: { PATH: await toolPath() },
       execute: baseline,
     });
     expect(checks.some((check) => check.id === "tool.openroad")).toBe(false);
@@ -170,7 +187,7 @@ describe("runDoctor roadmap intake readiness", () => {
   it("reports OpenRoad readiness when roadmap intake is requested", async () => {
     const checks = await runDoctor({
       cwd: process.cwd(),
-      environment: { PATH: process.env.PATH },
+      environment: { PATH: await toolPath() },
       roadmapIntake: true,
       execute: (command, args) =>
         command === "openroad" && args[0] === "doctor"
@@ -188,7 +205,7 @@ describe("runDoctor roadmap intake readiness", () => {
   it("fails roadmap readiness when OpenRoad rejects the roadmap", async () => {
     const checks = await runDoctor({
       cwd: process.cwd(),
-      environment: { PATH: process.env.PATH },
+      environment: { PATH: await toolPath() },
       roadmapIntake: true,
       execute: (command, args) =>
         command === "openroad" && args[0] === "doctor"
@@ -207,7 +224,7 @@ describe("runDoctor roadmap intake readiness", () => {
   it("warns rather than fails when OpenRoad is absent", async () => {
     const checks = await runDoctor({
       cwd: process.cwd(),
-      environment: { PATH: "" },
+      environment: { PATH: await toolPath(false) },
       roadmapIntake: true,
       execute: () => ({ status: 1, stdout: "", stderr: "missing" }),
     });
