@@ -352,7 +352,7 @@ export function developmentProductMetadata(
 export const PRODUCT_COMPATIBILITY: ProductMetadata["compatibility"] = {
   apiProtocolVersion: 1,
   stateSchemaVersion: CURRENT_SCHEMA_VERSION,
-  compatibleClientRange: ">=0.1.0 <0.2.0",
-  piExtensionRange: ">=0.1.0 <0.2.0",
+  compatibleClientRange: ">=0.2.0 <0.3.0",
+  piExtensionRange: ">=0.2.0 <0.3.0",
   minimumNodeVersion: "24.0.0",
 };

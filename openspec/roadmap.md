@@ -71,8 +71,9 @@ prerequisite.
 
 ### RM-004 — Start eligible roadmap work through SWF
 
-**Status:** ready
+**Status:** done
 **Priority:** 100
+**Change:** start-roadmap-work-through-swf
 **Depends on:** RM-003
 
 Use OpenRoad as an optional intake layer before the existing SWF lifecycle. If

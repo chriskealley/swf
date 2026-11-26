@@ -11,8 +11,8 @@ production-like preview, and non-publishing verification are described in
 
 | Channel  | Version shape  | Registry tag | GitHub     | Authorization     |
 | -------- | -------------- | ------------ | ---------- | ----------------- |
-| `stable` | `0.1.0`        | `latest`     | release    | explicit approval |
-| `next`   | `0.2.0-next.1` | `next`       | prerelease | not required      |
+| `stable` | `0.2.0`        | `latest`     | release    | explicit approval |
+| `next`   | `0.3.0-next.1` | `next`       | prerelease | not required      |
 
 Releases begin pre-1.0. Under SemVer a `0.y.z` minor increment may introduce breaking changes, and release notes must say so when it does. `1.0.0` is reserved for an explicit stability commitment.
 
@@ -24,7 +24,7 @@ Before the irreversible publication workflow, dispatch the non-publishing
 rehearsal from `main`:
 
 ```sh
-gh workflow run release-candidate.yml --ref main -f version=0.1.0
+gh workflow run release-candidate.yml --ref main -f version=0.2.0
 ```
 
 The build job produces the exact product and Pi-extension tarballs and their
@@ -51,7 +51,7 @@ Dispatch the workflow from the protected `main` branch with the exact version
 already declared in `package.json`:
 
 ```sh
-gh workflow run release.yml --ref main -f version=0.1.0 -f channel=stable
+gh workflow run release.yml --ref main -f version=0.2.0 -f channel=stable
 ```
 
 The workflow refuses a prefixed version, a version that differs from the

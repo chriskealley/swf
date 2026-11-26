@@ -248,10 +248,18 @@ const doctor = defineCommand({
     name: "doctor",
     description: "Check SWF prerequisites without making changes",
   },
-  args: { json: { type: "boolean" }, harness: { type: "string" } },
+  args: {
+    json: { type: "boolean" },
+    harness: { type: "string" },
+    roadmap: {
+      type: "boolean",
+      description: "Also report OpenRoad readiness for roadmap intake",
+    },
+  },
   async run({ args }) {
     const checks = await runDoctor({
       selectedHarnesses: args.harness ? ([args.harness] as never[]) : [],
+      roadmapIntake: Boolean(args.roadmap),
     });
     if (args.json) return output({ checks }, true);
     for (const check of checks) {
@@ -1810,6 +1818,153 @@ const cleanup = defineCommand({
   },
 });
 
+interface RoadmapIntakeOutput {
+  schemaVersion: number;
+  intake: string;
+  mode: string;
+  itemId?: string;
+  itemTitle?: string;
+  changeName?: string;
+  runId?: string;
+  status?: string;
+  phaseId?: string;
+  stoppedReason?: string;
+  diagnostics?: Array<{ severity: string; code: string; message: string }>;
+  conflicts?: Array<Record<string, string | undefined>>;
+  nextAction?: string;
+}
+
+function renderRoadmapIntake(result: RoadmapIntakeOutput): string {
+  const lines: string[] = [];
+  const identity = [
+    result.itemId && `item ${result.itemId}`,
+    result.changeName && `change ${result.changeName}`,
+    result.runId && `run ${result.runId}`,
+  ].filter(Boolean);
+  const headline: Record<string, string> = {
+    selected: "Selected the next roadmap item",
+    resumed: "Resumed the existing roadmap association",
+    recovered: "Recovered an interrupted roadmap association",
+    "no-eligible-work": "No roadmap item is eligible",
+    "invalid-roadmap": "OpenRoad could not validate the roadmap",
+    conflict: "Roadmap intake found conflicting associations",
+  };
+  lines.push(
+    `${headline[result.intake] ?? result.intake}${
+      result.itemTitle ? `: ${result.itemTitle}` : ""
+    }`,
+  );
+  if (identity.length) lines.push(`  ${identity.join(", ")}`);
+  if (result.status)
+    lines.push(
+      `  run status: ${result.status}${result.phaseId ? ` (${result.phaseId})` : ""}${
+        result.stoppedReason ? ` — ${result.stoppedReason}` : ""
+      }`,
+    );
+  for (const diagnostic of result.diagnostics ?? [])
+    lines.push(`  ${diagnostic.severity}: ${diagnostic.message}`);
+  for (const conflict of result.conflicts ?? [])
+    lines.push(
+      `  conflict: ${Object.entries(conflict)
+        .filter(([, value]) => value)
+        .map(([key, value]) => (key === "reason" ? value : `${key}=${value}`))
+        .join(", ")}`,
+    );
+  if (result.nextAction) lines.push(`  next: ${result.nextAction}`);
+  return lines.join("\n");
+}
+
+function roadmapEntryCommand(
+  type: "roadmap-new" | "roadmap-run" | "roadmap-reconcile",
+) {
+  const name =
+    type === "roadmap-new"
+      ? "new"
+      : type === "roadmap-run"
+        ? "run"
+        : "reconcile";
+  return defineCommand({
+    meta: {
+      name,
+      description:
+        type === "roadmap-new"
+          ? "Start the next eligible roadmap item, execute Planning, and stop"
+          : type === "roadmap-run"
+            ? "Start the next eligible roadmap item with automatic progression"
+            : "Settle an interrupted roadmap intake without selecting new work",
+    },
+    args: {
+      workflow: { type: "string" },
+      policy: { type: "string" },
+      "authorize-autonomous": { type: "boolean" },
+      actor: { type: "string" },
+      cwd: { type: "string" },
+      verbose: { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    async run({ args }) {
+      try {
+        const { active, projectId } = await connectedProject(args.cwd);
+        const progress = startProgress(active, { projectId }, !args.json);
+        try {
+          // The CLI never preselects work: the service asks OpenRoad and owns
+          // the resulting item, change, and run association.
+          const result = await active.command<RoadmapIntakeOutput>({
+            type,
+            projectId,
+            workflowId: args.workflow,
+            policyId: args.policy,
+            authorization: args["authorize-autonomous"]
+              ? {
+                  authorizationId: crypto.randomUUID(),
+                  delegatedBy: { type: "user", id: args.actor ?? "operator" },
+                  scope: "project",
+                  scopeId: projectId,
+                  acknowledgedAt: new Date().toISOString(),
+                  configurationSource: "cli:--authorize-autonomous",
+                }
+              : undefined,
+          });
+          if (args.json) {
+            output(result, true);
+          } else {
+            consola.log(renderRoadmapIntake(result));
+            const projection = projectionFromResult(result);
+            if (projection)
+              consola.log(
+                renderOperatorProjection(projection, {
+                  verbose: Boolean(args.verbose),
+                }),
+              );
+          }
+          if (
+            ["no-eligible-work", "invalid-roadmap", "conflict"].includes(
+              result.intake,
+            )
+          )
+            process.exitCode = 1;
+        } finally {
+          await progress.stop();
+        }
+      } catch (error) {
+        fail(error, args.json, args.verbose);
+      }
+    },
+  });
+}
+
+const roadmap = defineCommand({
+  meta: {
+    name: "roadmap",
+    description: "Start SWF work from the project's OpenRoad roadmap",
+  },
+  subCommands: {
+    new: roadmapEntryCommand("roadmap-new"),
+    run: roadmapEntryCommand("roadmap-run"),
+    reconcile: roadmapEntryCommand("roadmap-reconcile"),
+  },
+});
+
 const main = defineCommand({
   meta: {
     name: "swf",
@@ -1844,6 +1999,7 @@ const main = defineCommand({
     explore,
     new: newRun,
     run: automaticRun,
+    roadmap,
     next,
     phase,
     check,

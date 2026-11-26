@@ -27,6 +27,7 @@ export const contentAllowlist = [
   "bin/product.json",
   "service/server/index.mjs",
   "service/server/index.mjs.map",
+  "service/server/timing.js",
   "service/server/product.json",
   "service/server/chunks/**",
   "service/public/dashboard/**",
