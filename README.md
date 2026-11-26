@@ -47,6 +47,9 @@ These are required only when selected by a workflow:
 | Claude Code        |              `2.1.222` |
 | GitHub Copilot CLI |              `0.0.358` |
 
+`@chriskealley/openroad` `0.2.0` is likewise optional, and is required only for
+[roadmap-driven entry](docs/roadmap-intake.md).
+
 See [Harness adapter capabilities](docs/harness-adapters.md) for structured-output, resume, tool-policy, model, and usage limitations.
 
 ## Installation
@@ -54,9 +57,9 @@ See [Harness adapter capabilities](docs/harness-adapters.md) for structured-outp
 Install a published release with npm or pnpm:
 
 ```sh
-npm install --global @chriskealley/swf@0.1.0
+npm install --global @chriskealley/swf@0.2.0
 # or
-pnpm add --global @chriskealley/swf@0.1.0
+pnpm add --global @chriskealley/swf@0.2.0
 ```
 
 Package installation writes product files and dependencies only. It does not
@@ -199,6 +202,9 @@ Run `swf --help` or `swf <command> --help` for the authoritative CLI syntax.
 SWF's operator workflow is centered on:
 
 - `swf explore` — durable read-only exploration;
+- `swf roadmap new` / `swf roadmap run` — start the next eligible OpenRoad
+  roadmap item, without naming a change (optional; see
+  [Roadmap-driven entry](docs/roadmap-intake.md));
 - `swf new` — initialize work and execute only the first eligible phase;
 - `swf run` — create or resume automatic progression;
 - `swf next` — execute exactly one eligible phase;
@@ -218,6 +224,18 @@ swf approve improve-login --actor <operator-id>
 swf next improve-login       # exactly one eligible phase
 swf run improve-login        # automatic progression
 ```
+
+With an OpenRoad roadmap installed, let the roadmap choose the work instead:
+
+```sh
+swf doctor --roadmap         # report OpenRoad readiness
+swf roadmap new              # start the next eligible item, stop after Planning
+swf roadmap run              # start the next eligible item, progress automatically
+```
+
+OpenRoad stays authoritative for eligibility and roadmap lifecycle; SWF stays
+authoritative for run execution. See
+[Roadmap-driven entry](docs/roadmap-intake.md).
 
 The CLI shows bounded progress, the actual stopping phase, evidence-oriented attention, and executable next commands. Add `--verbose` for internal IDs and diagnostics. Explicit `--project`, `--run`, `--phase`, and `--gate` selectors remain available for automation and ambiguity resolution.
 
@@ -375,6 +393,7 @@ pnpm test:e2e
 - [Troubleshooting](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md)
 - [Harness adapter capabilities](docs/harness-adapters.md)
+- [Roadmap-driven entry](docs/roadmap-intake.md)
 - [Security, retention, recovery, migration, and transfer](docs/operations.md)
 - [Releasing](docs/releasing.md)
 

@@ -316,6 +316,67 @@ export const GateStatusSchema = z.enum([
   "skipped",
 ]);
 
+/**
+ * Durable evidence that a run originated from a roadmap item. Optional, so a
+ * direct-entry run stays valid and is never given a fabricated association.
+ */
+export const RoadmapProvenanceSchema = z.object({
+  source: z.literal("openroad"),
+  itemId: z.string().min(1),
+  itemTitle: z.string().min(1).optional(),
+  operationId: z.string().uuid(),
+  linkedAt: IsoDateTime,
+});
+
+export const RoadmapIntakeStepSchema = z.enum([
+  "intent-recorded",
+  "run-created",
+  "roadmap-linked",
+  "completed",
+]);
+
+const ApprovalAuthorizationSchema = z.object({
+  authorizationId: z.string().uuid(),
+  delegatedBy: z.object({ type: z.literal("user"), id: z.string().min(1) }),
+  scope: z.enum(["gate", "phase", "run", "workflow", "project"]),
+  scopeId: z.string().min(1),
+  acknowledgedAt: IsoDateTime,
+  configurationSource: z.string().min(1),
+  expiresAt: IsoDateTime.optional(),
+});
+
+/**
+ * One roadmap intake operation. The record exists before any side effect so an
+ * interrupted startup can be told apart from conflicting reuse of the same
+ * item, change, or run.
+ */
+export const RoadmapIntakeRecordSchema = z.object({
+  operationId: z.string().uuid(),
+  itemId: z.string().min(1),
+  itemTitle: z.string().min(1).optional(),
+  changeName: Identifier,
+  mode: z.enum(["planning-only", "automatic"]),
+  runSelection: z
+    .object({
+      workflowId: Identifier,
+      policyId: Identifier,
+      authorization: ApprovalAuthorizationSchema.optional(),
+    })
+    .optional(),
+  step: RoadmapIntakeStepSchema,
+  runId: z.string().uuid().optional(),
+  observedItemStatus: z
+    .enum(["planned", "ready", "active", "done", "cancelled"])
+    .optional(),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const RoadmapIntakeJournalSchema = z.object({
+  schemaVersion: SchemaVersion,
+  records: z.array(RoadmapIntakeRecordSchema).default([]),
+});
+
 export const RunSchema = z.object({
   schemaVersion: SchemaVersion,
   runId: z.string().uuid(),
@@ -327,6 +388,7 @@ export const RunSchema = z.object({
   phaseIds: z.array(Identifier).optional(),
   description: z.string().min(1),
   status: RunStatusSchema,
+  roadmap: RoadmapProvenanceSchema.optional(),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -487,17 +549,7 @@ export const ApprovalSchema = z.object({
   createdAt: IsoDateTime,
   reason: z.string().min(1).optional(),
   evidenceArtifactIds: z.array(z.string().uuid()).default([]),
-  authorization: z
-    .object({
-      authorizationId: z.string().uuid(),
-      delegatedBy: z.object({ type: z.literal("user"), id: z.string().min(1) }),
-      scope: z.enum(["gate", "phase", "run", "workflow", "project"]),
-      scopeId: z.string().min(1),
-      acknowledgedAt: IsoDateTime,
-      configurationSource: z.string().min(1),
-      expiresAt: IsoDateTime.optional(),
-    })
-    .optional(),
+  authorization: ApprovalAuthorizationSchema.optional(),
 });
 
 export const CheckpointSchema = z.object({
@@ -726,6 +778,9 @@ export const documents = {
   profile: ProfileSchema,
   guideline: GuidelineSchema,
   run: RunSchema,
+  roadmapProvenance: RoadmapProvenanceSchema,
+  roadmapIntakeRecord: RoadmapIntakeRecordSchema,
+  roadmapIntakeJournal: RoadmapIntakeJournalSchema,
   event: EventSchema,
   snapshot: SnapshotSchema,
   invocation: InvocationSchema,

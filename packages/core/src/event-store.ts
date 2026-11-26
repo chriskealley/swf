@@ -20,7 +20,12 @@ import {
   reconstructRunState,
   parseRunEvent,
 } from "./domain.js";
-import { RunSchema, SnapshotSchema, type DocumentValue } from "./schemas.js";
+import {
+  RoadmapProvenanceSchema,
+  RunSchema,
+  SnapshotSchema,
+  type DocumentValue,
+} from "./schemas.js";
 import { Redactor, type RedactionOptions } from "./security.js";
 
 const RUNS_DIRECTORY = "runs";
@@ -129,6 +134,8 @@ export interface CreateRunInput {
   phaseIds: string[];
   runId?: string;
   createdAt?: string;
+  /** Present only for runs created through roadmap intake. */
+  roadmap?: DocumentValue<"roadmapProvenance">;
 }
 
 export interface SnapshotResult {
@@ -240,6 +247,9 @@ export class RunEventStore {
           phaseIds: input.phaseIds,
           description: input.description,
           status: "pending",
+          ...(input.roadmap
+            ? { roadmap: RoadmapProvenanceSchema.parse(input.roadmap) }
+            : {}),
           createdAt,
           updatedAt: createdAt,
         }),
@@ -256,7 +266,10 @@ export class RunEventStore {
         type: "run.created",
         actor: { type: "system", id: "swf" },
         context: {},
-        data: { changeIdentity: input.changeIdentity },
+        data: {
+          changeIdentity: input.changeIdentity,
+          ...(run.roadmap ? { roadmap: run.roadmap } : {}),
+        },
       });
       await this.beforeWrite("initial-event", this.eventsPath(run.runId));
       await writeAtomically(
