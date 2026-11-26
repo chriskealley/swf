@@ -15,14 +15,7 @@ export default defineNitroConfig({
   srcDir: "src/server",
   compatibilityDate: "2026-04-02",
   publicAssets: [{ dir: dashboardAssets, baseURL: "/dashboard" }],
-  // The service is copied into the published product rather than installed as
-  // its own package. Inline its runtime dependencies so Nitro cannot preserve
-  // build-machine file URLs that will not exist on a consumer machine. The
-  // product manifest still declares these dependencies for the CLI bundle.
-  externals: {
-    trace: false,
-    inline: [
-      /(?:^|\/)node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(?:effect|picomatch|yaml|zod)(?:\/|$)/,
-    ],
-  },
+  // The service is copied into the product. Bundle its dependency graph so
+  // the output cannot import files from the machine that built it.
+  noExternals: true,
 });

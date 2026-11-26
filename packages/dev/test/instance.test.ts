@@ -8,7 +8,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEVELOPMENT_DIRECTORY,
   INSTALLED_SERVICE_PORT,
@@ -321,6 +321,30 @@ describe("instance lifecycle", () => {
     const status = await instanceStatus(root, "unreachable", async () => false);
     expect(status.health).toBe("unreachable");
     expect(status.staleProcess).toBe(false);
+  });
+
+  it("probes the loopback port without following redirects", async () => {
+    const root = await checkout();
+    const created = await createInstance({
+      checkoutRoot: root,
+      name: "loopback-probe",
+      mode: "preview",
+      sourceCommit: "8".repeat(40),
+    });
+    const { writeInstance } = await import("../src/instance.js");
+    await writeInstance({ ...created, pid: process.pid });
+    const probe = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      expect((await instanceStatus(root, created.name)).health).toBe("running");
+      expect(probe).toHaveBeenCalledExactlyOnceWith(
+        new URL(`http://127.0.0.1:${created.port}/api/health`),
+        expect.objectContaining({ redirect: "error" }),
+      );
+    } finally {
+      probe.mockRestore();
+    }
   });
 
   it("treats a missing process identity as already stopped", async () => {

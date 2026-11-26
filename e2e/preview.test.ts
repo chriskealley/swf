@@ -74,9 +74,12 @@ describe.skipIf(!previewed)("previewed artifact", () => {
 
   it("serves health and dashboard from the previewed service when running", async () => {
     const instance = await readInstance(repositoryRoot, PREVIEW_INSTANCE);
+    const endpoint = new URL("http://127.0.0.1");
+    endpoint.port = String(instance.port);
     let health: Response;
     try {
-      health = await fetch(`${instance.endpoint}/api/health`, {
+      health = await fetch(new URL("/api/health", endpoint), {
+        redirect: "error",
         signal: AbortSignal.timeout(3_000),
       });
     } catch {
@@ -92,7 +95,8 @@ describe.skipIf(!previewed)("previewed artifact", () => {
     expect(body.product?.productVersion).toBeTruthy();
     expect(body.compatibility?.minimumNodeVersion).toBe("24.0.0");
 
-    const dashboard = await fetch(`${instance.endpoint}/dashboard/`, {
+    const dashboard = await fetch(new URL("/dashboard/", endpoint), {
+      redirect: "error",
       signal: AbortSignal.timeout(3_000),
     });
     expect(dashboard.ok).toBe(true);

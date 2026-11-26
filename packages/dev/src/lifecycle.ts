@@ -31,7 +31,7 @@ export function processAlive(pid: number | undefined): boolean {
 export async function instanceStatus(
   checkoutRoot: string,
   name: string,
-  probe: (endpoint: string) => Promise<boolean> = probeHealth,
+  probe: (port: number) => Promise<boolean> = probeHealth,
 ): Promise<InstanceStatus> {
   const instance = await readInstance(checkoutRoot, name);
   const alive = processAlive(instance.pid);
@@ -43,14 +43,17 @@ export async function instanceStatus(
     };
   return {
     instance,
-    health: (await probe(instance.endpoint)) ? "running" : "unreachable",
+    health: (await probe(instance.port)) ? "running" : "unreachable",
     staleProcess: false,
   };
 }
 
-async function probeHealth(endpoint: string): Promise<boolean> {
+async function probeHealth(port: number): Promise<boolean> {
+  const url = new URL("http://127.0.0.1/api/health");
+  url.port = String(port);
   try {
-    const response = await fetch(`${endpoint}/api/health`, {
+    const response = await fetch(url, {
+      redirect: "error",
       signal: AbortSignal.timeout(2_000),
     });
     return response.ok;

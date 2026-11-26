@@ -21,6 +21,15 @@ describe("OpenSpec task verification", () => {
     );
   });
 
+  it("preserves task identities across whitespace and keeps blank unchecked entries", () => {
+    const canonical = parseOpenSpecTasks("## Build\n- [X] 12.3 Ship it\n");
+    const formatted = parseOpenSpecTasks(
+      "##  Build  \r\n  - [X]\t 12.3 Ship   it   \r\n- [ ]    ",
+    );
+    expect(formatted[0]).toEqual(canonical[0]);
+    expect(formatted[1]).toMatchObject({ checked: false, text: "Build: " });
+  });
+
   it("fails closed for unchecked tasks and succeeds only with current evidence", () => {
     const incomplete = buildTaskAudit({
       tasksContents: "- [x] 1.1 Done\n- [ ] 1.2 Missing\n",

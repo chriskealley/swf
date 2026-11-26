@@ -31,7 +31,7 @@ suspected vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 | pnpm              |       `11.20.0` | Workspace package manager                       |
 | Git               |        `2.30.0` | Branches, worktrees, checkpoints, and rollback  |
 | Herdr             |         `0.7.4` | Harness process and terminal supervision        |
-| Pi                |        `0.83.0` | Reference harness and SWF extension host        |
+| Pi                |         `1.5.0` | Reference harness and SWF extension host        |
 | OpenSpec          |         `1.6.0` | Change planning and validation                  |
 | GitHub CLI (`gh`) |         `2.0.0` | GitHub authentication and pull-request delivery |
 
