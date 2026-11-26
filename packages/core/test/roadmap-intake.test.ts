@@ -276,6 +276,8 @@ describe("change-name derivation", () => {
 
   it("produces a leading letter even for numeric titles", () => {
     expect(slugifyChangeName("2024 cleanup")).toBe("cleanup");
+    expect(slugifyChangeName(" / 2024 -- Add --- login! ")).toBe("add-login");
+    expect(slugifyChangeName(" -- 2024 / ")).toBe("");
     expect(deriveChangeName({ id: "RM-7", title: "2024" })).toBe("rm-7");
   });
 

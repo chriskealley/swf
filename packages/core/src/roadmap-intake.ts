@@ -342,20 +342,16 @@ const MAX_CHANGE_NAME_LENGTH = 64;
  * requires a leading letter, so derivation targets that narrower intersection.
  */
 export function slugifyChangeName(value: string): string {
-  const slug = value
+  const normalized = value
     .normalize("NFKD")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-")
     .replace(/^[0-9-]+/, "");
+  const slug = normalized.endsWith("-") ? normalized.slice(0, -1) : normalized;
   if (slug.length <= MAX_CHANGE_NAME_LENGTH) return slug;
   const truncated = slug.slice(0, MAX_CHANGE_NAME_LENGTH);
   const boundary = truncated.lastIndexOf("-");
-  return (boundary > 0 ? truncated.slice(0, boundary) : truncated).replace(
-    /-+$/,
-    "",
-  );
+  return boundary > 0 ? truncated.slice(0, boundary) : truncated;
 }
 
 /**
