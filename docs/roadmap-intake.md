@@ -43,7 +43,8 @@ On a successful selection the service, in order:
 1. validates OpenRoad and settles any unfinished intake intent;
 2. asks `openroad next --json` and uses exactly the item it returns;
 3. derives a deterministic kebab-case change name from the item title, adding the roadmap ID when two items would otherwise collide;
-4. records the intent durably before any side effect;
+4. records the intent and the resolved workflow, policy, and any explicit
+   authorization durably before creating the run;
 5. creates the OpenSpec change scaffold and the single SWF run, stamping the roadmap item, title, and operation ID onto the run;
 6. calls the idempotent `openroad start` to link the change and activate the item;
 7. enters Planning through the same scheduling path as `swf new` / `swf run`.

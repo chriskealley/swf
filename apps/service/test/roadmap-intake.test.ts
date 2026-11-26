@@ -22,7 +22,7 @@ import {
   type OpenRoadStartOutcome,
   type ProcessResult,
 } from "@swf/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SwfService,
   type RoadmapIntakeResult,
@@ -599,6 +599,90 @@ describe("roadmap intake partial-start recovery", () => {
     expect((await journal.read()).records).toHaveLength(1);
     expect(await journal.incomplete()).toHaveLength(0);
     await harness.service.shutdown();
+  });
+
+  it("recovers the original run selections after interruption before run creation", async () => {
+    const harness = await setup([
+      readyItem("RM-014", "Recover run selections"),
+    ]);
+    const configDirectory = join(harness.projectRoot, ".swf");
+    const workflowDirectory = join(configDirectory, "workflows");
+    const stateDirectory = join(harness.projectRoot, ".swf-state");
+    const defaultWorkflow = await readFile(
+      join(workflowDirectory, "default.yaml"),
+      "utf8",
+    );
+    await writeFile(
+      join(workflowDirectory, "custom.yaml"),
+      defaultWorkflow.replace("id: default", "id: custom"),
+    );
+    await writeFile(
+      join(configDirectory, "policies", "autonomous.yaml"),
+      "schemaVersion: 1\nid: autonomous\napprovalMode: automatic\nmaxAttempts: 1\nriskOverrides: []\n",
+    );
+    const authorization = {
+      authorizationId: crypto.randomUUID(),
+      delegatedBy: { type: "user", id: "operator" },
+      scope: "project",
+      scopeId: projectId,
+      acknowledgedAt: new Date().toISOString(),
+      configurationSource: "test:original-roadmap-request",
+    } as const;
+    const journal = new RoadmapIntakeJournal(stateDirectory);
+    await expect(
+      harness.service.command({
+        type: "roadmap-run",
+        projectId,
+        workflowId: "custom",
+        policyId: "autonomous",
+      }),
+    ).rejects.toThrow(
+      "Autonomous policy requires explicit recorded human authorization",
+    );
+    expect(await journal.incomplete()).toHaveLength(0);
+
+    const availability = vi
+      .spyOn(FakePlanningAdapter.prototype, "availability")
+      .mockRejectedValueOnce(new Error("interrupted before run creation"));
+    try {
+      await expect(
+        harness.service.command({
+          type: "roadmap-run",
+          projectId,
+          workflowId: "custom",
+          policyId: "autonomous",
+          authorization,
+        }),
+      ).rejects.toThrow("interrupted before run creation");
+    } finally {
+      availability.mockRestore();
+    }
+    expect(await journal.incomplete()).toHaveLength(1);
+    expect(await runCount(harness.projectRoot)).toBe(0);
+
+    const restarted = await harness.restart();
+    try {
+      const [record] = (await journal.read()).records;
+      expect(record).toMatchObject({ step: "completed", itemId: "RM-014" });
+      expect(await runCount(harness.projectRoot)).toBe(1);
+      const run = await new RunEventStore(stateDirectory).readRun(
+        record!.runId!,
+      );
+      expect(run).toMatchObject({
+        workflowId: "custom",
+        policyId: "autonomous",
+      });
+      expect(
+        JSON.parse(
+          await readFile(
+            join(stateDirectory, "runs", run.runId, "authorization.json"),
+            "utf8",
+          ),
+        ),
+      ).toEqual(authorization);
+    } finally {
+      await restarted.shutdown();
+    }
   });
 
   it("settles an incomplete intent during service recovery", async () => {

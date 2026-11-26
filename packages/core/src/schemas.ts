@@ -335,6 +335,16 @@ export const RoadmapIntakeStepSchema = z.enum([
   "completed",
 ]);
 
+const ApprovalAuthorizationSchema = z.object({
+  authorizationId: z.string().uuid(),
+  delegatedBy: z.object({ type: z.literal("user"), id: z.string().min(1) }),
+  scope: z.enum(["gate", "phase", "run", "workflow", "project"]),
+  scopeId: z.string().min(1),
+  acknowledgedAt: IsoDateTime,
+  configurationSource: z.string().min(1),
+  expiresAt: IsoDateTime.optional(),
+});
+
 /**
  * One roadmap intake operation. The record exists before any side effect so an
  * interrupted startup can be told apart from conflicting reuse of the same
@@ -346,6 +356,13 @@ export const RoadmapIntakeRecordSchema = z.object({
   itemTitle: z.string().min(1).optional(),
   changeName: Identifier,
   mode: z.enum(["planning-only", "automatic"]),
+  runSelection: z
+    .object({
+      workflowId: Identifier,
+      policyId: Identifier,
+      authorization: ApprovalAuthorizationSchema.optional(),
+    })
+    .optional(),
   step: RoadmapIntakeStepSchema,
   runId: z.string().uuid().optional(),
   observedItemStatus: z
@@ -532,17 +549,7 @@ export const ApprovalSchema = z.object({
   createdAt: IsoDateTime,
   reason: z.string().min(1).optional(),
   evidenceArtifactIds: z.array(z.string().uuid()).default([]),
-  authorization: z
-    .object({
-      authorizationId: z.string().uuid(),
-      delegatedBy: z.object({ type: z.literal("user"), id: z.string().min(1) }),
-      scope: z.enum(["gate", "phase", "run", "workflow", "project"]),
-      scopeId: z.string().min(1),
-      acknowledgedAt: IsoDateTime,
-      configurationSource: z.string().min(1),
-      expiresAt: IsoDateTime.optional(),
-    })
-    .optional(),
+  authorization: ApprovalAuthorizationSchema.optional(),
 });
 
 export const CheckpointSchema = z.object({

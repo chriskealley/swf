@@ -4160,13 +4160,15 @@ export class SwfService {
           },
         ]);
     } else {
+      const { workflowId, policyId, authorization } =
+        record.runSelection ?? input;
       const prepared = await this.prepareRun({
         project,
         changeName: record.changeName,
         description: record.itemTitle ?? record.itemId,
-        workflowId: input.workflowId,
-        policyId: input.policyId,
-        authorization: input.authorization,
+        workflowId,
+        policyId,
+        authorization,
         roadmap: {
           source: "openroad",
           itemId: record.itemId,
@@ -4382,12 +4384,33 @@ export class SwfService {
           ],
         } satisfies RoadmapIntakeResult;
 
+      const location = await findProjectRoot(project.root);
+      if (!location?.initialized)
+        throw new Error("Roadmap entry requires an initialized project");
+      const workflowId =
+        input.workflowId ?? (await readProjectConfig(location)).defaultWorkflow;
+      const policyId = input.policyId ?? "manual";
+      const { policy } = await loadProjectDeliverySettings(
+        location,
+        workflowId,
+        policyId,
+      );
+      if (policy.approvalMode === "automatic" && !input.authorization)
+        throw new Error(
+          "Autonomous policy requires explicit recorded human authorization",
+        );
+
       const record = await journal.record({
         operationId: randomUUID(),
         itemId: item.id,
         itemTitle: item.title,
         changeName: selection.changeName,
         mode,
+        runSelection: {
+          workflowId,
+          policyId,
+          authorization: input.authorization,
+        },
         step: "intent-recorded",
         observedItemStatus: item.status,
       });
