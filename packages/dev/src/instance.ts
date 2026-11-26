@@ -23,7 +23,12 @@ export const DevelopmentInstanceSchema = z.object({
   checkoutRoot: z.string().min(1),
   sourceCommit: z.string().min(1),
   endpoint: z.string().url(),
-  port: z.number().int().positive(),
+  port: z
+    .number()
+    .int()
+    .min(1)
+    .max(65535)
+    .refine((port) => port !== INSTALLED_SERVICE_PORT, "reserved service port"),
   dashboardEndpoint: z.string().url().optional(),
   dashboardPort: z.number().int().positive().optional(),
   serviceHome: z.string().min(1),

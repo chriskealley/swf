@@ -22,13 +22,13 @@ export function parseOpenSpecTasks(contents: string): ParsedTask[] {
   let section = "tasks";
   let ordinal = 0;
   for (const [index, line] of contents.split(/\r?\n/).entries()) {
-    const heading = line.match(/^#{1,6}\s+(.+?)\s*$/);
+    const heading = line.match(/^#{1,6}\s(.+)$/s);
     if (heading) section = normalizeTaskText(heading[1]!);
-    const task = line.match(/^\s*-\s+\[([ xX])\]\s+(.+?)\s*$/);
+    const task = line.match(/^\s*-\s+\[([ xX])\]\s(.+)$/s);
     if (!task) continue;
     ordinal += 1;
     const text = normalizeTaskText(task[2]!);
-    const numeric = text.match(/^(\d+(?:\.\d+)*)\s+(.+)$/);
+    const numeric = text.match(/^(\d+(?:\.\d+)*) /);
     const taskId = numeric?.[1] ?? `${ordinal}`;
     entries.push({
       taskId: `${taskId}:${createHash("sha256").update(text).digest("hex").slice(0, 12)}`,

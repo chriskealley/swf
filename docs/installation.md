@@ -37,8 +37,8 @@ pnpm add --global @chriskealley/swf@0.2.0
 
 Both package managers install the same verified product files and resolve the
 declared third-party dependencies from the registry. The separately published
-Pi integration is `@chriskealley/swf-pi@0.2.0`; keep its version aligned with
-the product.
+Pi integration is `@chriskealley/swf-pi@0.2.0` and requires Pi 1.5.0 or newer.
+Keep the extension version aligned with the product.
 
 ### Verified GitHub release archive
 

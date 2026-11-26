@@ -27,7 +27,7 @@ export const requirements = {
   },
   pi: {
     command: "pi",
-    minimumVersion: "0.83.0",
+    minimumVersion: "1.5.0",
     required: true,
     reason: "Pi is the reference harness and hosts the SWF extension.",
   },
